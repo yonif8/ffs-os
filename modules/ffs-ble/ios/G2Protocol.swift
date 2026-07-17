@@ -507,6 +507,43 @@ enum G2GestureCtrl {
   }
 }
 
+// MARK: - Even AI (service 7) — native "thinking" swirl via the AI session lifecycle
+//
+// The G2 firmware renders a GPU-smooth, dual-lens animation (even_ai.animation, the
+// "Even AI thinking" swirl) while an even_ai session is active/awaiting a reply. We drive
+// that session over BLE to light the NATIVE animation with zero pixel streaming:
+//   CTRL{status=ENTER} opens the AI card (firmware shows its processing animation),
+//   ASK{text}          keeps it in the "thinking" (awaiting-reply) state,
+//   CTRL{status=EXIT}  closes the session (animation stops).
+// Encoding mirrors MentraOS EvenAIProto (service 7, live-proven against the official app):
+// EvenAIDataPackage { f1=commandId, f2=magicRandom, f3=ctrl, f5=askInfo }. (FUT-165, Path A.)
+enum G2EvenAI {
+  enum Status: Int32 { case wakeUp = 1, enter = 2, exit = 3 }
+
+  /// EvenAIDataPackage{ f1=commandId=CTRL(1), f2=magic, f3=EvenAIControl{ f1=status } }.
+  static func ctrl(status: Status, magicRandom: Int32) -> Data {
+    var ctrlW = G2ProtobufWriter()
+    ctrlW.writeInt32Field(1, status.rawValue)  // EvenAIControl.status
+    var w = G2ProtobufWriter()
+    w.writeInt32Field(1, 1)             // commandId = CTRL
+    w.writeInt32Field(2, magicRandom)
+    w.writeMessageField(3, ctrlW.data)  // ctrl (field 3)
+    return w.data
+  }
+
+  /// EvenAIDataPackage{ f1=commandId=ASK(3), f2=magic, f5=EvenAIAskInfo{ f2=streamEnable, f4=text } }.
+  static func ask(text: String, streamEnable: Int32 = 0, magicRandom: Int32) -> Data {
+    var askW = G2ProtobufWriter()
+    askW.writeInt32Field(2, streamEnable)      // streamEnable
+    askW.writeBytesField(4, Data(text.utf8))   // text
+    var w = G2ProtobufWriter()
+    w.writeInt32Field(1, 3)             // commandId = ASK
+    w.writeInt32Field(2, magicRandom)
+    w.writeMessageField(5, askW.data)   // askInfo (field 5)
+    return w.data
+  }
+}
+
 // MARK: - Sequence counters
 
 /// Rolling syncId (per transport packet) + magicRandom (per message). magicRandom

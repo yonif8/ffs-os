@@ -554,6 +554,14 @@ final class G2Central: NSObject {
     enqueueLocked(pkts, to: target)
   }
 
+  /// Send an even_ai (service 7) payload to the target side(s). `reserveFlag: true`
+  /// matches MentraOS's even_ai path. The swirl is dual-lens, so we send to BOTH.
+  private func sendEvenAILocked(_ payload: Data, to target: G2Target) {
+    let pkts = counters.packets(
+      serviceId: G2ServiceID.evenAI.rawValue, payload: payload, reserveFlag: true)
+    enqueueLocked(pkts, to: target)
+  }
+
   /// Run `body` on the CB queue after `ms` milliseconds.
   private func schedule(_ ms: Int, _ body: @escaping () -> Void) {
     queue.asyncAfter(deadline: .now() + .milliseconds(ms), execute: body)
@@ -611,6 +619,49 @@ final class G2Central: NSObject {
           guard let self = self else { return }
           self.startHeartbeatsLocked()
           self.sendImagePageLocked()
+        }
+      }
+    }
+  }
+
+  /// Public: toggle the firmware's NATIVE "Even AI" swirl (GPU-smooth, dual-lens) by
+  /// driving the even_ai session lifecycle over BLE — no pixel streaming. `on` sends
+  /// CTRL{ENTER} (firmware shows the AI card + its processing animation) then, after a
+  /// beat, ASK to hold the "thinking" (awaiting-reply) state; `off` sends CTRL{EXIT}.
+  /// Auths first if needed. (FUT-165, Path A — the native-animation trigger.)
+  func aiSwirl(on: Bool) {
+    queue.async { [weak self] in
+      guard let self = self else { return }
+      guard self.pairReadyLocked() else {
+        self.log("aiSwirl ignored — pair not ready (connect both lenses first)")
+        return
+      }
+      let fire: () -> Void = { [weak self] in
+        guard let self = self else { return }
+        if on {
+          self.sendEvenAILocked(
+            G2EvenAI.ctrl(status: .enter, magicRandom: self.counters.nextMagic()), to: .both)
+          self.log("aiSwirl: CTRL ENTER → native swirl on")
+          // Hold the session in the "thinking" (awaiting-reply) state so the animation
+          // keeps running instead of timing straight back out.
+          self.schedule(400) { [weak self] in
+            guard let self = self else { return }
+            self.sendEvenAILocked(
+              G2EvenAI.ask(text: " ", magicRandom: self.counters.nextMagic()), to: .both)
+            self.log("aiSwirl: ASK sustain")
+          }
+        } else {
+          self.sendEvenAILocked(
+            G2EvenAI.ctrl(status: .exit, magicRandom: self.counters.nextMagic()), to: .both)
+          self.log("aiSwirl: CTRL EXIT → swirl off")
+        }
+      }
+      if self.sessionAuthed {
+        fire()
+      } else {
+        self.runAuthLocked { [weak self] in
+          self?.startHeartbeatsLocked()
+          fire()
         }
       }
     }

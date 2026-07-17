@@ -127,6 +127,12 @@ interface FfsBleNativeModule {
    * fragments. Connect the pair first (isPairReady() === true).
    */
   showImage(): void;
+  /**
+   * FUT-165: toggle the firmware's NATIVE "Even AI" swirl (GPU-smooth, dual-lens) by
+   * driving the even_ai session lifecycle over BLE — no pixel streaming. `on` starts the
+   * animation (CTRL ENTER + ASK), false stops it (CTRL EXIT). Connect the pair first.
+   */
+  showAiSwirl(on: boolean): void;
   /** P3: tear down the EvenHub session (stops the keep-alive heartbeat). */
   stopSession(): void;
   addListener<E extends FfsBleEventName>(

@@ -20,7 +20,7 @@ import { useFfsBluetooth } from "./useFfsBluetooth";
 import { useConnectionSupervisor, healthLabel, type ConnectionHealth } from "./connection";
 import { screenOwner } from "./reclaim";
 import { PhoneNav, type PhoneCtx } from "./phone/nav";
-import { homeScreen, shutter } from "./phone/screens";
+import { homeScreen } from "./phone/screens";
 
 const APP_VERSION = "0.10.6";
 
@@ -41,6 +41,7 @@ export default function App() {
   const bt = useFfsBluetooth({ autoScan: true });
   const sup = useConnectionSupervisor(bt);
   const [session, setSession] = useState<string>("");
+  const [swirlOn, setSwirlOn] = useState(false);
 
   // Live refs so the nav's context getters always read current session state.
   const btRef = useRef(bt);
@@ -163,9 +164,14 @@ export default function App() {
         <Pressable
           style={[styles.btn, styles.btnAlt, !bt.pairReady && styles.btnDisabled]}
           disabled={!bt.pairReady}
-          onPress={() => shutter()}
+          onPress={() => {
+            const next = !swirlOn;
+            setSwirlOn(next);
+            glog.emit("os", "ai_swirl", { on: next });
+            FfsBle.showAiSwirl(next);
+          }}
         >
-          <Text style={styles.btnText}>Photo</Text>
+          <Text style={styles.btnText}>{swirlOn ? "Swirl ■" : "Swirl ▶"}</Text>
         </Pressable>
       </View>
 
