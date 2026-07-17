@@ -1,16 +1,16 @@
-// FFS Glasses OS — launcher / home shell (FUT-163, Phase 1).
+// FFS Glasses OS — launcher / home shell (FUT-163).
 //
-// The real app entry (index.ts points here), replacing the raw ffs-ble test harness.
-// It wires our OWN stack end-to-end with NO @mentra anywhere:
+// The real app entry (index.ts points here). Our OWN stack end-to-end, NO @mentra:
 //   useFfsBluetooth (driver session) → useConnectionSupervisor (health + reclaim-on-ready)
-//   → screenOwner (paints the home surface on the HUD via hud.ts → FfsBle.showText).
+//   → PhoneNav (on-glass phone-OS navigation) → screenOwner (paints via FfsBle.showText/Image).
 //
-// Minimal by design (parity, not a redesign — council, FUT-163): connect the pair,
-// show a live health readout, push the OS home screen to the HUD when ready, and offer
-// the P4 image demo. No Rico app here — that stays in the legacy repo.
+// The star is ON THE GLASSES: a stock-phone-style OS (status bar + app menu + nested
+// screens) you drive entirely by touchpad — swipe up/down to move, tap to open, double-tap
+// to go back. The phone screen here is just a connection dashboard + a couple of debug
+// controls (Home / Back / snap a photo) — everything real happens on the HUD.
 
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import FfsBle from "../../modules/ffs-ble";
@@ -19,7 +19,10 @@ import { initLoggerCore, glog } from "./log";
 import { useFfsBluetooth } from "./useFfsBluetooth";
 import { useConnectionSupervisor, healthLabel, type ConnectionHealth } from "./connection";
 import { screenOwner } from "./reclaim";
-import { hudHome } from "./hud";
+import { PhoneNav, type PhoneCtx } from "./phone/nav";
+import { homeScreen, shutter } from "./phone/screens";
+
+const APP_VERSION = "0.10.6";
 
 function healthColor(h: ConnectionHealth): string {
   switch (h) {
@@ -39,39 +42,61 @@ export default function App() {
   const sup = useConnectionSupervisor(bt);
   const [session, setSession] = useState<string>("");
 
+  // Live refs so the nav's context getters always read current session state.
+  const btRef = useRef(bt);
+  btRef.current = bt;
+
+  // One PhoneNav for the whole session. Its onChange re-asserts the current surface
+  // through screenOwner (which serializes BLE writes so repaints never interleave).
+  const navRef = useRef<PhoneNav | null>(null);
+  if (!navRef.current) {
+    const ctx: PhoneCtx = {
+      pairReady: () => btRef.current.pairReady,
+      sides: () => btRef.current.sides,
+      battery: () => 82,
+      version: () => APP_VERSION,
+      gestures: () => navRef.current?.gestureCount ?? 0,
+    };
+    navRef.current = new PhoneNav(homeScreen, ctx, () => screenOwner.reclaimNow());
+  }
+
   // Off-device telemetry (FUT-144 collector).
   useEffect(() => {
-    initLoggerCore({ app: "ffs-os-launcher", harness: "App" });
+    initLoggerCore({ app: "ffs-os-phone", harness: "App" });
     setSession(glog.session());
-    glog.emit("os", "launcher_start", { session: glog.session() });
+    glog.emit("os", "launcher_start", { session: glog.session(), version: APP_VERSION });
   }, []);
 
-  // Own the screen while the pair is ready: start the reclaim manager and paint the
-  // OS home surface. Tear down when the link drops so we don't paint into a dead link.
+  // Own the screen while the pair is ready: start the reclaim manager, paint the current
+  // phone-OS screen, and route touchpad gestures into navigation. Tear down on disconnect.
   useEffect(() => {
-    if (bt.pairReady) {
-      screenOwner.start();
-      void screenOwner.setSurface(() => hudHome());
-      glog.emit("os", "home_surface_set", {});
-      return () => screenOwner.stop();
-    }
-    return;
+    if (!bt.pairReady) return;
+    const nav = navRef.current!;
+    screenOwner.start();
+    void screenOwner.setSurface(() => nav.paint());
+    glog.emit("os", "phone_os_up", {});
+    const sub = FfsBle.addListener("onGesture", (g) => {
+      glog.emit("os", "nav_gesture", { gesture: g.gesture, side: g.side });
+      nav.handleGesture(g.gesture);
+    });
+    return () => {
+      sub.remove();
+      screenOwner.stop();
+    };
   }, [bt.pairReady]);
 
-  // Keep the HUD clock live: re-paint the home surface at each minute boundary while
-  // the pair is ready (hudHome() reads the wall clock at paint time, so a re-paint is
-  // all it takes). Minute-ALIGNED rather than a drifting 60s interval, so the shown
-  // minute flips right when it should. A slow 1/min re-push — well below the FUT-136
-  // keep-alive cadence that provoked firmware evictions. (Home is the only surface
-  // today; if the OS later navigates away, gate this on "home is current".)
+  // Keep the HUD status-bar clock live: re-paint the current screen at each minute
+  // boundary while the pair is ready — but skip while the image screen is up (a re-paint
+  // there would needlessly re-stream the bitmap). Minute-ALIGNED, 1/min (well under the
+  // FUT-136 keep-alive cadence that provoked firmware evictions).
   useEffect(() => {
     if (!bt.pairReady) return;
     let timer: ReturnType<typeof setTimeout>;
     const scheduleNextMinute = () => {
       const msToNextMinute = 60_000 - (Date.now() % 60_000);
       timer = setTimeout(() => {
-        void screenOwner.setSurface(() => hudHome());
-        glog.emit("os", "home_clock_tick", {});
+        const nav = navRef.current!;
+        if (!nav.onImageScreen()) screenOwner.reclaimNow();
         scheduleNextMinute();
       }, msToNextMinute + 50);
     };
@@ -85,8 +110,8 @@ export default function App() {
     <SafeAreaView style={styles.safe}>
       <StatusBar style="light" />
       <Text style={styles.title}>FFS Glasses OS</Text>
-      <Text style={styles.sub}>our own OS · our own driver · no mentra</Text>
-      <Text style={styles.sub}>log session: {session || "(starting)"}</Text>
+      <Text style={styles.sub}>phone OS on the HUD · drive it with the touchpad</Text>
+      <Text style={styles.sub}>v{APP_VERSION} · log {session || "(starting)"}</Text>
 
       <View style={styles.card}>
         <View style={styles.pillRow}>
@@ -103,6 +128,11 @@ export default function App() {
         )}
       </View>
 
+      <Text style={styles.section}>Drive on-glass</Text>
+      <View style={styles.card}>
+        <Text style={styles.help}>swipe up/down — move    tap — open    double-tap — back</Text>
+      </View>
+
       <View style={styles.btnRow}>
         <Pressable style={styles.btn} onPress={() => sup.reconnect()}>
           <Text style={styles.btnText}>Connect</Text>
@@ -116,22 +146,26 @@ export default function App() {
         <Pressable
           style={[styles.btn, !bt.pairReady && styles.btnDisabled]}
           disabled={!bt.pairReady}
-          onPress={() => {
-            glog.emit("os", "home_repaint", {});
-            void screenOwner.setSurface(() => hudHome());
-          }}
+          onPress={() => navRef.current?.goHome()}
         >
-          <Text style={styles.btnText}>{bt.pairReady ? "Push home to HUD" : "HUD — pair not ready"}</Text>
+          <Text style={styles.btnText}>Home</Text>
         </Pressable>
         <Pressable
           style={[styles.btn, styles.btnAlt, !bt.pairReady && styles.btnDisabled]}
           disabled={!bt.pairReady}
           onPress={() => {
-            glog.emit("os", "show_image", {});
-            FfsBle.showImage();
+            const nav = navRef.current;
+            if (nav?.back()) screenOwner.reclaimNow();
           }}
         >
-          <Text style={styles.btnText}>Show image (P4)</Text>
+          <Text style={styles.btnText}>Back</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.btn, styles.btnAlt, !bt.pairReady && styles.btnDisabled]}
+          disabled={!bt.pairReady}
+          onPress={() => shutter()}
+        >
+          <Text style={styles.btnText}>Photo</Text>
         </Pressable>
       </View>
 
@@ -158,13 +192,13 @@ export default function App() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: theme.bg, paddingHorizontal: 16 },
   title: { color: theme.text, fontSize: 22, fontWeight: "700", marginTop: 10 },
-  sub: { color: theme.textDim, fontSize: 12, marginBottom: 8 },
+  sub: { color: theme.textDim, fontSize: 12, marginBottom: 4 },
   card: {
     backgroundColor: theme.surface,
     borderRadius: theme.radius,
     padding: 14,
     marginTop: 6,
-    marginBottom: 12,
+    marginBottom: 10,
     borderWidth: 1,
     borderColor: theme.surfaceAlt,
   },
@@ -172,6 +206,7 @@ const styles = StyleSheet.create({
   dot: { width: 10, height: 10, borderRadius: 5, marginRight: 8 },
   pillText: { fontSize: 16, fontWeight: "700" },
   meta: { color: theme.textDim, fontSize: 13, fontFamily: "Menlo", marginTop: 2 },
+  help: { color: theme.text, fontSize: 12, fontFamily: "Menlo" },
   btnRow: { flexDirection: "row", gap: 10, marginBottom: 10 },
   btn: {
     flex: 1,
