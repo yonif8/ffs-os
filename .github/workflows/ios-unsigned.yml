@@ -1,0 +1,136 @@
+name: iOS Unsigned IPA (for SideStore)
+
+# Builds an UNSIGNED .ipa on a GitHub-hosted macOS runner — the only $0 way to get
+# an installable iOS binary without a Mac or a paid Apple Developer account.
+# SideStore re-signs it on Yoni's iPhone with his free Apple ID. (FUT-139, POC path.)
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [master, main]
+    paths-ignore:
+      - "README.md"
+      - "**/*.md"
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      # Off-device telemetry token (FUT-144). Private repo secret — inlined into the
+      # JS bundle by Metro as an EXPO_PUBLIC_* var; never hardcoded in this public repo.
+      EXPO_PUBLIC_GLOG_TOKEN: ${{ secrets.EXPO_PUBLIC_GLOG_TOKEN }}
+      # The React Native Podfile enables ccache when USE_CCACHE=1 (checked before the
+      # expo-build-properties apple.ccacheEnabled property). This is the reliable switch
+      # that actually routes the Pods clang/ld through ccache. (FUT-142)
+      USE_CCACHE: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select latest Xcode (RN 0.86 needs >= 16.1)
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache bun install cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install JS deps
+        run: bun install
+
+      # FUT-142 — ccache: install + restore. expo-build-properties (ios.ccacheEnabled)
+      # wires the Pods build to route clang/ld through ccache; we just provide the
+      # binary + a persistent cache dir. Rolling key: save fresh each run, restore latest.
+      - name: Install ccache
+        run: |
+          which ccache || brew install ccache
+          # RN's ccache-clang.sh wrapper runs `exec $CCACHE_BINARY clang "$@"` — it
+          # NO-OPs (plain clang, no caching) unless CCACHE_BINARY points at ccache.
+          # This is the piece that was missing (cold runs showed 0 GB cached). (FUT-142)
+          echo "CCACHE_BINARY=$(command -v ccache)" >> "$GITHUB_ENV"
+
+      - name: Cache ccache objects
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-ios-${{ github.run_id }}
+          restore-keys: ccache-ios-
+
+      - name: Configure ccache
+        run: |
+          ccache --set-config max_size=2G
+          ccache --set-config sloppiness=clang_index_store,file_stat_matches,include_file_ctime,include_file_mtime,ivfsoverlay,pch_defines,modules,system_headers,time_macros
+          ccache --zero-stats
+
+      - name: Expo prebuild (generate native iOS project)
+        run: npx expo prebuild -p ios --no-install --clean
+
+      # FUT-142 — restore Pods AFTER prebuild regenerates ios/ (prebuild --clean wipes it).
+      - name: Cache CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: |
+            ios/Pods
+            ~/Library/Caches/CocoaPods
+            ~/.cocoapods/repos
+          key: pods-${{ runner.os }}-${{ hashFiles('bun.lock', 'app.json') }}
+          restore-keys: pods-${{ runner.os }}-
+
+      - name: CocoaPods install
+        working-directory: ios
+        run: pod install   # no --repo-update: CDN specs, cached above
+
+      - name: Build unsigned .app
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -workspace FFSGlassesOS.xcworkspace \
+            -scheme FFSGlassesOS \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            DEBUG_INFORMATION_FORMAT=dwarf \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            clean build
+
+      - name: ccache stats
+        if: always()
+        run: ccache --show-stats
+
+      - name: Package unsigned IPA
+        working-directory: ios/build/Build/Products/Release-iphoneos
+        run: |
+          set -x
+          ls -la
+          mkdir -p Payload
+          cp -R FFSGlassesOS.app Payload/
+          zip -qry FFSGlassesOS-unsigned.ipa Payload
+          ls -la FFSGlassesOS-unsigned.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FFSGlassesOS-unsigned-ipa
+          path: ios/build/Build/Products/Release-iphoneos/FFSGlassesOS-unsigned.ipa
+          if-no-files-found: error

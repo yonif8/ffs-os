@@ -1,0 +1,71 @@
+{
+  "expo": {
+    "name": "FFS Glasses OS",
+    "slug": "ffs-glasses-os",
+    "scheme": "ffsglassesos",
+    "version": "0.10.1",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "runtimeVersion": "1.1.0",
+    "updates": {
+      "url": "https://u.expo.dev/315f6eef-7582-4d4b-a9a4-82a30e08025c",
+      "enabled": true,
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0,
+      "requestHeaders": {
+        "expo-channel-name": "production"
+      }
+    },
+    "ios": {
+      "supportsTablet": false,
+      "buildNumber": "17",
+      "bundleIdentifier": "com.futurefounders.glassesos",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSBluetoothAlwaysUsageDescription": "FFS Glasses OS connects directly to your Even Realities G2 glasses over Bluetooth to drive the display, input and microphone.",
+        "NSBluetoothPeripheralUsageDescription": "FFS Glasses OS connects directly to your Even Realities G2 glasses over Bluetooth.",
+        "NSMicrophoneUsageDescription": "FFS Glasses OS uses the glasses microphone for voice input.",
+        "UIBackgroundModes": [
+          "bluetooth-central",
+          "audio"
+        ]
+      }
+    },
+    "android": {
+      "package": "com.futurefounders.glassesos",
+      "adaptiveIcon": {
+        "backgroundColor": "#000000",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "ccacheEnabled": true
+          }
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "315f6eef-7582-4d4b-a9a4-82a30e08025c"
+      }
+    },
+    "owner": "yonif8"
+  }
+}

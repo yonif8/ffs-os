@@ -1,0 +1,19 @@
+{
+  "name": "ffs-ble",
+  "version": "0.1.0",
+  "description": "FFS local Expo native module — from-scratch CoreBluetooth central driver for Even Realities G2 glasses (Phase 1: scan/connect/discover/subscribe/log).",
+  "main": "index.ts",
+  "author": "Future Founders Systems",
+  "license": "MIT",
+  "private": true,
+  "keywords": [
+    "react-native",
+    "expo",
+    "expo-modules",
+    "bluetooth",
+    "ble",
+    "even-realities",
+    "g2",
+    "smart-glasses"
+  ]
+}
