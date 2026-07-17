@@ -1,11 +1,10 @@
 import { registerRootComponent } from 'expo';
 
-// ⚠️ P1 TEST BUILD (branch rico/fut-149-p1-ffs-ble-native-module, FUT-149).
-// This entry points at the ffs-ble driver test harness, NOT the real app shell,
-// so our own from-scratch CoreBluetooth stack can be exercised on-glass in
-// isolation (no @mentra/bluetooth-sdk contending for the peripheral). The real
-// `App` is restored before this branch merges.
-import App from './src/os/FfsBleTestApp';
+// FFS Glasses OS entry — the launcher/home shell (FUT-163, Phase 1).
+// Our own stack end-to-end: useFfsBluetooth → connection supervisor → screenOwner
+// → hud (FfsBle.showText), NO @mentra. The old ffs-ble test harness (FfsBleTestApp)
+// stays in the repo for isolated driver bring-up, but the app now boots the real OS.
+import App from './src/os/App';
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);
 // It also ensures that whether you load the app in Expo Go or in a native build,
