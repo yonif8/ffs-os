@@ -42,6 +42,7 @@ export default function App() {
   const sup = useConnectionSupervisor(bt);
   const [session, setSession] = useState<string>("");
   const [swirlOn, setSwirlOn] = useState(false);
+  const [flashProbe, setFlashProbe] = useState<string>("");
 
   // Live refs so the nav's context getters always read current session state.
   const btRef = useRef(bt);
@@ -66,6 +67,16 @@ export default function App() {
     initLoggerCore({ app: "ffs-os-phone", harness: "App" });
     setSession(glog.session());
     glog.emit("os", "launcher_start", { session: glog.session(), version: APP_VERSION });
+  }, []);
+
+  // FUT-167 Stage 1: receive the zero-write flash-channel probe result.
+  useEffect(() => {
+    const sub = FfsBle.addListener("onFlashProbe", (e) => {
+      const ready = e.leftReady && e.rightReady;
+      setFlashProbe(`${e.detail}\n→ ${ready ? "READY — flasher can reach both lenses ✓" : "NOT ready"}`);
+      glog.emit("os", "flash_probe", { leftReady: e.leftReady, rightReady: e.rightReady });
+    });
+    return () => sub.remove();
   }, []);
 
   // Own the screen while the pair is ready: start the reclaim manager, paint the current
@@ -173,6 +184,21 @@ export default function App() {
         >
           <Text style={styles.btnText}>{swirlOn ? "Swirl ■" : "Swirl ▶"}</Text>
         </Pressable>
+      </View>
+
+      <Text style={styles.section}>Firmware (dry-run only)</Text>
+      <View style={styles.card}>
+        <Pressable
+          style={[styles.btn, !bt.pairReady && styles.btnDisabled]}
+          disabled={!bt.pairReady}
+          onPress={() => {
+            setFlashProbe("probing… (zero writes)");
+            FfsBle.flashDryRun();
+          }}
+        >
+          <Text style={styles.btnText}>Flash dry-run (zero-write probe)</Text>
+        </Pressable>
+        {flashProbe ? <Text style={[styles.meta, { marginTop: 8 }]}>{flashProbe}</Text> : null}
       </View>
 
       <Text style={styles.section}>Connection log</Text>
