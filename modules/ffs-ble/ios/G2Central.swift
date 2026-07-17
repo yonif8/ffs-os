@@ -147,6 +147,9 @@ final class G2Central: NSObject {
   var onDisconnected: ((String, String, String?) -> Void)?
   /// (gesture, side) — a decoded touch gesture ("tap"/"double_tap"/"swipe_up"/"swipe_down").
   var onGesture: ((String, String) -> Void)?
+  /// (leftReady, rightReady, detail) — result of the zero-write flash-channel probe
+  /// (FUT-167 Stage 1). `*Ready` = all 4 OTA flash characteristics present on that lens.
+  var onFlashProbe: ((Bool, Bool, String) -> Void)?
 
   // MARK: - State
 
@@ -621,6 +624,47 @@ final class G2Central: NSObject {
           self.sendImagePageLocked()
         }
       }
+    }
+  }
+
+  /// Public: FUT-167 Stage 1 — a ZERO-WRITE flash-channel probe. Confirms the OTA
+  /// firmware-flash characteristics (CTRL write/notify + DATA write/notify) are
+  /// discoverable on BOTH lenses — the g2flash "discover" stage, no writes, no brick
+  /// risk. Proves the in-app flasher can reach the glasses before any write path exists
+  /// (Stage 2). Reads already-discovered GATT state only; sends nothing.
+  func flashDryRun() {
+    queue.async { [weak self] in
+      guard let self = self else { return }
+      // The four OTA flash characteristics (from g2flash: CTRL svc e5450, DATA svc e1001).
+      let want: [(String, CBUUID)] = [
+        ("CTRL.write", CBUUID(string: "00002760-08C2-11E1-9073-0E8AC72E5401")),
+        ("CTRL.notify", CBUUID(string: "00002760-08C2-11E1-9073-0E8AC72E5402")),
+        ("DATA.write", CBUUID(string: "00002760-08C2-11E1-9073-0E8AC72E0001")),
+        ("DATA.notify", CBUUID(string: "00002760-08C2-11E1-9073-0E8AC72E0002")),
+      ]
+
+      func probe(_ side: G2Side) -> (ready: Bool, line: String) {
+        guard let lens = self.lenses[side], lens.connected else {
+          return (false, "\(side.rawValue): not connected")
+        }
+        var found = Set<CBUUID>()
+        for svc in lens.peripheral.services ?? [] {
+          for ch in svc.characteristics ?? [] { found.insert(ch.uuid) }
+        }
+        let present = want.map { found.contains($0.1) }
+        let ready = present.allSatisfy { $0 }
+        let missing = zip(want, present).filter { !$0.1 }.map { $0.0.0 }
+        let line = ready
+          ? "\(side.rawValue): all 4 flash channels present ✓"
+          : "\(side.rawValue): MISSING \(missing.joined(separator: ", "))"
+        return (ready, line)
+      }
+
+      let l = probe(.left)
+      let r = probe(.right)
+      let detail = "FLASH DRY-RUN (zero-write, no data sent)\n\(l.line)\n\(r.line)"
+      self.log("flashDryRun — \(l.line); \(r.line)")
+      self.onFlashProbe?(l.ready, r.ready, detail)
     }
   }
 

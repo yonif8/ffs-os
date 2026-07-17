@@ -33,7 +33,8 @@ public class FfsBleModule: Module {
       "onPairReady",
       "onNotify",
       "onGesture",
-      "onDisconnected"
+      "onDisconnected",
+      "onFlashProbe"
     )
 
     Function("startScan") { [weak self] in
@@ -83,6 +84,12 @@ public class FfsBleModule: Module {
     // dual-lens) via the even_ai session lifecycle. `on` starts it, false stops it.
     Function("showAiSwirl") { [weak self] (on: Bool) in
       self?.ensureCentral().aiSwirl(on: on)
+    }
+
+    // FUT-167 Stage 1: zero-write flash-channel probe (proves the in-app flasher can
+    // reach both lenses' OTA characteristics — no writes, no brick risk).
+    Function("flashDryRun") { [weak self] in
+      self?.ensureCentral().flashDryRun()
     }
 
     // P3: tear down the EvenHub session (stops the keep-alive heartbeat).
@@ -140,6 +147,13 @@ public class FfsBleModule: Module {
     }
     c.onGesture = { [weak self] (gesture, side) in
       self?.sendEvent("onGesture", ["gesture": gesture, "side": side])
+    }
+    c.onFlashProbe = { [weak self] (leftReady, rightReady, detail) in
+      self?.sendEvent("onFlashProbe", [
+        "leftReady": leftReady,
+        "rightReady": rightReady,
+        "detail": detail,
+      ])
     }
     c.onDisconnected = { [weak self] (name, side, reason) in
       self?.sendEvent("onDisconnected", [

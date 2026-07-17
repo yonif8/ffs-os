@@ -83,6 +83,16 @@ export interface OnDisconnectedEvent {
   reason: string | null;
 }
 
+/** Result of the zero-write flash-channel probe (FUT-167 Stage 1). */
+export interface OnFlashProbeEvent {
+  /** All 4 OTA flash characteristics present on the LEFT lens. */
+  leftReady: boolean;
+  /** All 4 OTA flash characteristics present on the RIGHT lens. */
+  rightReady: boolean;
+  /** Human-readable per-lens detail. */
+  detail: string;
+}
+
 /** Map of event name → payload type. */
 export interface FfsBleEvents {
   onLog: OnLogEvent;
@@ -94,6 +104,7 @@ export interface FfsBleEvents {
   onNotify: OnNotifyEvent;
   onGesture: OnGestureEvent;
   onDisconnected: OnDisconnectedEvent;
+  onFlashProbe: OnFlashProbeEvent;
 }
 
 export type FfsBleEventName = keyof FfsBleEvents;
@@ -133,6 +144,12 @@ interface FfsBleNativeModule {
    * animation (CTRL ENTER + ASK), false stops it (CTRL EXIT). Connect the pair first.
    */
   showAiSwirl(on: boolean): void;
+  /**
+   * FUT-167 Stage 1: zero-write flash-channel probe. Confirms the OTA flash
+   * characteristics are discoverable on both lenses (no writes). Result arrives via the
+   * `onFlashProbe` event. Connect the pair first.
+   */
+  flashDryRun(): void;
   /** P3: tear down the EvenHub session (stops the keep-alive heartbeat). */
   stopSession(): void;
   addListener<E extends FfsBleEventName>(
