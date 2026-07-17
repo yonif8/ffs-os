@@ -33,6 +33,7 @@
 
 import CoreBluetooth
 import Foundation
+import CryptoKit
 
 /// Which physical lens a peripheral is.
 enum G2Side: String {
@@ -120,6 +121,11 @@ final class G2Central: NSObject {
   static let CHAR_NOTIFY = CBUUID(string: "00002760-08C2-11E1-9073-0E8AC72E5402")
   /// glasses → phone LC3 mic audio (notify). G2.swift:39
   static let AUDIO_NOTIFY = CBUUID(string: "00002760-08C2-11E1-9073-0E8AC72E6402")
+  // OTA firmware-flash channels (FUT-167 Stage 2). DATA svc e1001: write e0001 / notify
+  // e0002. CTRL write e5401 == CHAR_WRITE. All acks arrive on the DATA notify (e0002).
+  static let FLASH_DATA_SVC = CBUUID(string: "00002760-08C2-11E1-9073-0E8AC72E1001")
+  static let FLASH_DATA_WRITE = CBUUID(string: "00002760-08C2-11E1-9073-0E8AC72E0001")
+  static let FLASH_DATA_NOTIFY = CBUUID(string: "00002760-08C2-11E1-9073-0E8AC72E0002")
 
   /// Substring every G2 peripheral name contains, e.g. "Even G2_XX_L_XXXXXX".
   private static let NAME_MATCH = "G2"
@@ -150,6 +156,20 @@ final class G2Central: NSObject {
   /// (leftReady, rightReady, detail) — result of the zero-write flash-channel probe
   /// (FUT-167 Stage 1). `*Ready` = all 4 OTA flash characteristics present on that lens.
   var onFlashProbe: ((Bool, Bool, String) -> Void)?
+  /// (message, progress 0…1, done, ok) — FUT-167 Stage 2 CFW flash/validate progress.
+  var onFlashProgress: ((String, Double, Bool, Bool) -> Void)?
+
+  // ---- FUT-167 Stage 2 flash state (internal so the G2CentralFlash extension file
+  // can reach it; the OTA state machine runs on `flashQueue`, off the CB queue). ----
+  let flashQueue = DispatchQueue(label: "com.ffs.g2flash")
+  /// True while an OTA flash session owns the link (suspends display/gesture/heartbeat).
+  var flashActive = false
+  /// Raw frames captured on the DATA notify char (e0002) during a flash, FIFO.
+  var flashRx: [[UInt8]] = []
+  let flashRxLock = NSLock()
+  let flashSem = DispatchSemaphore(value: 0)
+  /// Rolling transport seq for the OTA session (guarded by flashRxLock).
+  var flashSeq: UInt8 = 0
 
   // MARK: - State
 
@@ -1130,6 +1150,18 @@ extension G2Central: CBPeripheralDelegate {
       return
     }
     guard let data = characteristic.value else { return }
+
+    // FUT-167 Stage 2: during an OTA flash, the DATA-notify (e0002) carries the OTA
+    // ack frames. Capture them into the flash FIFO + wake the flasher, and DON'T run
+    // them through the normal EvenHub gesture/image parsing.
+    if flashActive && characteristic.uuid == G2Central.FLASH_DATA_NOTIFY {
+      flashRxLock.lock()
+      flashRx.append([UInt8](data))
+      flashRxLock.unlock()
+      flashSem.signal()
+      return
+    }
+
     let b64 = data.base64EncodedString()
     // Compact log — full payload goes to JS as base64 via onNotify, tagged side.
     log("Notify \(characteristic.uuid.uuidString) (side=\(s.rawValue), \(data.count) bytes)")
@@ -1146,6 +1178,246 @@ extension G2Central: CBPeripheralDelegate {
         handleImageAckLocked(session: ack.session, fragment: ack.fragment, success: ack.success)
       }
     }
+  }
+}
+
+// MARK: - FUT-167 Stage 2: CFW OTA flasher (over BLE)
+//
+// Swift port of g2flash.py's flash path. Runs on `flashQueue` (off the CB queue) so it
+// can block-wait for OTA acks that the CB queue delivers into `flashRx`. Takes EXCLUSIVE
+// ownership of the link: heartbeats are suspended and `flashActive` gates the notify
+// handler to capture OTA acks (not run gesture/image parsing). The MRAM brick-guard +
+// golden-vector self-test MUST pass before any write. GATED: the real write path only
+// runs with dryRun=false, which the UI puts behind the "my warranty is void" phrase.
+extension G2Central {
+  static let flashCtrlWrite = CBUUID(string: "00002760-08C2-11E1-9073-0E8AC72E5401")
+  static let FLASH_BLOCK_NAK_RETRIES = 5
+  static let FLASH_COMPONENT_RETRIES = 3
+
+  private func findChar(_ p: CBPeripheral, _ uuid: CBUUID) -> CBCharacteristic? {
+    for svc in p.services ?? [] {
+      for ch in svc.characteristics ?? [] where ch.uuid == uuid { return ch }
+    }
+    return nil
+  }
+
+  private func flashProgress(_ msg: String, _ frac: Double, done: Bool = false, ok: Bool = true) {
+    log("flash: \(msg)")
+    onFlashProgress?(msg, frac, done, ok)
+  }
+
+  private func flashNextSeq() -> UInt8 {
+    flashRxLock.lock(); flashSeq = flashSeq &+ 1; let s = flashSeq; flashRxLock.unlock(); return s
+  }
+
+  private func flashDrainRx() {
+    flashRxLock.lock(); flashRx.removeAll(); flashRxLock.unlock()
+    while flashSem.wait(timeout: .now()) == .success {}
+  }
+
+  /// Download the image synchronously (before any flash — no mid-flash network).
+  private func flashDownload(_ url: URL) -> [UInt8]? {
+    let sem = DispatchSemaphore(value: 0)
+    var out: [UInt8]?
+    URLSession.shared.dataTask(with: url) { data, _, _ in
+      if let d = data { out = [UInt8](d) }
+      sem.signal()
+    }.resume()
+    _ = sem.wait(timeout: .now() + 180)
+    return out
+  }
+
+  /// One withoutResponse write, respecting iOS flow control (poll-capped ~2s).
+  private func flashWrite(_ frame: [UInt8], to ch: CBCharacteristic, on p: CBPeripheral) {
+    var waited = 0
+    while !p.canSendWriteWithoutResponse && waited < 2000 { usleep(1000); waited += 1 }
+    queue.sync { p.writeValue(Data(frame), for: ch, type: .withoutResponse) }
+  }
+
+  private func flashWriteFrames(_ frames: [[UInt8]], to ch: CBCharacteristic, on p: CBPeripheral) {
+    for f in frames { flashWrite(f, to: ch, on: p) }
+  }
+
+  /// Block until an OTA ack with opcode `wantOp` lands on the DATA-notify FIFO. Returns
+  /// the status byte, or nil on timeout.
+  private func flashWaitAck(_ wantOp: UInt8, timeoutMs: Int) -> UInt8? {
+    let deadline = Date().addingTimeInterval(Double(timeoutMs) / 1000.0)
+    while Date() < deadline {
+      flashRxLock.lock(); let batch = flashRx; flashRx.removeAll(); flashRxLock.unlock()
+      for frame in batch {
+        if let (_, pb) = G2Flash.parseRx(frame), pb.count >= 2, pb[0] == wantOp { return pb[1] }
+      }
+      _ = flashSem.wait(timeout: .now() + 0.2)
+    }
+    return nil
+  }
+
+  private func flashSendDataMsg(_ frames: [[UInt8]], wantOp: UInt8,
+                                dataWrite: CBCharacteristic, p: CBPeripheral,
+                                timeoutMs: Int = 5000) -> UInt8? {
+    flashWriteFrames(frames, to: dataWrite, on: p)
+    return flashWaitAck(wantOp, timeoutMs: timeoutMs)
+  }
+
+  /// Entry point (JS bridge). Downloads + SHA-verifies + guard + golden-vector self-test,
+  /// then (dryRun=false only) runs the real per-lens OTA flash. dryRun=true stops before
+  /// any write. Reports via onFlashProgress.
+  func startCfwFlash(url urlStr: String, expectedSha256 sha256: String, dryRun: Bool) {
+    flashQueue.async { [weak self] in
+      guard let self = self else { return }
+      self.flashProgress(dryRun ? "validating (dry-run, no writes)…" : "preparing flash…", 0.02)
+
+      guard let url = URL(string: urlStr) else {
+        self.flashProgress("bad image URL", 0, done: true, ok: false); return
+      }
+      guard let img = self.flashDownload(url) else {
+        self.flashProgress("image download failed", 0, done: true, ok: false); return
+      }
+      let sha = SHA256.hash(data: Data(img)).map { String(format: "%02x", $0) }.joined()
+      guard sha.lowercased() == sha256.lowercased() else {
+        self.flashProgress("SHA mismatch — refusing (got \(sha.prefix(12))…)", 0, done: true, ok: false); return
+      }
+      self.flashProgress("image SHA-256 verified ✓", 0.10)
+
+      let segs: [G2Flash.Segment]
+      do { segs = try G2Flash.parseSegments(img) }
+      catch { self.flashProgress("parse failed: \(error)", 0, done: true, ok: false); return }
+
+      let g = G2Flash.checkMainAppFitsMram(img, segs)
+      guard g.pass else {
+        self.flashProgress("BRICK-GUARD BLOCKED: \(g.reason)", 0, done: true, ok: false); return
+      }
+      let gv: G2Flash.GoldenVector? =
+        sha.lowercased() == G2Flash.goldenCFW.sha256 ? G2Flash.goldenCFW :
+        (sha.lowercased() == G2Flash.goldenStock.sha256 ? G2Flash.goldenStock : nil)
+      guard let gvec = gv else {
+        self.flashProgress("not a known golden build — refusing", 0, done: true, ok: false); return
+      }
+      if let fail = G2Flash.selfTestGuard(img, expect: gvec) {
+        self.flashProgress("SELF-TEST FAILED: \(fail) — refusing", 0, done: true, ok: false); return
+      }
+      self.flashProgress(String(format: "brick-guard + self-test PASSED (prog_end 0x%08x)", g.progEnd), 0.18)
+
+      guard let left = self.lenses[.left], let right = self.lenses[.right],
+            left.connected, right.connected else {
+        self.flashProgress("both lenses must be connected", 0, done: true, ok: false); return
+      }
+      for (label, lens) in [("L", left), ("R", right)] {
+        guard self.findChar(lens.peripheral, G2Central.FLASH_DATA_WRITE) != nil,
+              self.findChar(lens.peripheral, G2Central.FLASH_DATA_NOTIFY) != nil else {
+          self.flashProgress("\(label): OTA channels missing", 0, done: true, ok: false); return
+        }
+      }
+
+      if dryRun {
+        self.flashProgress("DRY-RUN OK — image validated + both lenses ready; NO writes performed ✓",
+                           1.0, done: true, ok: true)
+        return
+      }
+
+      // ===== REAL FLASH (dryRun == false only) =====
+      self.queue.sync { self.heartbeatRunning = false }   // suspend EvenHub heartbeat
+      self.flashActive = true
+      defer {
+        self.flashActive = false
+        self.queue.async { self.startHeartbeatsLocked() }  // restore keep-alive after
+      }
+      var okAll = true
+      let order: [(String, G2Lens)] = [("L", left), ("R", right)]
+      for (i, entry) in order.enumerated() {
+        self.flashProgress("flashing \(entry.0) lens…", 0.2 + 0.4 * Double(i))
+        if !self.flashOneLens(entry.1.peripheral, img: img, segs: segs, side: entry.0) {
+          okAll = false; break
+        }
+      }
+      self.flashProgress(
+        okAll ? "FLASH COMPLETE — glasses reboot into new firmware ✓"
+              : "FLASH FAILED — see log; run Restore Stock if a lens is half-flashed",
+        okAll ? 1.0 : 0.0, done: true, ok: okAll)
+    }
+  }
+
+  private func flashOneLens(_ p: CBPeripheral, img: [UInt8], segs: [G2Flash.Segment], side: String) -> Bool {
+    guard let dataWrite = findChar(p, G2Central.FLASH_DATA_WRITE),
+          let dataNotify = findChar(p, G2Central.FLASH_DATA_NOTIFY),
+          let ctrlWrite = findChar(p, G2Central.flashCtrlWrite) else {
+      flashProgress("\(side): OTA channels missing at flash time", 0, ok: false); return false
+    }
+    flashRxLock.lock(); flashSeq = 0; flashRxLock.unlock()
+    queue.sync { p.setNotifyValue(true, for: dataNotify) }
+    Thread.sleep(forTimeInterval: 2.5)
+    flashDrainRx()
+
+    // 12s keep-alive on the CTRL write during the transfer (like the official app).
+    let hb = DispatchSource.makeTimerSource(queue: queue)
+    hb.schedule(deadline: .now() + 12, repeating: 12)
+    hb.setEventHandler { [weak self, weak p, weak ctrlWrite] in
+      guard let self = self, let p = p, let ctrlWrite = ctrlWrite else { return }
+      let f = G2Flash.frames(sid: 0x80, pb: [0x08, 0x0E, 0x10, 0x26, 0x6A, 0x00], seq: self.flashNextSeq())
+      for fr in f { p.writeValue(Data(fr), for: ctrlWrite, type: .withoutResponse) }
+    }
+    hb.resume()
+    defer { hb.cancel() }
+
+    // begin
+    let bst = flashSendDataMsg(G2Flash.ctrlFrames(0x00, seq: flashNextSeq()), wantOp: 0x00,
+                               dataWrite: dataWrite, p: p)
+    flashProgress("\(side): begin ack \(bst.map { String($0) } ?? "timeout")", 0.0)
+
+    for (i, seg) in segs.enumerated() {
+      if !flashComponent(seg, index: i, total: segs.count, img: img,
+                         dataWrite: dataWrite, p: p, side: side) {
+        return false
+      }
+    }
+    flashProgress("\(side): all \(segs.count) components verified ✓", 0.0)
+    return true
+  }
+
+  private func flashComponent(_ seg: G2Flash.Segment, index: Int, total: Int, img: [UInt8],
+                              dataWrite: CBCharacteristic, p: CBPeripheral, side: String) -> Bool {
+    let off = Int(seg.off) + 128
+    let ps = Int(seg.ps)
+    guard off + ps <= img.count else { flashProgress("\(side): seg \(seg.fn) past EOF", 0, ok: false); return false }
+    let payload = Array(img[off..<off + ps])
+    let nb = (payload.count + 4095) / 4096
+
+    for attempt in 0..<G2Central.FLASH_COMPONENT_RETRIES {
+      if attempt > 0 { flashProgress("\(side): re-flash \(seg.fn) attempt \(attempt + 1)", 0.0); flashDrainRx(); Thread.sleep(forTimeInterval: 1.5) }
+      // FILE_CHECK
+      let fc = flashSendDataMsg(G2Flash.ctrlFrames(0x01, seg.sub, seq: flashNextSeq()), wantOp: 0x01,
+                                dataWrite: dataWrite, p: p)
+      guard fc == 0 else { flashProgress("\(side): \(seg.fn) FILE_CHECK status \(fc.map { String($0) } ?? "timeout")", 0.0); continue }
+
+      var blocksOK = true
+      for b in 0..<nb {
+        let blk = Array(payload[b * 4096..<min((b + 1) * 4096, payload.count)])
+        var acked = false
+        for _ in 0..<G2Central.FLASH_BLOCK_NAK_RETRIES {
+          let seq = flashNextSeq()
+          flashDrainRx()
+          flashWriteFrames(G2Flash.ctrlFrames(0x02, seq: seq), to: dataWrite, on: p)   // marker
+          flashWriteFrames(G2Flash.dataFrames(blk, seq: seq), to: dataWrite, on: p)     // 4 KB
+          if let st = flashWaitAck(0x02, timeoutMs: 5000), st == 0 { acked = true; break }
+        }
+        if !acked { flashProgress("\(side): \(seg.fn) block \(b)/\(nb) failed", 0.0); blocksOK = false; break }
+        if b % 100 == 0 || b == nb - 1 {
+          let compFrac = (Double(index) + Double(b + 1) / Double(nb)) / Double(total)
+          flashProgress("\(side): \(seg.fn) block \(b + 1)/\(nb)", 0.2 + 0.4 * min(1.0, compFrac))
+        }
+      }
+      if !blocksOK { continue }
+
+      // END
+      let est = flashSendDataMsg(G2Flash.ctrlFrames(0x03, seq: flashNextSeq()), wantOp: 0x03,
+                                 dataWrite: dataWrite, p: p, timeoutMs: 15000)
+      if let e = est, e == 0 || e == 8 || e == 9 {
+        flashProgress("\(side): \(seg.fn) END verified (\(e))", 0.0); return true
+      }
+      flashProgress("\(side): \(seg.fn) END status \(est.map { String($0) } ?? "timeout") — retrying", 0.0)
+    }
+    flashProgress("\(side): \(seg.fn) FAILED after \(G2Central.FLASH_COMPONENT_RETRIES) attempts", 0, ok: false)
+    return false
   }
 }
 
