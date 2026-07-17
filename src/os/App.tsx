@@ -58,6 +58,27 @@ export default function App() {
     return;
   }, [bt.pairReady]);
 
+  // Keep the HUD clock live: re-paint the home surface at each minute boundary while
+  // the pair is ready (hudHome() reads the wall clock at paint time, so a re-paint is
+  // all it takes). Minute-ALIGNED rather than a drifting 60s interval, so the shown
+  // minute flips right when it should. A slow 1/min re-push — well below the FUT-136
+  // keep-alive cadence that provoked firmware evictions. (Home is the only surface
+  // today; if the OS later navigates away, gate this on "home is current".)
+  useEffect(() => {
+    if (!bt.pairReady) return;
+    let timer: ReturnType<typeof setTimeout>;
+    const scheduleNextMinute = () => {
+      const msToNextMinute = 60_000 - (Date.now() % 60_000);
+      timer = setTimeout(() => {
+        void screenOwner.setSurface(() => hudHome());
+        glog.emit("os", "home_clock_tick", {});
+        scheduleNextMinute();
+      }, msToNextMinute + 50);
+    };
+    scheduleNextMinute();
+    return () => clearTimeout(timer);
+  }, [bt.pairReady]);
+
   const health = sup.health;
 
   return (
