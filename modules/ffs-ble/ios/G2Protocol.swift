@@ -232,14 +232,16 @@ enum G2EvenHub {
     return w.data
   }
 
-  /// A dedicated 1×1 invisible event-capture container. Every page needs EXACTLY one
-  /// container with isEventCapture=1 or the firmware rejects input binding
-  /// ("no container with Is_event_capture=1 found") and only the system double-press
-  /// survives. Putting the flag on a REAL container paints a visible artifact, so we
-  /// use a 1×1 empty one on every page (matches MentraOS "evt-0"). FUT-160/FUT-153.
+  /// A dedicated FULL-CANVAS invisible event-capture container, prepended (rendered
+  /// behind) on every page. Every page needs a container with isEventCapture=1 or the
+  /// firmware unbinds input ("no container with Is_event_capture=1 found") and only the
+  /// system double-press survives. It must be FULL-CANVAS, not 1×1: the arm touchpad
+  /// maps to a screen region, so a tiny hit-target at (0,0) misses ~70% of gestures
+  /// (the build18 "30% detection" bug). Empty content + no border = invisible; being
+  /// first in the list keeps it behind the real text/image containers. FUT-160/FUT-153.
   private static func eventCaptureContainer() -> Data {
     return textContainer(
-      x: 0, y: 0, width: 1, height: 1, containerID: 0,
+      x: 0, y: 0, width: 576, height: 288, containerID: 0,
       content: "", containerName: "evt-0", isEventCapture: true)
   }
 
