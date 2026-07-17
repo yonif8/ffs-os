@@ -34,7 +34,8 @@ public class FfsBleModule: Module {
       "onNotify",
       "onGesture",
       "onDisconnected",
-      "onFlashProbe"
+      "onFlashProbe",
+      "onFlashProgress"
     )
 
     Function("startScan") { [weak self] in
@@ -90,6 +91,14 @@ public class FfsBleModule: Module {
     // reach both lenses' OTA characteristics — no writes, no brick risk).
     Function("flashDryRun") { [weak self] in
       self?.ensureCentral().flashDryRun()
+    }
+
+    // FUT-167 Stage 2: CFW OTA flash. Downloads `url`, verifies `sha256`, runs the MRAM
+    // brick-guard + golden-vector self-test, then flashes (dryRun=false) or stops before
+    // any write (dryRun=true). Progress via onFlashProgress. The real write path (dryRun
+    // false) must be gated in JS behind the warranty confirmation.
+    Function("startCfwFlash") { [weak self] (url: String, sha256: String, dryRun: Bool) in
+      self?.ensureCentral().startCfwFlash(url: url, expectedSha256: sha256, dryRun: dryRun)
     }
 
     // P3: tear down the EvenHub session (stops the keep-alive heartbeat).
@@ -153,6 +162,14 @@ public class FfsBleModule: Module {
         "leftReady": leftReady,
         "rightReady": rightReady,
         "detail": detail,
+      ])
+    }
+    c.onFlashProgress = { [weak self] (message, progress, done, ok) in
+      self?.sendEvent("onFlashProgress", [
+        "message": message,
+        "progress": progress,
+        "done": done,
+        "ok": ok,
       ])
     }
     c.onDisconnected = { [weak self] (name, side, reason) in

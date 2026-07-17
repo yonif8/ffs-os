@@ -93,6 +93,17 @@ export interface OnFlashProbeEvent {
   detail: string;
 }
 
+/** CFW flash / validate progress (FUT-167 Stage 2). */
+export interface OnFlashProgressEvent {
+  message: string;
+  /** 0…1. */
+  progress: number;
+  /** Terminal event (success or failure). */
+  done: boolean;
+  /** Whether the (terminal) result was a success. */
+  ok: boolean;
+}
+
 /** Map of event name → payload type. */
 export interface FfsBleEvents {
   onLog: OnLogEvent;
@@ -105,6 +116,7 @@ export interface FfsBleEvents {
   onGesture: OnGestureEvent;
   onDisconnected: OnDisconnectedEvent;
   onFlashProbe: OnFlashProbeEvent;
+  onFlashProgress: OnFlashProgressEvent;
 }
 
 export type FfsBleEventName = keyof FfsBleEvents;
@@ -150,6 +162,13 @@ interface FfsBleNativeModule {
    * `onFlashProbe` event. Connect the pair first.
    */
   flashDryRun(): void;
+  /**
+   * FUT-167 Stage 2: CFW OTA flash. Downloads `url`, verifies `sha256`, runs the MRAM
+   * brick-guard + golden-vector self-test, then flashes (dryRun=false) or stops before
+   * any write (dryRun=true). Progress via `onFlashProgress`. The real write (dryRun
+   * false) MUST be gated behind the warranty confirmation in the UI.
+   */
+  startCfwFlash(url: string, sha256: string, dryRun: boolean): void;
   /** P3: tear down the EvenHub session (stops the keep-alive heartbeat). */
   stopSession(): void;
   addListener<E extends FfsBleEventName>(

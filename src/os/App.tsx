@@ -11,7 +11,7 @@
 
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef, useState } from "react";
-import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import FfsBle from "../../modules/ffs-ble";
 import { theme } from "./theme";
@@ -22,7 +22,16 @@ import { screenOwner } from "./reclaim";
 import { PhoneNav, type PhoneCtx } from "./phone/nav";
 import { homeScreen } from "./phone/screens";
 
-const APP_VERSION = "0.10.6";
+const APP_VERSION = "0.10.9";
+
+// FUT-167 Stage 2 — CFW + stock-restore images (hosted on the private slsrc server, NOT
+// bundled: this repo is public and the firmware is Even's copyrighted image). Downloaded
+// + SHA-verified natively before any write.
+const CFW_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_cfw.bin";
+const CFW_SHA = "5c1539fd39c599e6035f6a8ec0779ba687c250d342a24c21a39952fed6c56aa0";
+const STOCK_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_stock.bin";
+const STOCK_SHA = "f4dfb0b49ad3de3c2daf17f8a27a157c3dc98411d6a0d3ab2cfd0918f41b9afa";
+const WARRANTY_PHRASE = "my warranty is void";
 
 function healthColor(h: ConnectionHealth): string {
   switch (h) {
@@ -43,6 +52,10 @@ export default function App() {
   const [session, setSession] = useState<string>("");
   const [swirlOn, setSwirlOn] = useState(false);
   const [flashProbe, setFlashProbe] = useState<string>("");
+  const [flashMsg, setFlashMsg] = useState<string>("");
+  const [flashFrac, setFlashFrac] = useState<number>(0);
+  const [flashBusy, setFlashBusy] = useState<boolean>(false);
+  const [warranty, setWarranty] = useState<string>("");
 
   // Live refs so the nav's context getters always read current session state.
   const btRef = useRef(bt);
@@ -78,6 +91,27 @@ export default function App() {
     });
     return () => sub.remove();
   }, []);
+
+  // FUT-167 Stage 2: CFW flash / validate progress.
+  useEffect(() => {
+    const sub = FfsBle.addListener("onFlashProgress", (e) => {
+      setFlashMsg(e.message);
+      setFlashFrac(e.progress);
+      if (e.done) setFlashBusy(false);
+      glog.emit("os", "flash_progress", { message: e.message, progress: e.progress, done: e.done, ok: e.ok });
+    });
+    return () => sub.remove();
+  }, []);
+
+  const armed = warranty.trim() === WARRANTY_PHRASE;
+  const startFlash = (url: string, sha: string, dryRun: boolean) => {
+    if (!bt.pairReady || flashBusy) return;
+    setFlashBusy(true);
+    setFlashMsg("starting…");
+    setFlashFrac(0);
+    glog.emit("os", "flash_start", { dryRun, url });
+    FfsBle.startCfwFlash(url, sha, dryRun);
+  };
 
   // Own the screen while the pair is ready: start the reclaim manager, paint the current
   // phone-OS screen, and route touchpad gestures into navigation. Tear down on disconnect.
@@ -186,19 +220,63 @@ export default function App() {
         </Pressable>
       </View>
 
-      <Text style={styles.section}>Firmware (dry-run only)</Text>
+      <Text style={styles.section}>Firmware — CFW flasher (FUT-167)</Text>
       <View style={styles.card}>
-        <Pressable
-          style={[styles.btn, !bt.pairReady && styles.btnDisabled]}
-          disabled={!bt.pairReady}
-          onPress={() => {
-            setFlashProbe("probing… (zero writes)");
-            FfsBle.flashDryRun();
-          }}
-        >
-          <Text style={styles.btnText}>Flash dry-run (zero-write probe)</Text>
-        </Pressable>
-        {flashProbe ? <Text style={[styles.meta, { marginTop: 8 }]}>{flashProbe}</Text> : null}
+        <View style={styles.btnRow}>
+          <Pressable
+            style={[styles.btn, styles.btnAlt, (!bt.pairReady || flashBusy) && styles.btnDisabled]}
+            disabled={!bt.pairReady || flashBusy}
+            onPress={() => {
+              setFlashProbe("probing… (zero writes)");
+              FfsBle.flashDryRun();
+            }}
+          >
+            <Text style={styles.btnText}>Channel probe</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.btn, (!bt.pairReady || flashBusy) && styles.btnDisabled]}
+            disabled={!bt.pairReady || flashBusy}
+            onPress={() => startFlash(CFW_URL, CFW_SHA, true)}
+          >
+            <Text style={styles.btnText}>Validate CFW (no writes)</Text>
+          </Pressable>
+        </View>
+        {flashProbe ? <Text style={styles.meta}>{flashProbe}</Text> : null}
+        {flashMsg ? (
+          <Text style={[styles.meta, { marginTop: 6 }]}>
+            {flashBusy ? "⏳ " : ""}
+            {Math.round(flashFrac * 100)}% — {flashMsg}
+          </Text>
+        ) : null}
+
+        <Text style={[styles.meta, { marginTop: 12, color: theme.danger }]}>
+          Real flash voids warranty + can brick. Type "{WARRANTY_PHRASE}" to arm:
+        </Text>
+        <TextInput
+          style={styles.input}
+          value={warranty}
+          onChangeText={setWarranty}
+          placeholder="my warranty is void"
+          placeholderTextColor={theme.textDim}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        <View style={styles.btnRow}>
+          <Pressable
+            style={[styles.btn, { backgroundColor: theme.danger }, (!armed || !bt.pairReady || flashBusy) && styles.btnDisabled]}
+            disabled={!armed || !bt.pairReady || flashBusy}
+            onPress={() => startFlash(CFW_URL, CFW_SHA, false)}
+          >
+            <Text style={styles.btnText}>⚠️ FLASH CFW</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.btn, styles.btnAlt, (!armed || !bt.pairReady || flashBusy) && styles.btnDisabled]}
+            disabled={!armed || !bt.pairReady || flashBusy}
+            onPress={() => startFlash(STOCK_URL, STOCK_SHA, false)}
+          >
+            <Text style={styles.btnText}>Restore Stock</Text>
+          </Pressable>
+        </View>
       </View>
 
       <Text style={styles.section}>Connection log</Text>
@@ -250,6 +328,19 @@ const styles = StyleSheet.create({
   btnAlt: { backgroundColor: theme.surfaceAlt },
   btnDisabled: { backgroundColor: theme.surfaceAlt, opacity: 0.5 },
   btnText: { color: theme.text, fontWeight: "600", fontSize: 14 },
+  input: {
+    backgroundColor: "#010409",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.surfaceAlt,
+    color: theme.text,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginTop: 6,
+    marginBottom: 8,
+    fontFamily: "Menlo",
+    fontSize: 13,
+  },
   section: { color: theme.textDim, fontSize: 12, marginBottom: 6, marginTop: 4 },
   dim: { color: theme.textDim, fontSize: 12 },
   logBox: {
