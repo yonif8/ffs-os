@@ -581,12 +581,14 @@ final class G2Central: NSObject {
   }
 
   private func sendTextPageLocked(_ text: String) {
-    let msg = G2EvenHub.createTextPage(text: text, magicRandom: counters.nextMagic())
+    let rebuild = pageCreated
+    let msg = G2EvenHub.textPageMessage(
+      text: text, rebuild: rebuild, magicRandom: counters.nextMagic())
     // Display content goes to the RIGHT lens (the protocol channel); the firmware
     // mirrors the page to both lenses. (P0 spec: default target = RIGHT.)
     sendEvenHubLocked(msg, to: .right)
     pageCreated = true
-    log("showText: sent create-text-page (\(text.utf8.count)B) → right")
+    log("showText: \(rebuild ? "rebuilt" : "created") text page (\(text.utf8.count)B) → right")
   }
 
   // MARK: - Image display (P4, FUT-153)
@@ -625,7 +627,7 @@ final class G2Central: NSObject {
     let ic = G2EvenHub.imageContainer(
       x: 188, y: 94, width: 200, height: 100, containerID: cid, containerName: name)
     let rebuild = pageCreated
-    let page = G2EvenHub.imagePage(
+    let page = G2EvenHub.imagePageMessage(
       imageContainer: ic, rebuild: rebuild, magicRandom: counters.nextMagic())
     sendEvenHubLocked(page, to: .right)
     pageCreated = true

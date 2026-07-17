@@ -232,16 +232,42 @@ enum G2EvenHub {
     return w.data
   }
 
-  /// Full "create a startup page containing one text container" message.
-  static func createTextPage(text: String, magicRandom: Int32) -> Data {
-    // A single centered-ish text container across most of the 576×288 canvas.
+  /// A dedicated 1×1 invisible event-capture container. Every page needs EXACTLY one
+  /// container with isEventCapture=1 or the firmware rejects input binding
+  /// ("no container with Is_event_capture=1 found") and only the system double-press
+  /// survives. Putting the flag on a REAL container paints a visible artifact, so we
+  /// use a 1×1 empty one on every page (matches MentraOS "evt-0"). FUT-160/FUT-153.
+  private static func eventCaptureContainer() -> Data {
+    return textContainer(
+      x: 0, y: 0, width: 1, height: 1, containerID: 0,
+      content: "", containerName: "evt-0", isEventCapture: true)
+  }
+
+  /// Build a page from real text + image containers, always prepending the evt-0
+  /// capture container so gestures work on EVERY page. `rebuild=false` →
+  /// createStartupPage (cmd 0, only valid for the FIRST page of a session);
+  /// `rebuild=true` → rebuildPage (cmd 7, for every page after). Sending
+  /// createStartupPage twice is silently ignored by the firmware — that was the
+  /// "stuck on the image, can't show text again" bug (FUT-153).
+  static func pageMessage(
+    textContainers: [Data], imageContainers: [Data], rebuild: Bool, magicRandom: Int32
+  ) -> Data {
+    let page = createStartupPageContainer(
+      textContainers: [eventCaptureContainer()] + textContainers,
+      imageContainers: imageContainers)
+    return rebuild
+      ? message(cmd: .rebuildPage, subField: 7, sub: page, magicRandom: magicRandom)
+      : message(cmd: .createStartupPage, subField: 3, sub: page, magicRandom: magicRandom)
+  }
+
+  /// Full text page (create or rebuild). The visible text container does NOT capture
+  /// events — the evt-0 container does.
+  static func textPageMessage(text: String, rebuild: Bool, magicRandom: Int32) -> Data {
     let tc = textContainer(
       x: 0, y: 0, width: 576, height: 288, containerID: 1,
-      content: text.isEmpty ? " " : text, containerName: "ffs-txt",
-      isEventCapture: true  // capture single-press + swipe (FUT-160); double-press is system-level regardless
-    )
-    let page = createStartupPageContainer(textContainers: [tc])
-    return message(cmd: .createStartupPage, subField: 3, sub: page, magicRandom: magicRandom)
+      content: text.isEmpty ? " " : text, containerName: "ffs-txt")
+    return pageMessage(
+      textContainers: [tc], imageContainers: [], rebuild: rebuild, magicRandom: magicRandom)
   }
 
   /// TextContainerUpgrade (updateTextData, sub-field 9): update a live container.
@@ -281,15 +307,12 @@ extension G2EvenHub {
     return w.data
   }
 
-  /// A page (create OR rebuild) containing one image container. `rebuild=false`
-  /// → createStartupPage (cmd 0, sub-field 3, first page of a session); `rebuild=true`
-  /// → rebuildPage (cmd 7, sub-field 7, for a page created earlier this session —
-  /// createStartupPage only takes once).
-  static func imagePage(imageContainer ic: Data, rebuild: Bool, magicRandom: Int32) -> Data {
-    let page = createStartupPageContainer(textContainers: [], imageContainers: [ic])
-    return rebuild
-      ? message(cmd: .rebuildPage, subField: 7, sub: page, magicRandom: magicRandom)
-      : message(cmd: .createStartupPage, subField: 3, sub: page, magicRandom: magicRandom)
+  /// A page (create OR rebuild) containing one image container. Routes through
+  /// `pageMessage`, so it also carries the evt-0 capture container — gestures keep
+  /// working while an image is shown (the image container itself can't capture). FUT-153.
+  static func imagePageMessage(imageContainer ic: Data, rebuild: Bool, magicRandom: Int32) -> Data {
+    return pageMessage(
+      textContainers: [], imageContainers: [ic], rebuild: rebuild, magicRandom: magicRandom)
   }
 
   /// ImageRawDataUpdate: f1=containerID, f2=name, f3=mapSessionId, f4=mapTotalSize,
