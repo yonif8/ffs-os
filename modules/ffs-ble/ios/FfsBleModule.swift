@@ -79,6 +79,12 @@ public class FfsBleModule: Module {
       self?.ensureCentral().showImage()
     }
 
+    // FUT-165: toggle the firmware's NATIVE Even-AI "thinking" swirl (GPU-smooth,
+    // dual-lens) via the even_ai session lifecycle. `on` starts it, false stops it.
+    Function("showAiSwirl") { [weak self] (on: Bool) in
+      self?.ensureCentral().aiSwirl(on: on)
+    }
+
     // P3: tear down the EvenHub session (stops the keep-alive heartbeat).
     Function("stopSession") { [weak self] in
       self?.central?.stopSession()
