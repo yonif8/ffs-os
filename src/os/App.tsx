@@ -38,6 +38,13 @@ const STOCK_SHA = "f4dfb0b49ad3de3c2daf17f8a27a157c3dc98411d6a0d3ab2cfd0918f41b9
 // loop is proven on-hardware, with a payload that is behaviorally stock. Restore Stock reverts.
 const CANARY_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_canary.bin";
 const CANARY_SHA = "67759cd67ed7031d7b4c8a613b8b0fe9dc9bd51c11e82260c35f5bc807159b5e";
+// FUT-188 "fontpeek" — the shipped CFW + one injected READ that appends the XIP font-slot-0
+// header (127 B from 0x80100000) to the sid=0x09 device-info response. After flashing, tap
+// "Read battery + firmware version" and the font header shows on the firmware-L version line
+// as ⟨FONT0=…hex…⟩ → gives us the s200_font.bin format ground-truth for native Hebrew. Pure
+// read, no new flash-write behavior; Restore Stock reverts. Same golden-vector safety gate.
+const FONTPEEK_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_fontpeek.bin";
+const FONTPEEK_SHA = "13547292b4cf83290eab822b7544d5331de5bed8046a182cdfbd7a4bfe6ee249";
 const WARRANTY_PHRASE = "my warranty is void";
 
 // FUT-167 soft precheck — a self-attested readiness checklist that must be
@@ -381,6 +388,13 @@ export default function App() {
           onPress={() => startFlash(CANARY_URL, CANARY_SHA, false)}
         >
           <Text style={styles.btnText}>⚑ Flash CANARY (stock+marker → 2.2.6.77) — do this first</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.btn, { backgroundColor: theme.accent, marginBottom: 10 }, (!armed || !bt.pairReady || flashBusy) && styles.btnDisabled]}
+          disabled={!armed || !bt.pairReady || flashBusy}
+          onPress={() => startFlash(FONTPEEK_URL, FONTPEEK_SHA, false)}
+        >
+          <Text style={styles.btnText}>🔤 Flash FONT-PEEK CFW (reads font, then tap “Read … firmware version”)</Text>
         </Pressable>
         <View style={styles.btnRow}>
           <Pressable

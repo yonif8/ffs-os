@@ -622,6 +622,13 @@ enum G2Setting {
     if let d = inf[6] as? Data { out.rightVersion = String(data: d, encoding: .utf8) }
     if let b = inf[12] as? Int32, b >= 0, b <= 100 { out.battery = Int(b) }
     if let c = inf[13] as? Int32 { out.charging = c != 0 }
+    // FUT-188 "fontpeek": our CFW appends field 101 (OUTER level) = the first 127 bytes
+    // of the XIP font slot 0 @ 0x80100000. Surface it as hex on the version line the app
+    // already shows, so we can capture the s200_font.bin format ground-truth with no new UI.
+    if let fp = f[101] as? Data {
+      let hex = fp.map { String(format: "%02x", $0) }.joined()
+      out.leftVersion = (out.leftVersion ?? "") + "  ⟨FONT0=" + hex + "⟩"
+    }
     if out.leftVersion == nil && out.rightVersion == nil && out.battery == nil && out.charging == nil {
       return nil
     }

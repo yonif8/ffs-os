@@ -1670,7 +1670,8 @@ extension G2Central {
       let gv: G2Flash.GoldenVector? =
         sha.lowercased() == G2Flash.goldenCFW.sha256 ? G2Flash.goldenCFW :
         (sha.lowercased() == G2Flash.goldenStock.sha256 ? G2Flash.goldenStock :
-        (sha.lowercased() == G2Flash.goldenCanary.sha256 ? G2Flash.goldenCanary : nil))
+        (sha.lowercased() == G2Flash.goldenCanary.sha256 ? G2Flash.goldenCanary :
+        (sha.lowercased() == G2Flash.goldenFontpeek.sha256 ? G2Flash.goldenFontpeek : nil)))
       guard let gvec = gv else {
         self.flashProgress("not a known golden build — refusing", 0, done: true, ok: false); return
       }

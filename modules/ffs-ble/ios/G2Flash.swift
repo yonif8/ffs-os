@@ -214,6 +214,13 @@ enum G2Flash {
   static let goldenCanary = GoldenVector(
     sha256: "67759cd67ed7031d7b4c8a613b8b0fe9dc9bd51c11e82260c35f5bc807159b5e",
     ps: 3_523_396, progEnd: 0x0079_4324, pass: true)
+  // FUT-188 "fontpeek" CFW: the shipped CFW (_cfw.bin) + one injected read that appends
+  // the XIP font-slot-0 header (127 B from 0x80100000) to the sid=0x09 device-info
+  // response, so we can capture the s200_font.bin format ground-truth. Pure read, no new
+  // flash-write behavior; ps/prog_end verified against the built image via g2flash.
+  static let goldenFontpeek = GoldenVector(
+    sha256: "13547292b4cf83290eab822b7544d5331de5bed8046a182cdfbd7a4bfe6ee249",
+    ps: 3_539_655, progEnd: 0x0079_82A7, pass: true)
 
   /// Run the parse+guard on `img` and assert it reproduces the golden vector. Returns
   /// nil on success, or a failure description. Any non-nil result MUST block flashing.
