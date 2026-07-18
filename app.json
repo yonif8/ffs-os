@@ -3,7 +3,7 @@
     "name": "FFS Glasses OS",
     "slug": "ffs-glasses-os",
     "scheme": "ffsglassesos",
-    "version": "0.10.12",
+    "version": "0.10.13",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -20,7 +20,7 @@
     },
     "ios": {
       "supportsTablet": false,
-      "buildNumber": "28",
+      "buildNumber": "29",
       "bundleIdentifier": "com.futurefounders.glassesos",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,

@@ -22,7 +22,7 @@ import { screenOwner } from "./reclaim";
 import { PhoneNav, type PhoneCtx } from "./phone/nav";
 import { homeScreen } from "./phone/screens";
 
-const APP_VERSION = "0.10.12";
+const APP_VERSION = "0.10.13";
 
 // FUT-167 Stage 2 — CFW + stock-restore images (hosted on the private slsrc server, NOT
 // bundled: this repo is public and the firmware is Even's copyrighted image). Downloaded
@@ -31,6 +31,13 @@ const CFW_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_cfw.bin";
 const CFW_SHA = "5c1539fd39c599e6035f6a8ec0779ba687c250d342a24c21a39952fed6c56aa0";
 const STOCK_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_stock.bin";
 const STOCK_SHA = "f4dfb0b49ad3de3c2daf17f8a27a157c3dc98411d6a0d3ab2cfd0918f41b9afa";
+// FUT-167 canary — Even's EXACT stock 2.2.6.10 with ONLY the reported firmware-version
+// string changed 2.2.6.10 → 2.2.6.77 (10 rodata literals, length-preserving, checksums
+// recomputed; bootloader byte-identical, validate PASS). The safe FIRST real flash: if it
+// boots, "Read battery + firmware version" shows 2.2.6.77 → the write→commit→reboot→readback
+// loop is proven on-hardware, with a payload that is behaviorally stock. Restore Stock reverts.
+const CANARY_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_canary.bin";
+const CANARY_SHA = "67759cd67ed7031d7b4c8a613b8b0fe9dc9bd51c11e82260c35f5bc807159b5e";
 const WARRANTY_PHRASE = "my warranty is void";
 
 // FUT-167 soft precheck — a self-attested readiness checklist that must be
@@ -294,11 +301,18 @@ export default function App() {
           <Pressable
             style={[styles.btn, (!bt.pairReady || flashBusy) && styles.btnDisabled]}
             disabled={!bt.pairReady || flashBusy}
-            onPress={() => startFlash(CFW_URL, CFW_SHA, true)}
+            onPress={() => startFlash(CANARY_URL, CANARY_SHA, true)}
           >
-            <Text style={styles.btnText}>Validate CFW (no writes)</Text>
+            <Text style={styles.btnText}>Validate CANARY (no writes)</Text>
           </Pressable>
         </View>
+        <Pressable
+          style={[styles.btn, styles.btnAlt, (!bt.pairReady || flashBusy) && styles.btnDisabled, { marginTop: 2 }]}
+          disabled={!bt.pairReady || flashBusy}
+          onPress={() => startFlash(CFW_URL, CFW_SHA, true)}
+        >
+          <Text style={styles.btnText}>Validate CFW (no writes)</Text>
+        </Pressable>
         {flashProbe ? <Text style={styles.meta}>{flashProbe}</Text> : null}
         {flashMsg ? (
           <Text style={[styles.meta, { marginTop: 6 }]}>
@@ -347,6 +361,13 @@ export default function App() {
           autoCapitalize="none"
           autoCorrect={false}
         />
+        <Pressable
+          style={[styles.btn, { backgroundColor: theme.accent, marginBottom: 10 }, (!armed || !bt.pairReady || flashBusy) && styles.btnDisabled]}
+          disabled={!armed || !bt.pairReady || flashBusy}
+          onPress={() => startFlash(CANARY_URL, CANARY_SHA, false)}
+        >
+          <Text style={styles.btnText}>⚑ Flash CANARY (stock+marker → 2.2.6.77) — do this first</Text>
+        </Pressable>
         <View style={styles.btnRow}>
           <Pressable
             style={[styles.btn, { backgroundColor: theme.danger }, (!armed || !bt.pairReady || flashBusy) && styles.btnDisabled]}
