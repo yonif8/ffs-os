@@ -218,9 +218,12 @@ enum G2Flash {
   // the XIP font-slot-0 header (127 B from 0x80100000) to the sid=0x09 device-info
   // response, so we can capture the s200_font.bin format ground-truth. Pure read, no new
   // flash-write behavior; ps/prog_end verified against the built image via g2flash.
+  // v3 (FUT-186): read window moved to slot-0 0x80100030..0xA4 (116 B) to capture the
+  // wrapper tail (len@0x3c + metrics) + glyph-body start — the bytes v2 missed. Same pure
+  // read, new golden vector (blob size/content changed the injected read).
   static let goldenFontpeek = GoldenVector(
-    sha256: "dfe2e9ed676dfe1dc381eb2783521b445f4cf3f760362650c7629e6ba07445b4",
-    ps: 3_540_051, progEnd: 0x0079_8433, pass: true)
+    sha256: "0c6cc7b12709a212443335b108997cc0e72d9df59065699aed1302bc7f3b2739",
+    ps: 3_539_827, progEnd: 0x0079_8353, pass: true)
 
   /// Run the parse+guard on `img` and assert it reproduces the golden vector. Returns
   /// nil on success, or a failure description. Any non-nil result MUST block flashing.
