@@ -189,6 +189,14 @@ interface FfsBleNativeModule {
    * canary flash's firmware-version read-back.
    */
   requestDeviceInfo(): void;
+  /**
+   * FUT-165: play an on-glass pixel animation by id (one of: "image", "ball", "spinner",
+   * "rings", "plasma", "starfield", "marquee", "video"). Streams CFW mode-2 frames to a
+   * persistent 576×288 container. Connect the pair first (isPairReady() === true).
+   */
+  playAnimation(id: string): void;
+  /** FUT-165: stop the running animation. */
+  stopAnimation(): void;
   /** P3: tear down the EvenHub session (stops the keep-alive heartbeat). */
   stopSession(): void;
   addListener<E extends FfsBleEventName>(

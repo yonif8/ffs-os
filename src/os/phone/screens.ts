@@ -29,9 +29,27 @@ const list = (id: string, title: string, items: MenuItem[]): Screen => ({
 
 const image = (id: string, title: string): Screen => ({ id, title, kind: "image" });
 
-// ---- Animations (NATIVE firmware animation via the even_ai session) --------
+/** An on-glass pixel animation screen (FUT-165) — opening it streams CFW mode-2 frames;
+ *  double-tap (back) stops it. */
+const anim = (animId: string, title: string): Screen => ({
+  id: `anim-${animId}`,
+  title,
+  kind: "anim",
+  animId,
+});
+
+// ---- Animations (CFW pixel-frame demos + the native even_ai swirl) ---------
+// Tap a demo to play it full-canvas on the HUD; double-tap to stop + go back (FUT-165).
 
 const animations = list("animations", "Animations", [
+  { label: "Full-canvas image", hint: ">", target: anim("image", "Image") },
+  { label: "Bouncing ball", hint: ">", target: anim("ball", "Bouncing ball") },
+  { label: "Spinner", hint: ">", target: anim("spinner", "Spinner") },
+  { label: "Expanding rings", hint: ">", target: anim("rings", "Expanding rings") },
+  { label: "Plasma", hint: ">", target: anim("plasma", "Plasma") },
+  { label: "Starfield", hint: ">", target: anim("starfield", "Starfield") },
+  { label: "Marquee text", hint: ">", target: anim("marquee", "Marquee") },
+  { label: "Video demo (loop)", hint: ">", target: anim("video", "Video demo") },
   { label: "Even-AI swirl: START", hint: "native", action: () => FfsBle.showAiSwirl(true) },
   { label: "Even-AI swirl: STOP", hint: "", action: () => FfsBle.showAiSwirl(false) },
 ]);

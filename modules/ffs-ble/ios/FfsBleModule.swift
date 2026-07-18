@@ -102,6 +102,17 @@ public class FfsBleModule: Module {
       self?.ensureCentral().startCfwFlash(url: url, expectedSha256: sha256, dryRun: dryRun)
     }
 
+    // FUT-165: play an on-glass pixel animation by id (see G2Anim.ids). Streams CFW mode-2
+    // frames to a persistent 576×288 container. Connect the pair first.
+    Function("playAnimation") { [weak self] (id: String) in
+      self?.ensureCentral().playAnimation(id)
+    }
+
+    // FUT-165: stop the running animation.
+    Function("stopAnimation") { [weak self] in
+      self?.central?.stopAnimation()
+    }
+
     // FUT-169 / FUT-167: request real device info (battery %, charging, per-lens firmware
     // version) from the glasses. Answer arrives async via `onDeviceInfo`. Connect the pair
     // first. This is the real battery source (the HUD 82% was a stub) and the canary
