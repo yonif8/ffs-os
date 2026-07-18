@@ -206,6 +206,14 @@ enum G2Flash {
   static let goldenStock = GoldenVector(
     sha256: "f4dfb0b49ad3de3c2daf17f8a27a157c3dc98411d6a0d3ab2cfd0918f41b9afa",
     ps: 3_523_396, progEnd: 0x0079_4324, pass: true)
+  // FUT-167 canary: stock 2.2.6.10 with ONLY the reported firmware-version string changed
+  // (2.2.6.10 → 2.2.6.77, 10 length-preserving rodata edits, checksums recomputed). Because
+  // the edit is length-preserving, ps + prog_end are byte-for-byte identical to stock —
+  // verified via g2flash — so the same MRAM guard vector holds; only the SHA differs. This
+  // is the safe FIRST real flash (the write→commit→readback proof). Bootloader untouched.
+  static let goldenCanary = GoldenVector(
+    sha256: "67759cd67ed7031d7b4c8a613b8b0fe9dc9bd51c11e82260c35f5bc807159b5e",
+    ps: 3_523_396, progEnd: 0x0079_4324, pass: true)
 
   /// Run the parse+guard on `img` and assert it reproduces the golden vector. Returns
   /// nil on success, or a failure description. Any non-nil result MUST block flashing.
