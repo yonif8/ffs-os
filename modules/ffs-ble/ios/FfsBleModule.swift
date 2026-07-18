@@ -113,6 +113,12 @@ public class FfsBleModule: Module {
       self?.central?.stopAnimation()
     }
 
+    // FUT-170 PoC: push custom text into the firmware's native head-up dashboard over BLE
+    // (Schedule widget). Re-enables head-up + puts Schedule first. Look UP to see it.
+    Function("pushDashboardDemo") { [weak self] (text: String) in
+      self?.ensureCentral().pushDashboardDemo(text: text)
+    }
+
     // FUT-169 / FUT-167: request real device info (battery %, charging, per-lens firmware
     // version) from the glasses. Answer arrives async via `onDeviceInfo`. Connect the pair
     // first. This is the real battery source (the HUD 82% was a stub) and the canary

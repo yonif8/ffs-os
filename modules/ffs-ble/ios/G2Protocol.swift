@@ -619,6 +619,65 @@ enum G2Setting {
   }
 }
 
+// MARK: - Stock dashboard content (service 0x01 = dashboard) — FUT-170
+//
+// The firmware's native head-up dashboard renders widgets (Schedule/News/Stock/Quicklist/
+// Health) via LVGL. Its CONTENT + widget order are driven over BLE with a hand-rolled
+// `DashboardDataPackage` protobuf on service 0x01. We can (a) reorder/select which widgets
+// appear and (b) push custom content into the SCHEDULE widget (title/location/time). News/
+// Stock/Weather content is Even-cloud-owned (not driveable); layout/fonts need a CFW patch.
+// Encoding mirrors MentraOS G2.swift (DashboardProto.calendarPush / setCalendarWidgetFirst),
+// itself from an RE'd dashboard.proto. WidgetType: 1=News 2=Stock 3=Schedule 4=Quicklist 5=Health.
+enum G2Dashboard {
+  static let CMD_RECEIVE: Int32 = 2  // Dashboard_Receive (phone → glasses push)
+
+  /// DashboardDisplayConfig: pick + order the visible widgets (+ status order, 12/24h, C/F).
+  /// `widgetOrder` is a packed list of WidgetType IDs; array order = on-screen order.
+  static func displayConfig(magicRandom: Int32, widgetOrder: [UInt8],
+                            halfDay: Bool = true, celsius: Bool = true) -> Data {
+    var cfg = G2ProtobufWriter()
+    cfg.writeInt32Field(1, 4)                        // displayMode
+    cfg.writeInt32Field(2, 3)                        // statusDisplayCount
+    cfg.writeBytesField(3, Data([1, 2, 3]))          // statusDisplayOrder
+    cfg.writeInt32Field(4, Int32(widgetOrder.count)) // widgetDisplayCount
+    cfg.writeBytesField(5, Data(widgetOrder))        // widgetDisplayOrder
+    cfg.writeInt32Field(6, halfDay ? 1 : 0)          // halfDayFormat
+    cfg.writeInt32Field(7, celsius ? 1 : 2)          // temperatureUnit
+    var recv = G2ProtobufWriter(); recv.writeMessageField(2, cfg.data)  // DashboardReceiveFromApp.f2
+    var pkg = G2ProtobufWriter()
+    pkg.writeInt32Field(1, CMD_RECEIVE)
+    pkg.writeInt32Field(2, magicRandom)
+    pkg.writeMessageField(4, recv.data)              // DashboardDataPackage.f4
+    return pkg.data
+  }
+
+  /// Push ONE Schedule entry (custom title/location/time) into the Schedule widget.
+  static func pushSchedule(magicRandom: Int32, scheduleId: Int32, title: String,
+                           location: String, time: String, endTimestamp: Int32) -> Data {
+    var sched = G2ProtobufWriter()
+    sched.writeInt32Field(1, scheduleId)
+    sched.writeStringField(2, title)                 // ← custom display text
+    sched.writeStringField(3, location)
+    sched.writeStringField(4, time)
+    sched.writeInt32Field(5, endTimestamp)
+    var rSched = G2ProtobufWriter()
+    rSched.writeInt32Field(1, 1)                     // scheduleTotal (0 = clear)
+    rSched.writeInt32Field(2, 0)                     // scheduleNum
+    rSched.writeMessageField(3, sched.data)          // Schedule
+    rSched.writeInt32Field(4, 1)                     // scheduleAuthority
+    var comp = G2ProtobufWriter(); comp.writeMessageField(3, rSched.data)     // rWidgetComponent.f3 = Schedule
+    var content = G2ProtobufWriter(); content.writeMessageField(2, comp.data) // DashboardContent.f2
+    var recv = G2ProtobufWriter()
+    recv.writeInt32Field(1, 1)                       // packageId
+    recv.writeMessageField(3, content.data)          // DashboardReceiveFromApp.f3
+    var pkg = G2ProtobufWriter()
+    pkg.writeInt32Field(1, CMD_RECEIVE)
+    pkg.writeInt32Field(2, magicRandom)
+    pkg.writeMessageField(4, recv.data)
+    return pkg.data
+  }
+}
+
 // MARK: - Sequence counters
 
 /// Rolling syncId (per transport packet) + magicRandom (per message). magicRandom

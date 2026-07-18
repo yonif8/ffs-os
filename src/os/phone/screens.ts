@@ -96,4 +96,6 @@ export const homeScreen: Screen = list("home", "Home", [
   { label: "Image Test", hint: ">", target: image("imgtest", "Image Test") },
   { label: "About", hint: ">", target: about },
   { label: "Bluetooth", hint: ">", target: bluetooth },
+  // FUT-170 PoC: push custom text into the firmware's native dashboard, then look UP.
+  { label: "Dashboard demo", hint: "look up", action: () => FfsBle.pushDashboardDemo("Hello from FFS OS") },
 ]);
