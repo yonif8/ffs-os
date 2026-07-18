@@ -119,6 +119,13 @@ public class FfsBleModule: Module {
       self?.ensureCentral().pushDashboardDemo(text: text)
     }
 
+    // FUT-170: reveal Even's OWN native head-up dashboard by releasing our EvenHub page
+    // (the firmware dashboard can't surface while we hold a page). Re-enables head-up +
+    // applies our widget layout over BLE. Any gesture returns to our OS. Connect first.
+    Function("showStockDashboard") { [weak self] in
+      self?.ensureCentral().showStockDashboard()
+    }
+
     // FUT-169 / FUT-167: request real device info (battery %, charging, per-lens firmware
     // version) from the glasses. Answer arrives async via `onDeviceInfo`. Connect the pair
     // first. This is the real battery source (the HUD 82% was a stub) and the canary

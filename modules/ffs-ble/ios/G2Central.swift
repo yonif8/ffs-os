@@ -660,6 +660,40 @@ final class G2Central: NSObject {
     }
   }
 
+  /// Reveal the FIRMWARE'S OWN native head-up dashboard (Even's real LVGL UI) by RELEASING
+  /// our EvenHub page. While our OS holds a page the stock dashboard can never surface; this
+  /// shuts our page down (cmd 9), re-enables the head-up trigger (we disable it by default),
+  /// and arranges the widgets our way over BLE (service 0x01) — so the user sees Even's
+  /// gorgeous dashboard, styled by us, NO firmware patch. Touchpad gestures still arrive over
+  /// BLE, so the next screen (showText/showImage re-creates a fresh page) is the way back.
+  /// This is the real FUT-170 deliverable — bring THEIR dashboard in, not a text clone.
+  func showStockDashboard() {
+    queue.async { [weak self] in
+      guard let self = self else { return }
+      guard self.pairReadyLocked() else {
+        self.log("showStockDashboard ignored — pair not ready (connect both lenses first)"); return
+      }
+      let reveal: () -> Void = { [weak self] in
+        guard let self = self else { return }
+        // stop any pixel loop, then release our page so the firmware owns the HUD.
+        self.stopAnimationLocked()
+        self.sendEvenHubLocked(
+          G2EvenHub.shutdownPage(magicRandom: self.counters.nextMagic()), to: .right)
+        self.pageCreated = false  // next page re-creates fresh — that's the way back
+        // re-enable the head-up trigger so Even's native dashboard renders on look-up.
+        self.sendG2SettingLocked(
+          G2Setting.setHeadUpSwitch(magicRandom: self.counters.nextMagic(), enabled: true), to: .both)
+        // arrange the widgets our way over BLE — styling THEIR UI, no firmware patch.
+        self.sendDashboardLocked(
+          G2Dashboard.displayConfig(magicRandom: self.counters.nextMagic(), widgetOrder: [3, 1, 2, 4, 5]),
+          to: .both)
+        self.log("showStockDashboard: released our page + head-up ON — Even's native dashboard now shows (look up)")
+      }
+      if self.sessionAuthed { reveal() } else { self.runAuthLocked { [weak self] in
+        self?.startHeartbeatsLocked(); reveal() } }
+    }
+  }
+
   /// Run `body` on the CB queue after `ms` milliseconds.
   private func schedule(_ ms: Int, _ body: @escaping () -> Void) {
     queue.asyncAfter(deadline: .now() + .milliseconds(ms), execute: body)
