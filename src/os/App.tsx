@@ -22,7 +22,7 @@ import { screenOwner } from "./reclaim";
 import { PhoneNav, type PhoneCtx } from "./phone/nav";
 import { homeScreen } from "./phone/screens";
 
-const APP_VERSION = "0.10.9";
+const APP_VERSION = "0.10.10";
 
 // FUT-167 Stage 2 — CFW + stock-restore images (hosted on the private slsrc server, NOT
 // bundled: this repo is public and the firmware is Even's copyrighted image). Downloaded
@@ -32,6 +32,21 @@ const CFW_SHA = "5c1539fd39c599e6035f6a8ec0779ba687c250d342a24c21a39952fed6c56aa
 const STOCK_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_stock.bin";
 const STOCK_SHA = "f4dfb0b49ad3de3c2daf17f8a27a157c3dc98411d6a0d3ab2cfd0918f41b9afa";
 const WARRANTY_PHRASE = "my warranty is void";
+
+// FUT-167 soft precheck — a self-attested readiness checklist that must be
+// acknowledged (AND the warranty phrase) before a real flash arms. Right-sized to
+// the ACTUAL risk: Yoni's clean on-face official flash proved the battery-brick
+// vector is minor (near-zero power), so the battery floor is a SOFT self-confirm,
+// not a device read. The real risk is BLE dropping across the ~5-min window, so the
+// high-value items are stay-close / stay-foregrounded / screen-on. Items are user
+// attestations (the app does not read battery or hold a wake-lock — those are
+// offered later follow-ups), so the wording claims nothing the app doesn't enforce.
+const PRECHECK_ITEMS: string[] = [
+  "Glasses are charged (≥25% — soft floor; near-zero power flash, so just insurance)",
+  "Phone stays within ~1 m of the glasses the whole time — I won't walk away (~5 min)",
+  "I'll keep this app open + foregrounded and my screen ON so it won't lock mid-flash",
+  "Glasses are stable/worn and won't be handled or moved during the flash",
+];
 
 function healthColor(h: ConnectionHealth): string {
   switch (h) {
@@ -56,6 +71,7 @@ export default function App() {
   const [flashFrac, setFlashFrac] = useState<number>(0);
   const [flashBusy, setFlashBusy] = useState<boolean>(false);
   const [warranty, setWarranty] = useState<string>("");
+  const [precheck, setPrecheck] = useState<boolean[]>(() => PRECHECK_ITEMS.map(() => false));
 
   // Live refs so the nav's context getters always read current session state.
   const btRef = useRef(bt);
@@ -103,14 +119,24 @@ export default function App() {
     return () => sub.remove();
   }, []);
 
-  const armed = warranty.trim() === WARRANTY_PHRASE;
+  // FUT-167 soft precheck: a real flash arms ONLY when the warranty phrase is typed
+  // AND every readiness item is acknowledged. Single source of truth — both the FLASH
+  // CFW and Restore Stock buttons gate on `armed`; there is no other arming path.
+  const precheckDone = precheck.every(Boolean);
+  const armed = warranty.trim() === WARRANTY_PHRASE && precheckDone;
   const startFlash = (url: string, sha: string, dryRun: boolean) => {
     if (!bt.pairReady || flashBusy) return;
     setFlashBusy(true);
     setFlashMsg("starting…");
     setFlashFrac(0);
-    glog.emit("os", "flash_start", { dryRun, url });
+    glog.emit("os", "flash_start", { dryRun, url, precheckAcked: dryRun ? null : precheckDone });
     FfsBle.startCfwFlash(url, sha, dryRun);
+    // Real-flash safety: disarm immediately so the button can't be re-fired by accident.
+    // A second real flash must re-type the warranty phrase AND re-confirm the checklist.
+    if (!dryRun) {
+      setWarranty("");
+      setPrecheck(PRECHECK_ITEMS.map(() => false));
+    }
   };
 
   // Own the screen while the pair is ready: start the reclaim manager, paint the current
@@ -249,8 +275,36 @@ export default function App() {
           </Text>
         ) : null}
 
+        <Text style={[styles.meta, { marginTop: 14, color: theme.text }]}>
+          Readiness check — confirm each before arming (self-attested; the app does not
+          read battery or hold your screen awake — you do):
+        </Text>
+        {PRECHECK_ITEMS.map((item, i) => (
+          <Pressable
+            key={i}
+            style={styles.checkRow}
+            disabled={flashBusy}
+            onPress={() =>
+              setPrecheck((prev) => {
+                const next = prev.slice();
+                next[i] = !next[i];
+                return next;
+              })
+            }
+          >
+            <Text style={[styles.checkBox, precheck[i] && styles.checkBoxOn]}>
+              {precheck[i] ? "☑" : "☐"}
+            </Text>
+            <Text style={styles.checkLabel}>{item}</Text>
+          </Pressable>
+        ))}
+        <Text style={[styles.meta, { marginTop: 8, color: theme.warn }]}>
+          Biggest real risk is BLE dropping mid-flash — keep the phone right next to the
+          glasses and the app open the whole ~5 min. A clean interrupted write can brick.
+        </Text>
+
         <Text style={[styles.meta, { marginTop: 12, color: theme.danger }]}>
-          Real flash voids warranty + can brick. Type "{WARRANTY_PHRASE}" to arm:
+          Real flash voids warranty + can brick. Type "{WARRANTY_PHRASE}" to arm{precheckDone ? "" : " (after the checks above)"}:
         </Text>
         <TextInput
           style={styles.input}
@@ -341,6 +395,10 @@ const styles = StyleSheet.create({
     fontFamily: "Menlo",
     fontSize: 13,
   },
+  checkRow: { flexDirection: "row", alignItems: "flex-start", marginTop: 8 },
+  checkBox: { color: theme.textDim, fontSize: 18, marginRight: 8, lineHeight: 20 },
+  checkBoxOn: { color: theme.accent },
+  checkLabel: { color: theme.text, fontSize: 13, flex: 1, lineHeight: 18 },
   section: { color: theme.textDim, fontSize: 12, marginBottom: 6, marginTop: 4 },
   dim: { color: theme.textDim, fontSize: 12 },
   logBox: {
