@@ -22,7 +22,7 @@ import { screenOwner } from "./reclaim";
 import { PhoneNav, type PhoneCtx } from "./phone/nav";
 import { homeScreen } from "./phone/screens";
 
-const APP_VERSION = "0.10.13";
+const APP_VERSION = "0.10.14";
 
 // FUT-167 Stage 2 — CFW + stock-restore images (hosted on the private slsrc server, NOT
 // bundled: this repo is public and the firmware is Even's copyrighted image). Downloaded
@@ -176,7 +176,7 @@ export default function App() {
       const msToNextMinute = 60_000 - (Date.now() % 60_000);
       timer = setTimeout(() => {
         const nav = navRef.current!;
-        if (!nav.onImageScreen()) screenOwner.reclaimNow();
+        if (!nav.ownsHudSurface()) screenOwner.reclaimNow();
         scheduleNextMinute();
       }, msToNextMinute + 50);
     };

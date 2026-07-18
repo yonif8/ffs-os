@@ -18,7 +18,7 @@
 
 import FfsBle, { type G2GestureName } from "../../../modules/ffs-ble";
 
-export type ScreenKind = "list" | "text" | "image";
+export type ScreenKind = "list" | "text" | "image" | "anim";
 
 /** Live context the dynamic screens read at paint time (connection, version, etc.). */
 export interface PhoneCtx {
@@ -47,6 +47,8 @@ export interface Screen {
   items?: MenuItem[];
   /** For `text` screens: dynamic body lines (rendered under the title). */
   body?: (ctx: PhoneCtx) => string[];
+  /** For `anim` screens: the animation id passed to FfsBle.playAnimation (FUT-165). */
+  animId?: string;
 }
 
 // HUD ~= 7 text rows at the default font. Reserve row 1 (status bar) + row 2 (title);
@@ -77,6 +79,13 @@ export class PhoneNav {
   /** True while the current screen renders the image path (so callers can skip text repaints). */
   onImageScreen(): boolean {
     return this.top().screen.kind === "image";
+  }
+
+  /** True while the current screen OWNS the HUD surface (image OR live animation) — text
+   *  repaints (e.g. the minute clock) must be suppressed so they don't clobber it. */
+  ownsHudSurface(): boolean {
+    const k = this.top().screen.kind;
+    return k === "image" || k === "anim";
   }
 
   /** Route a gesture into navigation. Repaints only if state actually changed. */
@@ -129,6 +138,7 @@ export class PhoneNav {
   /** Pop one screen. Returns whether anything changed. */
   back(): boolean {
     if (this.stack.length > 1) {
+      if (this.top().screen.kind === "anim") FfsBle.stopAnimation();
       this.stack.pop();
       return true;
     }
@@ -137,14 +147,22 @@ export class PhoneNav {
 
   /** Jump straight to the root home screen. */
   goHome(): void {
+    if (this.top().screen.kind === "anim") FfsBle.stopAnimation();
     this.stack = [{ screen: this.stack[0].screen, sel: 0 }];
     this.onChange();
   }
 
   /** Paint the current screen to the HUD (image screens use the raw-image path). */
   async paint(): Promise<void> {
-    if (this.onImageScreen()) {
+    const screen = this.top().screen;
+    if (screen.kind === "image") {
       FfsBle.showImage();
+      return;
+    }
+    if (screen.kind === "anim") {
+      // Start streaming pixel frames to the HUD (FUT-165). showText/showImage on the driver
+      // side auto-stop this loop, and back()/goHome() call stopAnimation explicitly.
+      if (screen.animId) FfsBle.playAnimation(screen.animId);
       return;
     }
     FfsBle.showText(this.renderText().join("\n"));

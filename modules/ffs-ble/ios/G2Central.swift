@@ -646,6 +646,7 @@ final class G2Central: NSObject {
   }
 
   private func sendTextPageLocked(_ text: String) {
+    stopAnimationLocked()  // a text surface replaces the page — never push frames into it
     let rebuild = pageCreated
     let msg = G2EvenHub.textPageMessage(
       text: text, rebuild: rebuild, magicRandom: counters.nextMagic())
@@ -766,6 +767,7 @@ final class G2Central: NSObject {
   }
 
   private func sendImagePageLocked() {
+    stopAnimationLocked()  // the static Image Test replaces the page — stop any anim loop
     guard let bmp = G2EvenHub.testImageBmp() else {
       log("showImage: BMP build failed")
       return
@@ -874,6 +876,114 @@ final class G2Central: NSObject {
     resolve?(success)
   }
 
+  // MARK: - FUT-165 animation engine (CFW mode-2 fast frames)
+
+  private var animActive = false
+  private var animId = ""
+  private var animFrame = 0
+  private var animContainerReady = false
+  private var animSession: Int32 = 0
+  private static let ANIM_CID: Int32 = 2          // distinct from showImage (1) + evt-0 (0)
+  private static let ANIM_NAME = "ffs-anim"
+  private static let ANIM_FRAME_MS = 33           // ~30fps ceiling; real rate is drain-gated
+  private static let ANIM_MAX_PENDING = 48        // right-lens queue depth → drop-if-busy
+
+  /// Public: play an on-glass animation by id (see G2Anim.ids). Creates ONE persistent
+  /// 576×288 container, then streams CFW mode-2 frames fire-and-forget, drain-gated so the
+  /// shared write queue never backs up unbounded. Auths first if needed.
+  func playAnimation(_ id: String) {
+    queue.async { [weak self] in
+      guard let self = self else { return }
+      guard self.pairReadyLocked() else {
+        self.log("playAnimation ignored — pair not ready (connect both lenses first)"); return
+      }
+      let start: () -> Void = { [weak self] in
+        guard let self = self else { return }
+        self.animId = id
+        self.animFrame = 0
+        self.animActive = true
+        self.log("anim: play \(id)")
+        self.ensureAnimContainerLocked { [weak self] in self?.animTickLocked() }
+      }
+      if self.sessionAuthed { start() } else { self.runAuthLocked { [weak self] in
+        self?.startHeartbeatsLocked(); start() } }
+    }
+  }
+
+  /// Public: stop the running animation. The next text/image surface rebuilds the page.
+  func stopAnimation() {
+    queue.async { [weak self] in self?.stopAnimationLocked() }
+  }
+
+  /// Stop the frame loop. Called on tap-back (JS), and on ANY surface change / disconnect /
+  /// flash so we never push frames into a container the OS just repurposed. (council fix)
+  private func stopAnimationLocked() {
+    if animActive { log("anim: stop \(animId)") }
+    animActive = false
+    animId = ""
+    animContainerReady = false
+  }
+
+  private func ensureAnimContainerLocked(_ done: @escaping () -> Void) {
+    if animContainerReady { done(); return }
+    let ic = G2EvenHub.imageContainer(
+      x: 0, y: 0, width: 576, height: 288,
+      containerID: G2Central.ANIM_CID, containerName: G2Central.ANIM_NAME)
+    let rebuild = pageCreated
+    let page = G2EvenHub.imagePageMessage(
+      imageContainer: ic, rebuild: rebuild, magicRandom: counters.nextMagic())
+    sendEvenHubLocked(page, to: .right)
+    pageCreated = true
+    animContainerReady = true
+    log("anim: \(rebuild ? "rebuilt" : "created") 576×288 container — 700ms settle")
+    schedule(700) { done() }
+  }
+
+  private func animTickLocked() {
+    guard animActive, !flashActive, pairReadyLocked() else { return }
+    // Drain-gate: if the right lens's paced FIFO is backed up, DROP this frame and retry
+    // shortly — bounds the shared queue so anim frames can't starve text/gesture/flash.
+    let pending = lenses[.right]?.writeQueue.count ?? 0
+    if pending > G2Central.ANIM_MAX_PENDING {
+      schedule(12) { [weak self] in self?.animTickLocked() }
+      return
+    }
+    let pixels = G2Anim.frame(animId, animFrame)
+    let n = animFrame
+    animFrame += 1
+    if let payload = G2Anim.mode2Payload(pixels) {
+      sendAnimFrameLocked(payload)
+      if n % 15 == 0 { log("anim[\(animId)]: frame \(n) payload=\(payload.count)B pending=\(pending)") }
+    }
+    schedule(G2Central.ANIM_FRAME_MS) { [weak self] in self?.animTickLocked() }
+  }
+
+  /// Fragment a mode-2 payload into updateImageRawData messages and enqueue all their
+  /// transport packets as ONE contiguous fire-and-forget message (no per-fragment ACK —
+  /// animation accepts drops; the drain-gate bounds the queue).
+  private func sendAnimFrameLocked(_ payload: Data) {
+    guard !payload.isEmpty else { return }
+    animSession = (animSession &+ 1) & 0xff
+    let total = Int32(payload.count)
+    var packets: [Data] = []
+    var offset = 0
+    var fragIdx: Int32 = 0
+    while offset < payload.count {
+      let end = min(offset + G2Central.IMG_FRAGMENT_SIZE, payload.count)
+      let chunk = payload.subdata(in: offset..<end)
+      let update = G2EvenHub.imageRawDataUpdate(
+        containerID: G2Central.ANIM_CID, containerName: G2Central.ANIM_NAME,
+        mapSessionId: animSession, mapTotalSize: total, compressMode: 0,
+        mapFragmentIndex: fragIdx, mapFragmentPacketSize: Int32(chunk.count), mapRawData: chunk)
+      let msg = G2EvenHub.updateImageMessage(update, magicRandom: counters.nextMagic())
+      packets.append(contentsOf: counters.packets(
+        serviceId: G2ServiceID.evenHub.rawValue, payload: msg, reserveFlag: true))
+      offset = end
+      fragIdx += 1
+    }
+    enqueueLocked(packets, to: .right)
+  }
+
   /// Auth handshake: authL→left, authR→right, pipeRoleChange→right, timeSync→both,
   /// spaced 200ms (P0 spec). Fires `done` on the queue after the final step.
   private func runAuthLocked(_ done: @escaping () -> Void) {
@@ -943,6 +1053,7 @@ final class G2Central: NSObject {
     sessionAuthed = false
     heartbeatRunning = false
     pageCreated = false
+    stopAnimationLocked()  // FUT-165: kill the frame loop when a lens drops (council fix)
     // Fail any in-flight image fragment so its transfer chain unwinds.
     imgAckTimer?.cancel()
     imgAckTimer = nil
@@ -1322,6 +1433,7 @@ extension G2Central {
   /// then (dryRun=false only) runs the real per-lens OTA flash. dryRun=true stops before
   /// any write. Reports via onFlashProgress.
   func startCfwFlash(url urlStr: String, expectedSha256 sha256: String, dryRun: Bool) {
+    queue.async { [weak self] in self?.stopAnimationLocked() }  // FUT-165: no frames during a flash
     flashQueue.async { [weak self] in
       guard let self = self else { return }
       self.flashProgress(dryRun ? "validating (dry-run, no writes)…" : "preparing flash…", 0.02)
