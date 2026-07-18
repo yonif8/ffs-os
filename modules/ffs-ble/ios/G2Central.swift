@@ -889,7 +889,7 @@ final class G2Central: NSObject {
   private let animQueue = DispatchQueue(label: "com.ffs.g2anim", qos: .userInitiated)
   private static let ANIM_CID: Int32 = 2          // distinct from showImage (1) + evt-0 (0)
   private static let ANIM_NAME = "ffs-anim"
-  private static let ANIM_FRAME_MS = 45           // ~22fps ceiling; heavy frames self-throttle
+  private static let ANIM_FRAME_MS = 35           // ~28fps ceiling; heavy frames self-throttle
   private static let ANIM_GATE_LOW = 5            // push next frame only when the pipe is ~drained
 
   /// Public: play an on-glass animation by id (see G2Anim.ids). Creates ONE persistent

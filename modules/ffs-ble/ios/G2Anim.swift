@@ -210,25 +210,25 @@ enum G2Anim {
 
   private static func starfield(_ f: Int) -> [UInt8] {
     var buf = [UInt8](repeating: 0, count: N)
-    // deterministic pseudo-stars, moving left, wrapping
+    // deterministic pseudo-stars, moving left, wrapping. Stars are 1-3px DISCS (single
+    // pixels are invisible on the 576×288 HUD — that was the "stars didn't work" report).
     var seed: UInt64 = 0x9E3779B97F4A7C15
     func rnd() -> Int { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Int((seed >> 33) & 0x7fffffff) }
-    for _ in 0..<140 {
+    for _ in 0..<110 {
       let baseX = rnd() % W
       let y = rnd() % H
-      let depth = 1 + rnd() % 3          // 1..3
-      let x = ((baseX - f * depth) % W + W) % W
-      let bright = UInt8(90 + depth * 55)
-      put(&buf, x, y, bright)
-      if depth == 3 { put(&buf, x - 1, y, bright / 2) }  // little streak for near stars
+      let depth = 1 + rnd() % 3          // 1..3 (near stars bigger/brighter/faster)
+      let x = ((baseX - f * (depth * 2)) % W + W) % W
+      let bright = UInt8(min(255, 130 + depth * 45))
+      disc(&buf, x, y, depth, bright)     // radius 1..3
     }
     return buf
   }
 
   private static func videoDemo(_ f: Int) -> [UInt8] {
-    // A short looping "video": a pulsing checker + a sweeping bar. Rendered at 144×72 then
-    // upscaled — keeps the compressed frame small so it can't saturate the BLE link.
-    let pw = 144, ph = 72
+    // A short looping "video": a pulsing checker + a sweeping bar. Rendered at 96×48 then
+    // upscaled — keeps the compressed frame small (less lag; can't saturate the BLE link).
+    let pw = 96, ph = 48
     var small = [UInt8](repeating: 0, count: pw * ph)
     let phase = f % 90
     let pulse = UInt8(60 + Int(80 * (0.5 + 0.5 * sin(Double(f) * 0.1))))
@@ -246,7 +246,10 @@ enum G2Anim {
 
   // MARK: - CoreGraphics text/image render (static image + marquee)
 
-  /// Render into an 8bpp grayscale buffer, flipped so drawing is TOP-DOWN.
+  /// Render into an 8bpp grayscale buffer. We draw in CoreGraphics' NATIVE bottom-up coords
+  /// (no in-context flip — that was the marquee-blank bug), then flip the row order at the
+  /// end so the display gets a top-down buffer. `y` in the draw closure is measured from the
+  /// BOTTOM; after the flip, a larger y appears nearer the TOP of the HUD.
   private static func renderGray(_ draw: (CGContext) -> Void) -> [UInt8] {
     var buf = [UInt8](repeating: 0, count: N)
     let cs = CGColorSpaceCreateDeviceGray()
@@ -255,16 +258,22 @@ enum G2Anim {
         data: raw.baseAddress, width: W, height: H, bitsPerComponent: 8,
         bytesPerRow: W, space: cs, bitmapInfo: CGImageAlphaInfo.none.rawValue)
       else { return }
-      // CG origin is bottom-left; flip so our draw calls are top-down.
-      ctx.translateBy(x: 0, y: CGFloat(H))
-      ctx.scaleBy(x: 1, y: -1)
+      ctx.setShouldAntialias(true)
       draw(ctx)
     }
-    return buf
+    // CG rendered bottom-up; the display wants top-down → reverse row order.
+    var out = [UInt8](repeating: 0, count: N)
+    for y in 0..<H {
+      let src = (H - 1 - y) * W
+      let dst = y * W
+      for x in 0..<W { out[dst + x] = buf[src + x] }
+    }
+    return out
   }
 
   private static func drawText(_ ctx: CGContext, _ text: String, x: CGFloat, y: CGFloat, size: CGFloat, gray: CGFloat = 1.0) {
-    // CoreText-native attribute keys (no UIKit/AppKit dependency).
+    // CoreText-native attribute keys (no UIKit/AppKit). Drawn in CG native coords; renderGray
+    // flips the buffer, so no per-text flip here.
     let font = CTFontCreateWithName("Helvetica-Bold" as CFString, size, nil)
     guard let color = CGColor(colorSpace: CGColorSpaceCreateDeviceGray(), components: [gray, 1.0]) else { return }
     let attrs: [CFString: Any] = [
@@ -273,14 +282,9 @@ enum G2Anim {
     ]
     guard let attr = CFAttributedStringCreate(nil, text as CFString, attrs as CFDictionary) else { return }
     let line = CTLineCreateWithAttributedString(attr)
-    // our context is already Y-flipped (top-down); flip text glyphs back upright
-    ctx.saveGState()
     ctx.textMatrix = .identity
-    ctx.translateBy(x: x, y: y)
-    ctx.scaleBy(x: 1, y: -1)
-    ctx.textPosition = .zero
+    ctx.textPosition = CGPoint(x: x, y: y)
     CTLineDraw(line, ctx)
-    ctx.restoreGState()
   }
 
   private static func staticImage() -> [UInt8] {
@@ -297,8 +301,9 @@ enum G2Anim {
       ctx.setStrokeColor(CGColor(colorSpace: cs, components: [1, 1])!)
       ctx.setLineWidth(6)
       ctx.stroke(CGRect(x: 6, y: 6, width: CGFloat(W - 12), height: CGFloat(H - 12)))
-      drawText(ctx, "FFS OS", x: 150, y: 120, size: 96, gray: 1.0)
-      drawText(ctx, "custom firmware · 576×288", x: 120, y: 200, size: 30, gray: 0.9)
+      // y is measured from the BOTTOM (renderGray flips) — larger y = higher on screen.
+      drawText(ctx, "FFS OS", x: 150, y: 165, size: 96, gray: 1.0)
+      drawText(ctx, "custom firmware · 576×288", x: 120, y: 95, size: 30, gray: 0.9)
     }
   }
 
