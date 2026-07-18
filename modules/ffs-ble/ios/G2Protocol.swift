@@ -287,6 +287,16 @@ enum G2EvenHub {
     let empty = G2ProtobufWriter().data
     return message(cmd: .heartbeat, subField: 14, sub: empty, magicRandom: magicRandom)
   }
+
+  /// Shut down our EvenHub page so the firmware releases the HUD — this is how the stock
+  /// DASHBOARD (or any firmware idle screen) gets to show; while we hold a page it never can.
+  /// Mirrors MentraOS `shutdownMessage` (cmd shutdownPage=9, sub-field 11, ShutdownContainer{
+  /// f1=exitMode }). FUT-170. Pairs with pageCreated=false so our next page re-creates fresh.
+  static func shutdownPage(magicRandom: Int32, exitMode: Int32 = 0) -> Data {
+    var c = G2ProtobufWriter()
+    c.writeInt32Field(1, exitMode)
+    return message(cmd: .shutdownPage, subField: 11, sub: c.data, magicRandom: magicRandom)
+  }
 }
 
 // MARK: - EvenHub image containers (P4, FUT-153)

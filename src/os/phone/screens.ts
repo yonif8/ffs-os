@@ -54,6 +54,26 @@ const animations = list("animations", "Animations", [
   { label: "Even-AI swirl: STOP", hint: "", action: () => FfsBle.showAiSwirl(false) },
 ]);
 
+// ---- Dashboard (OUR OWN, in-OS — FUT-170) ---------------------------------
+// Incorporated INTO our OS (Yoni steer): instead of shutting down our page to reveal the
+// firmware's stock dashboard, we render our own dashboard screen — clock + date + battery +
+// link — as a normal navigable screen. No page release, no getting stuck; fully ours to
+// style (informed by Even's LVGL dashboard layout). Live-updates on the minute-clock repaint.
+
+const dashboard = text("dashboard", "Dashboard", (ctx) => {
+  const now = new Date();
+  const time = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const date = now.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+  const bat = ctx.battery();
+  const batStr = bat < 0 ? "--" : `${bat}%`;
+  return [
+    `        ${time}`,
+    `     ${date}`,
+    "",
+    `   battery ${batStr}    ${ctx.pairReady() ? "BT ok" : "BT --"}`,
+  ];
+});
+
 // ---- Clock (real live time) -----------------------------------------------
 
 const clock = text("clock", "Clock", () => {
@@ -94,8 +114,10 @@ export const homeScreen: Screen = list("home", "Home", [
   { label: "Animations", hint: ">", target: animations },
   { label: "Clock", hint: ">", target: clock },
   { label: "Image Test", hint: ">", target: image("imgtest", "Image Test") },
+  { label: "Dashboard", hint: ">", target: dashboard },
   { label: "About", hint: ">", target: about },
   { label: "Bluetooth", hint: ">", target: bluetooth },
-  // FUT-170 PoC: push custom text into the firmware's native dashboard, then look UP.
-  { label: "Dashboard demo", hint: "look up", action: () => FfsBle.pushDashboardDemo("Hello from FFS OS") },
+  // FUT-170 RE capability (separate): push custom content into the firmware's STOCK dashboard
+  // over BLE (proves dashboard-protocol control). Our own Dashboard above is the primary UI.
+  { label: "Push to stock dash", hint: "BLE", action: () => FfsBle.pushDashboardDemo("Hello from FFS OS") },
 ]);
