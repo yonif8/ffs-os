@@ -1045,9 +1045,17 @@ final class G2Central: NSObject {
               self.log("runAuth: sent gesture_ctrl init → both")
               self.schedule(200) { [weak self] in
                 guard let self = self else { return }
-                self.sessionAuthed = true
-                self.log("runAuth: handshake complete (session authed)")
-                done()
+                // Disable the stock head-up DASHBOARD so it can't pop over our OS (Yoni ask).
+                self.sendG2SettingLocked(
+                  G2Setting.setHeadUpSwitch(magicRandom: self.counters.nextMagic(), enabled: false),
+                  to: .both)
+                self.log("runAuth: disabled stock head-up dashboard → both")
+                self.schedule(200) { [weak self] in
+                  guard let self = self else { return }
+                  self.sessionAuthed = true
+                  self.log("runAuth: handshake complete (session authed)")
+                  done()
+                }
               }
             }
           }
