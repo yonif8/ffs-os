@@ -544,6 +544,62 @@ enum G2EvenAI {
   }
 }
 
+// MARK: - Device settings/info (service 0x09) — read battery + firmware version (FUT-169)
+//
+// The glasses answer a "basic settings" request with their real battery %, charging
+// state, and per-lens firmware version STRING — over service 0x09 (g2Setting), reply on
+// CHAR_NOTIFY. This is the ONLY real battery source (the HUD's 82% was a stub) AND the
+// read-back the canary flash uses to prove a flash took (FUT-167). Encoding mirrors
+// MentraOS G2.swift requestInfo() / parseDeviceRequestResponse(), live-proven against the
+// official app: G2SettingPackage{ f1=commandId, f2=magic, f4=DeviceReceiveRequestFromApp }.
+enum G2Setting {
+  /// G2SettingCommandId.deviceReceiveRequest — "request info FROM glasses".
+  static let CMD_DEVICE_RECEIVE_REQUEST: Int32 = 2
+
+  /// Build the basic-info request: G2SettingPackage{ f1=cmd(2), f2=magic,
+  /// f4=DeviceReceiveRequestFromApp{ f1=settingInfoType=APP_REQUIRE_BASIC_SETTING(1) } }.
+  static func requestDeviceInfo(magicRandom: Int32) -> Data {
+    var req = G2ProtobufWriter()
+    req.writeInt32Field(1, 1)  // settingInfoType = APP_REQUIRE_BASIC_SETTING
+    var w = G2ProtobufWriter()
+    w.writeInt32Field(1, CMD_DEVICE_RECEIVE_REQUEST)
+    w.writeInt32Field(2, magicRandom)
+    w.writeMessageField(4, req.data)
+    return w.data
+  }
+
+  struct DeviceInfo {
+    var leftVersion: String?
+    var rightVersion: String?
+    var battery: Int?
+    var charging: Bool?
+  }
+
+  /// Parse a service-0x09 response payload into DeviceInfo, or nil if it isn't a
+  /// device-info response. The response is a G2SettingPackage whose inner
+  /// DeviceReceiveRequestFromApp (field 4, or field 5 = DeviceSendInfoToApp on some
+  /// firmwares) carries: f5=leftVersion(str), f6=rightVersion(str), f12=battery(int
+  /// 0-100), f13=charging(int). We do NOT hard-gate on the command id — instead we
+  /// require the inner message to actually contain at least one known field, which
+  /// safely rejects any other service-0x09 traffic.
+  static func parseDeviceInfo(_ payload: Data) -> DeviceInfo? {
+    var r = G2ProtobufReader(payload)
+    let f = r.parseFields()
+    guard let inner = (f[4] as? Data) ?? (f[5] as? Data) else { return nil }
+    var ir = G2ProtobufReader(inner)
+    let inf = ir.parseFields()
+    var out = DeviceInfo()
+    if let d = inf[5] as? Data { out.leftVersion = String(data: d, encoding: .utf8) }
+    if let d = inf[6] as? Data { out.rightVersion = String(data: d, encoding: .utf8) }
+    if let b = inf[12] as? Int32, b >= 0, b <= 100 { out.battery = Int(b) }
+    if let c = inf[13] as? Int32 { out.charging = c != 0 }
+    if out.leftVersion == nil && out.rightVersion == nil && out.battery == nil && out.charging == nil {
+      return nil
+    }
+    return out
+  }
+}
+
 // MARK: - Sequence counters
 
 /// Rolling syncId (per transport packet) + magicRandom (per message). magicRandom

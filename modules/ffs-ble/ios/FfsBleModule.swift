@@ -33,6 +33,7 @@ public class FfsBleModule: Module {
       "onPairReady",
       "onNotify",
       "onGesture",
+      "onDeviceInfo",
       "onDisconnected",
       "onFlashProbe",
       "onFlashProgress"
@@ -101,6 +102,14 @@ public class FfsBleModule: Module {
       self?.ensureCentral().startCfwFlash(url: url, expectedSha256: sha256, dryRun: dryRun)
     }
 
+    // FUT-169 / FUT-167: request real device info (battery %, charging, per-lens firmware
+    // version) from the glasses. Answer arrives async via `onDeviceInfo`. Connect the pair
+    // first. This is the real battery source (the HUD 82% was a stub) and the canary
+    // flash's firmware-version read-back.
+    Function("requestDeviceInfo") { [weak self] in
+      self?.ensureCentral().requestDeviceInfo()
+    }
+
     // P3: tear down the EvenHub session (stops the keep-alive heartbeat).
     Function("stopSession") { [weak self] in
       self?.central?.stopSession()
@@ -156,6 +165,14 @@ public class FfsBleModule: Module {
     }
     c.onGesture = { [weak self] (gesture, side) in
       self?.sendEvent("onGesture", ["gesture": gesture, "side": side])
+    }
+    c.onDeviceInfo = { [weak self] (leftVersion, rightVersion, battery, charging) in
+      self?.sendEvent("onDeviceInfo", [
+        "leftVersion": leftVersion as Any,
+        "rightVersion": rightVersion as Any,
+        "battery": battery as Any,
+        "charging": charging as Any,
+      ])
     }
     c.onFlashProbe = { [weak self] (leftReady, rightReady, detail) in
       self?.sendEvent("onFlashProbe", [

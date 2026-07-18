@@ -76,6 +76,18 @@ export interface OnGestureEvent {
   side: G2Side;
 }
 
+/**
+ * Real device info read back from the glasses (FUT-169 battery + FUT-167 canary
+ * firmware-version read-back). Any field may be null if the glasses omitted it. Battery
+ * is an aggregate 0–100; versions are per-lens firmware strings (e.g. "2.2.6.10").
+ */
+export interface OnDeviceInfoEvent {
+  leftVersion: string | null;
+  rightVersion: string | null;
+  battery: number | null;
+  charging: boolean | null;
+}
+
 export interface OnDisconnectedEvent {
   name: string;
   /** Which lens dropped. The other lens's state is unaffected. */
@@ -114,6 +126,7 @@ export interface FfsBleEvents {
   onPairReady: OnPairReadyEvent;
   onNotify: OnNotifyEvent;
   onGesture: OnGestureEvent;
+  onDeviceInfo: OnDeviceInfoEvent;
   onDisconnected: OnDisconnectedEvent;
   onFlashProbe: OnFlashProbeEvent;
   onFlashProgress: OnFlashProgressEvent;
@@ -169,6 +182,13 @@ interface FfsBleNativeModule {
    * false) MUST be gated behind the warranty confirmation in the UI.
    */
   startCfwFlash(url: string, sha256: string, dryRun: boolean): void;
+  /**
+   * FUT-169 / FUT-167: request real device info (battery %, charging, per-lens firmware
+   * version) from the glasses. The answer arrives via the `onDeviceInfo` event. Connect
+   * the pair first. This is the real battery source (the HUD 82% was a stub) and the
+   * canary flash's firmware-version read-back.
+   */
+  requestDeviceInfo(): void;
   /** P3: tear down the EvenHub session (stops the keep-alive heartbeat). */
   stopSession(): void;
   addListener<E extends FfsBleEventName>(
