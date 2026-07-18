@@ -22,7 +22,7 @@ import { screenOwner } from "./reclaim";
 import { PhoneNav, type PhoneCtx } from "./phone/nav";
 import { homeScreen } from "./phone/screens";
 
-const APP_VERSION = "0.10.10";
+const APP_VERSION = "0.10.11";
 
 // FUT-167 Stage 2 — CFW + stock-restore images (hosted on the private slsrc server, NOT
 // bundled: this repo is public and the firmware is Even's copyrighted image). Downloaded
@@ -181,6 +181,12 @@ export default function App() {
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar style="light" />
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={true}
+      >
       <Text style={styles.title}>FFS Glasses OS</Text>
       <Text style={styles.sub}>phone OS on the HUD · drive it with the touchpad</Text>
       <Text style={styles.sub}>v{APP_VERSION} · log {session || "(starting)"}</Text>
@@ -334,13 +340,14 @@ export default function App() {
       </View>
 
       <Text style={styles.section}>Connection log</Text>
-      <ScrollView style={styles.logBox}>
+      <View style={styles.logBox}>
         {sup.log.length === 0 ? (
           <Text style={styles.dim}>no transitions yet…</Text>
         ) : (
           sup.log
             .slice()
             .reverse()
+            .slice(0, 30)
             .map((e, i) => (
               <Text key={i} style={styles.logLine}>
                 {new Date(e.at).toLocaleTimeString()}  {e.health}
@@ -348,13 +355,16 @@ export default function App() {
               </Text>
             ))
         )}
+      </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: theme.bg, paddingHorizontal: 16 },
+  safe: { flex: 1, backgroundColor: theme.bg },
+  scroll: { flex: 1 },
+  scrollContent: { paddingHorizontal: 16, paddingBottom: 48 },
   title: { color: theme.text, fontSize: 22, fontWeight: "700", marginTop: 10 },
   sub: { color: theme.textDim, fontSize: 12, marginBottom: 4 },
   card: {
@@ -402,7 +412,6 @@ const styles = StyleSheet.create({
   section: { color: theme.textDim, fontSize: 12, marginBottom: 6, marginTop: 4 },
   dim: { color: theme.textDim, fontSize: 12 },
   logBox: {
-    flex: 1,
     backgroundColor: "#010409",
     borderRadius: 10,
     padding: 10,
