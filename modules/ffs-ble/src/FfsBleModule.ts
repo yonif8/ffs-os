@@ -203,6 +203,13 @@ interface FfsBleNativeModule {
    * Look UP on the glasses to see it. Connect the pair first.
    */
   pushDashboardDemo(text: string): void;
+  /**
+   * FUT-170: reveal Even's OWN native head-up dashboard (their real LVGL UI) by RELEASING
+   * our EvenHub page — the firmware dashboard can't surface while our OS holds a page. Also
+   * re-enables the head-up trigger and applies our widget layout over BLE (no firmware patch).
+   * Look UP to see it; any touchpad gesture repaints our OS (re-creating the page). Connect first.
+   */
+  showStockDashboard(): void;
   /** P3: tear down the EvenHub session (stops the keep-alive heartbeat). */
   stopSession(): void;
   addListener<E extends FfsBleEventName>(

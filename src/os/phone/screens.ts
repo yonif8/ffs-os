@@ -54,25 +54,13 @@ const animations = list("animations", "Animations", [
   { label: "Even-AI swirl: STOP", hint: "", action: () => FfsBle.showAiSwirl(false) },
 ]);
 
-// ---- Dashboard (OUR OWN, in-OS — FUT-170) ---------------------------------
-// Incorporated INTO our OS (Yoni steer): instead of shutting down our page to reveal the
-// firmware's stock dashboard, we render our own dashboard screen — clock + date + battery +
-// link — as a normal navigable screen. No page release, no getting stuck; fully ours to
-// style (informed by Even's LVGL dashboard layout). Live-updates on the minute-clock repaint.
+// ---- Dashboard (Even's REAL native dashboard, brought in — FUT-170) --------
+// Yoni's actual ask: bring EVEN'S gorgeous firmware-rendered dashboard INTO our OS — not a
+// text clone. Opening this releases our EvenHub page (kind "stockdash" → showStockDashboard)
+// so the firmware's native LVGL dashboard surfaces on look-up (re-enables head-up + applies
+// our widget layout over BLE, no firmware patch). Any gesture repaints our OS (the way back).
 
-const dashboard = text("dashboard", "Dashboard", (ctx) => {
-  const now = new Date();
-  const time = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const date = now.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
-  const bat = ctx.battery();
-  const batStr = bat < 0 ? "--" : `${bat}%`;
-  return [
-    `        ${time}`,
-    `     ${date}`,
-    "",
-    `   battery ${batStr}    ${ctx.pairReady() ? "BT ok" : "BT --"}`,
-  ];
-});
+const dashboard: Screen = { id: "dashboard", title: "Dashboard", kind: "stockdash" };
 
 // ---- Clock (real live time) -----------------------------------------------
 
@@ -117,7 +105,7 @@ export const homeScreen: Screen = list("home", "Home", [
   { label: "Dashboard", hint: ">", target: dashboard },
   { label: "About", hint: ">", target: about },
   { label: "Bluetooth", hint: ">", target: bluetooth },
-  // FUT-170 RE capability (separate): push custom content into the firmware's STOCK dashboard
-  // over BLE (proves dashboard-protocol control). Our own Dashboard above is the primary UI.
+  // FUT-170: push custom CONTENT into Even's dashboard (Schedule widget) over BLE — proves
+  // we drive the dashboard protocol. The "Dashboard" item above surfaces the real UI itself.
   { label: "Push to stock dash", hint: "BLE", action: () => FfsBle.pushDashboardDemo("Hello from FFS OS") },
 ]);

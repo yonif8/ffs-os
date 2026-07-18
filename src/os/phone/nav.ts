@@ -18,7 +18,7 @@
 
 import FfsBle, { type G2GestureName } from "../../../modules/ffs-ble";
 
-export type ScreenKind = "list" | "text" | "image" | "anim";
+export type ScreenKind = "list" | "text" | "image" | "anim" | "stockdash";
 
 /** Live context the dynamic screens read at paint time (connection, version, etc.). */
 export interface PhoneCtx {
@@ -85,7 +85,9 @@ export class PhoneNav {
    *  repaints (e.g. the minute clock) must be suppressed so they don't clobber it. */
   ownsHudSurface(): boolean {
     const k = this.top().screen.kind;
-    return k === "image" || k === "anim";
+    // "stockdash" releases our page to the firmware's native dashboard — a text repaint
+    // would re-grab the HUD and hide it, so treat it as surface-owning too (FUT-170).
+    return k === "image" || k === "anim" || k === "stockdash";
   }
 
   /** Route a gesture into navigation. Repaints only if state actually changed. */
@@ -163,6 +165,12 @@ export class PhoneNav {
       // Start streaming pixel frames to the HUD (FUT-165). showText/showImage on the driver
       // side auto-stop this loop, and back()/goHome() call stopAnimation explicitly.
       if (screen.animId) FfsBle.playAnimation(screen.animId);
+      return;
+    }
+    if (screen.kind === "stockdash") {
+      // Release our page so Even's OWN native dashboard shows (FUT-170). A back/goHome to a
+      // text screen re-creates our page (the way out); we never paint text over it here.
+      FfsBle.showStockDashboard();
       return;
     }
     FfsBle.showText(this.renderText().join("\n"));
