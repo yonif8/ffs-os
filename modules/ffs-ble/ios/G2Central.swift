@@ -889,8 +889,8 @@ final class G2Central: NSObject {
   private let animQueue = DispatchQueue(label: "com.ffs.g2anim", qos: .userInitiated)
   private static let ANIM_CID: Int32 = 2          // distinct from showImage (1) + evt-0 (0)
   private static let ANIM_NAME = "ffs-anim"
-  private static let ANIM_FRAME_MS = 45           // ~22fps ceiling; real rate is drain-gated
-  private static let ANIM_MAX_PENDING = 40        // right-lens queue depth → drop-if-busy
+  private static let ANIM_FRAME_MS = 45           // ~22fps ceiling; heavy frames self-throttle
+  private static let ANIM_GATE_LOW = 5            // push next frame only when the pipe is ~drained
 
   /// Public: play an on-glass animation by id (see G2Anim.ids). Creates ONE persistent
   /// 576×288 container, then streams CFW mode-2 frames fire-and-forget, drain-gated so the
@@ -945,16 +945,19 @@ final class G2Central: NSObject {
 
   private func animTickLocked() {
     guard animActive, !flashActive, pairReadyLocked() else { return }
-    // Drain-gate: if the right lens's paced FIFO is backed up, DROP this frame and retry
-    // shortly — bounds the shared queue so anim frames can't starve text/gesture/flash.
+    // Breathe-gate: push the next frame ONLY once the write pipe is nearly drained, so the
+    // BLE link is never held 100% saturated (sustained saturation supervision-times-out the
+    // lens — build31's video crash). Big frames self-throttle (they take longer to drain);
+    // small frames run near the ANIM_FRAME_MS ceiling.
     let pending = lenses[.right]?.writeQueue.count ?? 0
-    if pending > G2Central.ANIM_MAX_PENDING {
-      schedule(20) { [weak self] in self?.animTickLocked() }
+    if pending > G2Central.ANIM_GATE_LOW {
+      schedule(15) { [weak self] in self?.animTickLocked() }
       return
     }
     let id = animId
     let n = animFrame
     animFrame += 1
+    let isStatic = G2Anim.isStatic(id)
     // Generate + compress OFF the CB queue (the crash fix), then hop back to enqueue.
     animQueue.async { [weak self] in
       guard let self = self else { return }
@@ -966,12 +969,17 @@ final class G2Central: NSObject {
         guard let self = self, self.animActive, self.animId == id, !self.flashActive else { return }
         if let p = payload {
           self.sendAnimFrameLocked(p)
-          if n % 8 == 0 {
+          if n % 8 == 0 || isStatic {
             let pend = self.lenses[.right]?.writeQueue.count ?? 0
-            self.log("anim[\(id)] f\(n) \(p.count)B gen=\(genMs)ms pend=\(pend)")
+            self.log("anim[\(id)] f\(n) \(p.count)B gen=\(genMs)ms pend=\(pend)\(isStatic ? " static" : "")")
           }
         } else {
           self.log("anim[\(id)] f\(n) mode2 encode FAILED")
+        }
+        // Static content: a few sends for drop-robustness, then idle (leave it on screen).
+        if isStatic && n >= 2 {
+          self.log("anim[\(id)] static displayed — loop idle")
+          return
         }
         self.schedule(G2Central.ANIM_FRAME_MS) { [weak self] in self?.animTickLocked() }
       }
