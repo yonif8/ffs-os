@@ -95,6 +95,20 @@ enum G2Anim {
 
   // MARK: - Procedural generators (pure math, top-down)
 
+  /// Nearest-neighbour upscale a small sw×sh buffer to the full W×H canvas. Rendering
+  /// heavy content small then upscaling cuts compute ~16× AND makes it compress far better
+  /// (long runs of identical pixels) — the fix for plasma/video flooding the BLE link.
+  private static func upscaleNearest(_ src: [UInt8], _ sw: Int, _ sh: Int) -> [UInt8] {
+    var out = [UInt8](repeating: 0, count: N)
+    for y in 0..<H {
+      let sy = (y * sh) / H
+      let srow = sy * sw
+      let orow = y * W
+      for x in 0..<W { out[orow + x] = src[srow + (x * sw) / W] }
+    }
+    return out
+  }
+
   @inline(__always) private static func put(_ buf: inout [UInt8], _ x: Int, _ y: Int, _ v: UInt8) {
     if x >= 0 && x < W && y >= 0 && y < H { buf[y * W + x] = v }
   }
@@ -170,21 +184,23 @@ enum G2Anim {
   }
 
   private static func plasma(_ f: Int) -> [UInt8] {
-    var buf = [UInt8](repeating: 0, count: N)
+    // Render at 1/4 linear res (144×72) then upscale — 16× less sin() compute and a much
+    // smaller compressed payload than a full 576×288 sin field.
+    let pw = 144, ph = 72
+    var small = [UInt8](repeating: 0, count: pw * ph)
     let t = Double(f) * 0.12
-    for y in 0..<H {
-      let fy = Double(y)
-      for x in 0..<W {
-        let fx = Double(x)
+    for y in 0..<ph {
+      let fy = Double(y) * 4.0
+      for x in 0..<pw {
+        let fx = Double(x) * 4.0
         var v = sin(fx / 34.0 + t)
         v += sin(fy / 28.0 - t * 0.8)
         v += sin((fx + fy) / 40.0 + t * 0.6)
         v += sin(sqrt(fx * fx + fy * fy) / 34.0 - t)
-        // v in [-4,4] -> [0,255]
-        buf[y * W + x] = UInt8(max(0, min(255, Int((v + 4.0) * 31.9))))
+        small[y * pw + x] = UInt8(max(0, min(255, Int((v + 4.0) * 31.9))))
       }
     }
-    return buf
+    return upscaleNearest(small, pw, ph)
   }
 
   private static func starfield(_ f: Int) -> [UInt8] {
