@@ -555,6 +555,25 @@ enum G2EvenAI {
 enum G2Setting {
   /// G2SettingCommandId.deviceReceiveRequest — "request info FROM glasses".
   static let CMD_DEVICE_RECEIVE_REQUEST: Int32 = 2
+  /// G2SettingCommandId.deviceReceiveInfo — "send settings TO glasses".
+  static let CMD_DEVICE_RECEIVE_INFO: Int32 = 1
+
+  /// Toggle the firmware's native head-up DASHBOARD — the stock time/notifications panel
+  /// that pops on the look-up gesture and fights our OS for the HUD. `enabled: false` makes
+  /// our OS own the display; fully reversible (send `true` to restore). Mirrors MentraOS
+  /// setHeadUpSwitch: G2SettingPackage{ f1=deviceReceiveInfo(1), f2=magic,
+  /// f3=DeviceReceiveInfoFromApp{ f4=HeadUpSetting{ f1=headUpSwitch } } }.
+  static func setHeadUpSwitch(magicRandom: Int32, enabled: Bool) -> Data {
+    var headUp = G2ProtobufWriter()
+    headUp.writeInt32Field(1, enabled ? 1 : 0)
+    var info = G2ProtobufWriter()
+    info.writeMessageField(4, headUp.data)
+    var w = G2ProtobufWriter()
+    w.writeInt32Field(1, CMD_DEVICE_RECEIVE_INFO)
+    w.writeInt32Field(2, magicRandom)
+    w.writeMessageField(3, info.data)
+    return w.data
+  }
 
   /// Build the basic-info request: G2SettingPackage{ f1=cmd(2), f2=magic,
   /// f4=DeviceReceiveRequestFromApp{ f1=settingInfoType=APP_REQUIRE_BASIC_SETTING(1) } }.
