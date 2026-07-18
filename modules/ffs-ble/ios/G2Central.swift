@@ -153,6 +153,10 @@ final class G2Central: NSObject {
   var onDisconnected: ((String, String, String?) -> Void)?
   /// (gesture, side) — a decoded touch gesture ("tap"/"double_tap"/"swipe_up"/"swipe_down").
   var onGesture: ((String, String) -> Void)?
+  /// (leftVersion?, rightVersion?, battery?, charging?) — a device-info response
+  /// (FUT-169 real battery + FUT-167 canary firmware-version read-back). Any field may
+  /// be nil if the glasses omitted it.
+  var onDeviceInfo: ((String?, String?, Int?, Bool?) -> Void)?
   /// (leftReady, rightReady, detail) — result of the zero-write flash-channel probe
   /// (FUT-167 Stage 1). `*Ready` = all 4 OTA flash characteristics present on that lens.
   var onFlashProbe: ((Bool, Bool, String) -> Void)?
@@ -585,6 +589,36 @@ final class G2Central: NSObject {
     enqueueLocked(pkts, to: target)
   }
 
+  /// Send a G2 device-settings (service 0x09) payload to the target side(s). Matches
+  /// MentraOS's g2Setting send (reserveFlag: true).
+  private func sendG2SettingLocked(_ payload: Data, to target: G2Target) {
+    let pkts = counters.packets(
+      serviceId: G2ServiceID.g2Setting.rawValue, payload: payload, reserveFlag: true)
+    enqueueLocked(pkts, to: target)
+  }
+
+  /// Public: request real device info (battery %, charging, per-lens firmware version)
+  /// from the glasses. The answer arrives asynchronously via `onDeviceInfo`. No-op during
+  /// a flash (the OTA session owns the link exclusively) or before the pair is ready.
+  /// Sent to BOTH lenses so whichever answers is captured; the reply is deduped. This is
+  /// the real battery source (FUT-169) and the canary flash's version read-back (FUT-167).
+  func requestDeviceInfo() {
+    queue.async { [weak self] in
+      guard let self = self else { return }
+      if self.flashActive {
+        self.log("requestDeviceInfo ignored — flash in progress")
+        return
+      }
+      guard self.pairReadyLocked() else {
+        self.log("requestDeviceInfo ignored — pair not ready (connect both lenses first)")
+        return
+      }
+      self.sendG2SettingLocked(
+        G2Setting.requestDeviceInfo(magicRandom: self.counters.nextMagic()), to: .both)
+      self.log("requestDeviceInfo → both (service 0x09)")
+    }
+  }
+
   /// Run `body` on the CB queue after `ms` milliseconds.
   private func schedule(_ ms: Int, _ body: @escaping () -> Void) {
     queue.asyncAfter(deadline: .now() + .milliseconds(ms), execute: body)
@@ -938,6 +972,23 @@ final class G2Central: NSObject {
     log("GESTURE: \(gesture) (side=\(side.rawValue))")
     onGesture?(gesture, side.rawValue)
   }
+
+  // MARK: - Device info (inbound) — FUT-169 battery + FUT-167 version read-back
+
+  private var lastDeviceInfoAt: TimeInterval = 0
+
+  /// A device-info response arrived. Both lenses may answer the same request, so dedup
+  /// duplicates within 300ms (the aggregate battery/version is identical from either),
+  /// then emit to JS.
+  private func handleDeviceInfoLocked(_ info: G2Setting.DeviceInfo, side: G2Side) {
+    let now = Date().timeIntervalSince1970
+    if now - lastDeviceInfoAt < 0.3 { return }
+    lastDeviceInfoAt = now
+    log("DEVICE INFO (side=\(side.rawValue)): batt=\(info.battery.map { String($0) } ?? "?") "
+      + "charging=\(info.charging.map { String($0) } ?? "?") "
+      + "L=\(info.leftVersion ?? "?") R=\(info.rightVersion ?? "?")")
+    onDeviceInfo?(info.leftVersion, info.rightVersion, info.battery, info.charging)
+  }
 }
 
 // MARK: - CBCentralManagerDelegate
@@ -1170,12 +1221,20 @@ extension G2Central: CBPeripheralDelegate {
     // Reassemble the 0xAA transport per side (once), then interpret an EvenHub
     // (0xE0) message as either a touch gesture OR an image-fragment ACK.
     if characteristic.uuid == G2Central.CHAR_NOTIFY, let lens = lens(for: peripheral),
-      let (svc, payload) = lens.rx.feed(data), svc == G2ServiceID.evenHub.rawValue {
-      if let gesture = G2EvenHub.parseGesture(payload) {
-        handleGestureLocked(gesture, side: s)
-      } else if let ack = G2EvenHub.parseImageAck(payload) {
-        log("img: ack session=\(ack.session) fragment=\(ack.fragment) success=\(ack.success)")
-        handleImageAckLocked(session: ack.session, fragment: ack.fragment, success: ack.success)
+      let (svc, payload) = lens.rx.feed(data) {
+      if svc == G2ServiceID.evenHub.rawValue {
+        if let gesture = G2EvenHub.parseGesture(payload) {
+          handleGestureLocked(gesture, side: s)
+        } else if let ack = G2EvenHub.parseImageAck(payload) {
+          log("img: ack session=\(ack.session) fragment=\(ack.fragment) success=\(ack.success)")
+          handleImageAckLocked(session: ack.session, fragment: ack.fragment, success: ack.success)
+        }
+      } else if svc == G2ServiceID.g2Setting.rawValue {
+        // FUT-169 / FUT-167: a device-info response (battery / version). Routed purely by
+        // service id, so it can never swallow an EvenHub gesture/image-ack frame.
+        if let info = G2Setting.parseDeviceInfo(payload) {
+          handleDeviceInfoLocked(info, side: s)
+        }
       }
     }
   }

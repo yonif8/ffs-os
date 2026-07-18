@@ -22,7 +22,7 @@ import { screenOwner } from "./reclaim";
 import { PhoneNav, type PhoneCtx } from "./phone/nav";
 import { homeScreen } from "./phone/screens";
 
-const APP_VERSION = "0.10.11";
+const APP_VERSION = "0.10.12";
 
 // FUT-167 Stage 2 — CFW + stock-restore images (hosted on the private slsrc server, NOT
 // bundled: this repo is public and the firmware is Even's copyrighted image). Downloaded
@@ -84,7 +84,8 @@ export default function App() {
     const ctx: PhoneCtx = {
       pairReady: () => btRef.current.pairReady,
       sides: () => btRef.current.sides,
-      battery: () => 82,
+      // Real battery read back from the glasses (FUT-169); -1 = not read yet → HUD shows "?".
+      battery: () => btRef.current.deviceInfo?.battery ?? -1,
       version: () => APP_VERSION,
       gestures: () => navRef.current?.gestureCount ?? 0,
     };
@@ -250,6 +251,31 @@ export default function App() {
         >
           <Text style={styles.btnText}>{swirlOn ? "Swirl ■" : "Swirl ▶"}</Text>
         </Pressable>
+      </View>
+
+      <Text style={styles.section}>Device info — battery + firmware (FUT-169)</Text>
+      <View style={styles.card}>
+        <Pressable
+          style={[styles.btn, (!bt.pairReady || flashBusy) && styles.btnDisabled]}
+          disabled={!bt.pairReady || flashBusy}
+          onPress={() => bt.requestDeviceInfo()}
+        >
+          <Text style={styles.btnText}>Read battery + firmware version</Text>
+        </Pressable>
+        {bt.deviceInfo ? (
+          <>
+            <Text style={[styles.meta, { marginTop: 8 }]}>
+              battery: {bt.deviceInfo.battery == null ? "?" : `${bt.deviceInfo.battery}%`}
+              {bt.deviceInfo.charging == null ? "" : bt.deviceInfo.charging ? "  ⚡ charging" : "  (not charging)"}
+            </Text>
+            <Text style={styles.meta}>firmware L: {bt.deviceInfo.leftVersion ?? "?"}</Text>
+            <Text style={styles.meta}>firmware R: {bt.deviceInfo.rightVersion ?? "?"}</Text>
+          </>
+        ) : (
+          <Text style={[styles.meta, { marginTop: 8 }]}>
+            {bt.pairReady ? "not read yet — tap above (auto-reads ~2s after connect)" : "connect both lenses first"}
+          </Text>
+        )}
       </View>
 
       <Text style={styles.section}>Firmware — CFW flasher (FUT-167)</Text>

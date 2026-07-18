@@ -17,6 +17,15 @@ import FfsBle, {
   type OnDeviceFoundEvent,
 } from "../../modules/ffs-ble";
 
+/** Real device info read back from the glasses (FUT-169 battery + FUT-167 version). */
+export interface FfsDeviceInfo {
+  leftVersion: string | null;
+  rightVersion: string | null;
+  battery: number | null;
+  charging: boolean | null;
+  at: number;
+}
+
 /** Underlying link state, coarse-grained (the finest JS can observe). */
 export type FfsLinkState =
   | "idle" //        not scanning, nothing connected
@@ -35,6 +44,8 @@ export interface FfsGlassesSession {
   devices: OnDeviceFoundEvent[];
   /** Most recent decoded gesture (for the launcher's input routing). */
   lastGesture: { gesture: G2GestureName; side: G2Side; at: number } | null;
+  /** Most recent real device info (battery / firmware version), or null if not read yet. */
+  deviceInfo: FfsDeviceInfo | null;
 
   // --- actions (thin pass-throughs to the driver) ---
   startScan: () => void;
@@ -44,6 +55,8 @@ export interface FfsGlassesSession {
   disconnect: () => void;
   showText: (text: string) => void;
   showImage: () => void;
+  /** Ask the glasses for real battery + firmware version (answer lands in deviceInfo). */
+  requestDeviceInfo: () => void;
 }
 
 /**
@@ -60,6 +73,7 @@ export function useFfsBluetooth(options: { autoScan?: boolean } = {}): FfsGlasse
   const [devices, setDevices] = useState<OnDeviceFoundEvent[]>([]);
   const [lastGesture, setLastGesture] =
     useState<{ gesture: G2GestureName; side: G2Side; at: number } | null>(null);
+  const [deviceInfo, setDeviceInfo] = useState<FfsDeviceInfo | null>(null);
 
   useEffect(() => {
     const subs = [
@@ -84,9 +98,21 @@ export function useFfsBluetooth(options: { autoScan?: boolean } = {}): FfsGlasse
       FfsBle.addListener("onPairReady", () => {
         setPairReady(true);
         setScanning(false);
+        // Auto-read real device info shortly after the link settles, so the HUD battery
+        // stops showing the old stub value (FUT-169). Also refreshable on demand.
+        setTimeout(() => FfsBle.requestDeviceInfo(), 2000);
       }),
       FfsBle.addListener("onGesture", (g) => {
         setLastGesture({ gesture: g.gesture, side: g.side, at: Date.now() });
+      }),
+      FfsBle.addListener("onDeviceInfo", (d) => {
+        setDeviceInfo({
+          leftVersion: d.leftVersion,
+          rightVersion: d.rightVersion,
+          battery: d.battery,
+          charging: d.charging,
+          at: Date.now(),
+        });
       }),
     ];
     if (autoScan) {
@@ -115,6 +141,7 @@ export function useFfsBluetooth(options: { autoScan?: boolean } = {}): FfsGlasse
   }, []);
   const showText = useCallback((text: string) => FfsBle.showText(text), []);
   const showImage = useCallback(() => FfsBle.showImage(), []);
+  const requestDeviceInfo = useCallback(() => FfsBle.requestDeviceInfo(), []);
 
   const state = useMemo<FfsLinkState>(() => {
     if (pairReady) return "pairReady";
@@ -129,6 +156,7 @@ export function useFfsBluetooth(options: { autoScan?: boolean } = {}): FfsGlasse
     sides,
     devices,
     lastGesture,
+    deviceInfo,
     startScan,
     stopScan,
     connect,
@@ -136,5 +164,6 @@ export function useFfsBluetooth(options: { autoScan?: boolean } = {}): FfsGlasse
     disconnect,
     showText,
     showImage,
+    requestDeviceInfo,
   };
 }

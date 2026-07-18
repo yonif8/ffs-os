@@ -184,6 +184,9 @@ export class PhoneNav {
   private statusBar(): string {
     const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const bt = this.ctx.pairReady() ? "BT" : "--";
-    return `FFS OS    ${time}    ${bt} ${this.ctx.battery()}%`;
+    // battery() returns -1 until the real read lands (FUT-169) → show "?" not a fake number.
+    const bat = this.ctx.battery();
+    const batStr = bat < 0 ? "?" : `${bat}%`;
+    return `FFS OS    ${time}    ${bt} ${batStr}`;
   }
 }
