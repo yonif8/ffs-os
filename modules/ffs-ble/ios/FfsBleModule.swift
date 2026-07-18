@@ -126,6 +126,22 @@ public class FfsBleModule: Module {
       self?.ensureCentral().showStockDashboard()
     }
 
+    // FUT-176: our OWN dashboard (app #1) — rendered as our pixels via the mode-2 pipeline.
+    // showDashboard() displays it; dashboardInput(action) navigates tiles/expand;
+    // setDashboardData(json) feeds time/date/battery + widget data from the phone.
+    Function("showDashboard") { [weak self] in
+      self?.ensureCentral().showDashboard()
+    }
+    Function("hideDashboard") { [weak self] in
+      self?.ensureCentral().hideDashboard()
+    }
+    Function("dashboardInput") { [weak self] (action: String) in
+      self?.ensureCentral().dashboardInput(action)
+    }
+    Function("setDashboardData") { [weak self] (json: String) in
+      self?.ensureCentral().setDashboardData(json)
+    }
+
     // FUT-169 / FUT-167: request real device info (battery %, charging, per-lens firmware
     // version) from the glasses. Answer arrives async via `onDeviceInfo`. Connect the pair
     // first. This is the real battery source (the HUD 82% was a stub) and the canary

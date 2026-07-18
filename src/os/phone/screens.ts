@@ -54,13 +54,16 @@ const animations = list("animations", "Animations", [
   { label: "Even-AI swirl: STOP", hint: "", action: () => FfsBle.showAiSwirl(false) },
 ]);
 
-// ---- Dashboard (Even's REAL native dashboard, brought in — FUT-170) --------
-// Yoni's actual ask: bring EVEN'S gorgeous firmware-rendered dashboard INTO our OS — not a
-// text clone. Opening this releases our EvenHub page (kind "stockdash" → showStockDashboard)
-// so the firmware's native LVGL dashboard surfaces on look-up (re-enables head-up + applies
-// our widget layout over BLE, no firmware patch). Any gesture repaints our OS (the way back).
+// ---- Dashboard (OUR own dashboard, our pixels — FUT-176) -------------------
+// App #1: we render Even's dashboard concept as OUR pixels via the mode-2 pipeline — a
+// tileview (header + swipeable widget tiles + expand), built to the reverse-engineered
+// stock spec (FUT-178). Swipe = change tile, tap = expand/collapse, double-tap = exit.
+// Supersedes the FUT-170 "release page to firmware" approach (kept below for comparison).
+const dashboard: Screen = { id: "dashboard", title: "Dashboard", kind: "ffsdash" };
 
-const dashboard: Screen = { id: "dashboard", title: "Dashboard", kind: "stockdash" };
+// Even's OWN native firmware dashboard, brought in by releasing our page (FUT-170) — kept
+// as a separate entry for comparison against our own render above.
+const stockDash: Screen = { id: "stockdash", title: "Even Native Dash", kind: "stockdash" };
 
 // ---- Clock (real live time) -----------------------------------------------
 
@@ -103,9 +106,10 @@ export const homeScreen: Screen = list("home", "Home", [
   { label: "Clock", hint: ">", target: clock },
   { label: "Image Test", hint: ">", target: image("imgtest", "Image Test") },
   { label: "Dashboard", hint: ">", target: dashboard },
+  { label: "Even Native Dash", hint: ">", target: stockDash },
   { label: "About", hint: ">", target: about },
   { label: "Bluetooth", hint: ">", target: bluetooth },
   // FUT-170: push custom CONTENT into Even's dashboard (Schedule widget) over BLE — proves
-  // we drive the dashboard protocol. The "Dashboard" item above surfaces the real UI itself.
+  // we drive the dashboard protocol. The "Even Native Dash" item above surfaces the real UI.
   { label: "Push to stock dash", hint: "BLE", action: () => FfsBle.pushDashboardDemo("Hello from FFS OS") },
 ]);
