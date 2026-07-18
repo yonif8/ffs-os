@@ -78,6 +78,11 @@ enum G2Anim {
 
   static let ids = ["image", "ball", "spinner", "rings", "plasma", "starfield", "marquee", "video"]
 
+  /// Static content (one still frame) vs a live loop. Static anims are sent a few times
+  /// then the loop idles — no point re-streaming an unchanging full frame forever (that
+  /// saturates the BLE link exactly like a heavy loop).
+  static func isStatic(_ anim: String) -> Bool { anim == "image" }
+
   /// Produce one 8bpp frame (W*H) for `anim` at frame index `f`.
   static func frame(_ anim: String, _ f: Int) -> [UInt8] {
     switch anim {
@@ -221,22 +226,22 @@ enum G2Anim {
   }
 
   private static func videoDemo(_ f: Int) -> [UInt8] {
-    // A short looping "video": a pulsing checker + a sweeping bar — a placeholder
-    // multi-frame loop until the real converted clip lands (next build).
-    var buf = [UInt8](repeating: 0, count: N)
+    // A short looping "video": a pulsing checker + a sweeping bar. Rendered at 144×72 then
+    // upscaled — keeps the compressed frame small so it can't saturate the BLE link.
+    let pw = 144, ph = 72
+    var small = [UInt8](repeating: 0, count: pw * ph)
     let phase = f % 90
     let pulse = UInt8(60 + Int(80 * (0.5 + 0.5 * sin(Double(f) * 0.1))))
-    let cell = 48
-    for y in 0..<H {
-      for x in 0..<W {
+    let cell = 12
+    for y in 0..<ph {
+      for x in 0..<pw {
         let on = ((x / cell) + (y / cell) + phase / 10) % 2 == 0
-        buf[y * W + x] = on ? pulse : 0
+        small[y * pw + x] = on ? pulse : 0
       }
     }
-    // sweeping vertical bar
-    let barX = (f * 9) % W
-    for y in 0..<H { for dx in 0..<10 { put(&buf, barX + dx, y, 255) } }
-    return buf
+    let barX = (f * 3) % pw
+    for y in 0..<ph { for dx in 0..<3 { let xx = barX + dx; if xx < pw { small[y * pw + xx] = 255 } } }
+    return upscaleNearest(small, pw, ph)
   }
 
   // MARK: - CoreGraphics text/image render (static image + marquee)
