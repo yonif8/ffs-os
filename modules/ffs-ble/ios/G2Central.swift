@@ -619,6 +619,47 @@ final class G2Central: NSObject {
     }
   }
 
+  /// Send a stock-dashboard (service 0x01) payload to the target side(s). (FUT-170)
+  private func sendDashboardLocked(_ payload: Data, to target: G2Target) {
+    let pkts = counters.packets(
+      serviceId: G2ServiceID.dashboard.rawValue, payload: payload, reserveFlag: true)
+    enqueueLocked(pkts, to: target)
+  }
+
+  /// Public (FUT-170 PoC): push CUSTOM content into the firmware's native head-up dashboard
+  /// over BLE — no firmware patch. Re-enables the head-up trigger (we disable it by default),
+  /// puts the Schedule widget first, then pushes `text` as a Schedule entry. Look UP on the
+  /// glasses to see it. Proves we can drive the stock dashboard's content.
+  func pushDashboardDemo(text: String) {
+    queue.async { [weak self] in
+      guard let self = self else { return }
+      guard self.pairReadyLocked() else {
+        self.log("pushDashboardDemo ignored — pair not ready (connect both lenses first)"); return
+      }
+      let fire: () -> Void = { [weak self] in
+        guard let self = self else { return }
+        // 1) enable the head-up trigger so the dashboard renders on look-up.
+        self.sendG2SettingLocked(
+          G2Setting.setHeadUpSwitch(magicRandom: self.counters.nextMagic(), enabled: true), to: .both)
+        // 2) Schedule widget first.
+        self.sendDashboardLocked(
+          G2Dashboard.displayConfig(magicRandom: self.counters.nextMagic(), widgetOrder: [3, 1, 2, 4, 5]),
+          to: .both)
+        // 3) push our custom text as a Schedule entry.
+        let tz = Int32(TimeZone.current.secondsFromGMT())
+        let end = Int32(truncatingIfNeeded: Int64(Date().timeIntervalSince1970)) &+ tz &+ 3600
+        self.sendDashboardLocked(
+          G2Dashboard.pushSchedule(
+            magicRandom: self.counters.nextMagic(), scheduleId: 1, title: text,
+            location: "FFS OS", time: "now", endTimestamp: end),
+          to: .both)
+        self.log("dashboard demo: head-up ON + schedule-first + pushed '\(text)' — look UP to see it")
+      }
+      if self.sessionAuthed { fire() } else { self.runAuthLocked { [weak self] in
+        self?.startHeartbeatsLocked(); fire() } }
+    }
+  }
+
   /// Run `body` on the CB queue after `ms` milliseconds.
   private func schedule(_ ms: Int, _ body: @escaping () -> Void) {
     queue.asyncAfter(deadline: .now() + .milliseconds(ms), execute: body)

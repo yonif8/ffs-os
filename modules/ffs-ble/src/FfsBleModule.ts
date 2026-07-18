@@ -197,6 +197,12 @@ interface FfsBleNativeModule {
   playAnimation(id: string): void;
   /** FUT-165: stop the running animation. */
   stopAnimation(): void;
+  /**
+   * FUT-170 PoC: push custom text into the firmware's native head-up dashboard over BLE
+   * (into the Schedule widget). Re-enables the head-up trigger + orders Schedule first.
+   * Look UP on the glasses to see it. Connect the pair first.
+   */
+  pushDashboardDemo(text: string): void;
   /** P3: tear down the EvenHub session (stops the keep-alive heartbeat). */
   stopSession(): void;
   addListener<E extends FfsBleEventName>(
