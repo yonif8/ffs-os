@@ -22,7 +22,7 @@ import { screenOwner } from "./reclaim";
 import { PhoneNav, type PhoneCtx } from "./phone/nav";
 import { homeScreen } from "./phone/screens";
 
-const APP_VERSION = "0.10.14";
+const APP_VERSION = "0.10.15";
 
 // FUT-167 Stage 2 — CFW + stock-restore images (hosted on the private slsrc server, NOT
 // bundled: this repo is public and the firmware is Even's copyrighted image). Downloaded
@@ -125,6 +125,20 @@ export default function App() {
       glog.emit("os", "flash_progress", { message: e.message, progress: e.progress, done: e.done, ok: e.ok });
     });
     return () => sub.remove();
+  }, []);
+
+  // FUT-165 diagnostics (Yoni ask): stream EVERY native driver log line + disconnects +
+  // device-info to the off-device collector, so a full trace of what the driver actually
+  // did (anim frame sizes, gen time, queue depth, disconnect reasons) is visible remotely.
+  useEffect(() => {
+    const subs = [
+      FfsBle.addListener("onLog", (e) => glog.emit("drv", "log", { m: e.message })),
+      FfsBle.addListener("onDisconnected", (e) =>
+        glog.emit("drv", "disconnected", { side: e.side, reason: e.reason ?? null })),
+      FfsBle.addListener("onDeviceInfo", (e) =>
+        glog.emit("drv", "device_info", { batt: e.battery, chg: e.charging, l: e.leftVersion, r: e.rightVersion })),
+    ];
+    return () => subs.forEach((s) => s.remove());
   }, []);
 
   // FUT-167 soft precheck: a real flash arms ONLY when the warranty phrase is typed

@@ -883,10 +883,14 @@ final class G2Central: NSObject {
   private var animFrame = 0
   private var animContainerReady = false
   private var animSession: Int32 = 0
+  /// Frame generation + zlib compression run HERE, never on the CoreBluetooth queue — a
+  /// heavy generator (plasma) on the CB queue starves the write-drain + heartbeat and drops
+  /// the link. Only the enqueue hops back to `queue`. (v1.1 crash fix.)
+  private let animQueue = DispatchQueue(label: "com.ffs.g2anim", qos: .userInitiated)
   private static let ANIM_CID: Int32 = 2          // distinct from showImage (1) + evt-0 (0)
   private static let ANIM_NAME = "ffs-anim"
-  private static let ANIM_FRAME_MS = 33           // ~30fps ceiling; real rate is drain-gated
-  private static let ANIM_MAX_PENDING = 48        // right-lens queue depth → drop-if-busy
+  private static let ANIM_FRAME_MS = 45           // ~22fps ceiling; real rate is drain-gated
+  private static let ANIM_MAX_PENDING = 40        // right-lens queue depth → drop-if-busy
 
   /// Public: play an on-glass animation by id (see G2Anim.ids). Creates ONE persistent
   /// 576×288 container, then streams CFW mode-2 frames fire-and-forget, drain-gated so the
@@ -899,14 +903,14 @@ final class G2Central: NSObject {
       }
       let start: () -> Void = { [weak self] in
         guard let self = self else { return }
+        self.startHeartbeatsLocked()  // idempotent — keep the link alive during the anim
         self.animId = id
         self.animFrame = 0
         self.animActive = true
         self.log("anim: play \(id)")
         self.ensureAnimContainerLocked { [weak self] in self?.animTickLocked() }
       }
-      if self.sessionAuthed { start() } else { self.runAuthLocked { [weak self] in
-        self?.startHeartbeatsLocked(); start() } }
+      if self.sessionAuthed { start() } else { self.runAuthLocked(start) }
     }
   }
 
@@ -945,17 +949,33 @@ final class G2Central: NSObject {
     // shortly — bounds the shared queue so anim frames can't starve text/gesture/flash.
     let pending = lenses[.right]?.writeQueue.count ?? 0
     if pending > G2Central.ANIM_MAX_PENDING {
-      schedule(12) { [weak self] in self?.animTickLocked() }
+      schedule(20) { [weak self] in self?.animTickLocked() }
       return
     }
-    let pixels = G2Anim.frame(animId, animFrame)
+    let id = animId
     let n = animFrame
     animFrame += 1
-    if let payload = G2Anim.mode2Payload(pixels) {
-      sendAnimFrameLocked(payload)
-      if n % 15 == 0 { log("anim[\(animId)]: frame \(n) payload=\(payload.count)B pending=\(pending)") }
+    // Generate + compress OFF the CB queue (the crash fix), then hop back to enqueue.
+    animQueue.async { [weak self] in
+      guard let self = self else { return }
+      let t0 = Date()
+      let pixels = G2Anim.frame(id, n)
+      let payload = G2Anim.mode2Payload(pixels)
+      let genMs = Int(Date().timeIntervalSince(t0) * 1000)
+      self.queue.async { [weak self] in
+        guard let self = self, self.animActive, self.animId == id, !self.flashActive else { return }
+        if let p = payload {
+          self.sendAnimFrameLocked(p)
+          if n % 8 == 0 {
+            let pend = self.lenses[.right]?.writeQueue.count ?? 0
+            self.log("anim[\(id)] f\(n) \(p.count)B gen=\(genMs)ms pend=\(pend)")
+          }
+        } else {
+          self.log("anim[\(id)] f\(n) mode2 encode FAILED")
+        }
+        self.schedule(G2Central.ANIM_FRAME_MS) { [weak self] in self?.animTickLocked() }
+      }
     }
-    schedule(G2Central.ANIM_FRAME_MS) { [weak self] in self?.animTickLocked() }
   }
 
   /// Fragment a mode-2 payload into updateImageRawData messages and enqueue all their
