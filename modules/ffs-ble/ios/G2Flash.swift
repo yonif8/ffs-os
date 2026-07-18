@@ -219,8 +219,8 @@ enum G2Flash {
   // response, so we can capture the s200_font.bin format ground-truth. Pure read, no new
   // flash-write behavior; ps/prog_end verified against the built image via g2flash.
   static let goldenFontpeek = GoldenVector(
-    sha256: "13547292b4cf83290eab822b7544d5331de5bed8046a182cdfbd7a4bfe6ee249",
-    ps: 3_539_655, progEnd: 0x0079_82A7, pass: true)
+    sha256: "dfe2e9ed676dfe1dc381eb2783521b445f4cf3f760362650c7629e6ba07445b4",
+    ps: 3_540_051, progEnd: 0x0079_8433, pass: true)
 
   /// Run the parse+guard on `img` and assert it reproduces the golden vector. Returns
   /// nil on success, or a failure description. Any non-nil result MUST block flashing.

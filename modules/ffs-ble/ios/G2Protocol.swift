@@ -627,7 +627,7 @@ enum G2Setting {
     // already shows, so we can capture the s200_font.bin format ground-truth with no new UI.
     if let fp = f[101] as? Data {
       let hex = fp.map { String(format: "%02x", $0) }.joined()
-      out.leftVersion = (out.leftVersion ?? "") + "  ⟨FONT0=" + hex + "⟩"
+      out.leftVersion = (out.leftVersion ?? "") + "  ⟨FONTS=" + hex + "⟩"
     }
     if out.leftVersion == nil && out.rightVersion == nil && out.battery == nil && out.charging == nil {
       return nil
