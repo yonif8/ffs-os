@@ -543,6 +543,9 @@ final class G2Central: NSObject {
   /// A startup page has been created this session — subsequent pages must use
   /// rebuildPage (createStartupPage only takes once per session). Reset on drop.
   private var pageCreated = false
+  // FFS Dashboard (FUT-176) — our own dashboard app state.
+  private var dashModel = FfsDashboard.Model()
+  private var dashActive = false
 
   // MARK: - Image transfer state (P4, FUT-153)
   /// Rolling per-image session id (firmware keys reassembly on it).
@@ -692,6 +695,100 @@ final class G2Central: NSObject {
       if self.sessionAuthed { reveal() } else { self.runAuthLocked { [weak self] in
         self?.startHeartbeatsLocked(); reveal() } }
     }
+  }
+
+  // MARK: - FFS Dashboard (FUT-176) — our OWN dashboard, our pixels, on the mode-2 pipeline
+
+  /// Show our dashboard app: auth if needed, ensure the persistent 576×288 container,
+  /// then render the current model as a static mode-2 frame (reuses the FUT-165 pipeline).
+  func showDashboard() {
+    queue.async { [weak self] in
+      guard let self = self else { return }
+      guard self.pairReadyLocked() else { self.log("showDashboard ignored — pair not ready"); return }
+      let start: () -> Void = { [weak self] in
+        guard let self = self else { return }
+        self.startHeartbeatsLocked()
+        self.stopAnimationLocked()       // no frame loop; the dashboard is static-on-demand
+        self.dashActive = true
+        self.log("dashboard: show (tile \(self.dashModel.tile))")
+        self.ensureAnimContainerLocked { [weak self] in self?.renderDashboardLocked() }
+      }
+      if self.sessionAuthed { start() } else { self.runAuthLocked(start) }
+    }
+  }
+
+  func hideDashboard() { queue.async { [weak self] in self?.dashActive = false } }
+
+  /// Gesture from JS: "next" | "prev" | "select" | "back".
+  func dashboardInput(_ action: String) {
+    queue.async { [weak self] in
+      guard let self = self, self.dashActive else { return }
+      switch action {
+      case "next":   if !self.dashModel.expanded { self.dashModel.tile = (self.dashModel.tile + 1) % FfsDashboard.TILE_COUNT }
+      case "prev":   if !self.dashModel.expanded { self.dashModel.tile = (self.dashModel.tile + FfsDashboard.TILE_COUNT - 1) % FfsDashboard.TILE_COUNT }
+      case "select": self.dashModel.expanded = true
+      case "back":   self.dashModel.expanded = false
+      case "toggle": self.dashModel.expanded.toggle()
+      default: break
+      }
+      self.renderDashboardLocked()
+    }
+  }
+
+  /// Update dashboard model fields from a JSON blob supplied by the phone, then re-render.
+  func setDashboardData(_ json: String) {
+    queue.async { [weak self] in
+      guard let self = self else { return }
+      self.applyDashboardJSONLocked(json)
+      if self.dashActive && self.animContainerReady { self.renderDashboardLocked() }
+    }
+  }
+
+  private func renderDashboardLocked() {
+    guard dashActive, pairReadyLocked() else { return }
+    let model = dashModel
+    animQueue.async { [weak self] in
+      guard let self = self else { return }
+      let pixels = FfsDashboard.render(model)
+      let payload = G2Anim.mode2Payload(pixels)
+      self.queue.async { [weak self] in
+        guard let self = self, self.dashActive, self.animContainerReady else { return }
+        guard let p = payload else { self.log("dashboard: mode2 encode FAILED"); return }
+        self.sendAnimFrameLocked(p)
+        self.schedule(120) { [weak self] in
+          guard let self = self, self.dashActive else { return }
+          self.sendAnimFrameLocked(p)   // 2nd send: static-frame drop-robustness
+        }
+        self.log("dashboard: rendered tile=\(model.tile) expanded=\(model.expanded) \(p.count)B")
+      }
+    }
+  }
+
+  private func applyDashboardJSONLocked(_ json: String) {
+    guard let data = json.data(using: .utf8),
+          let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
+    var m = dashModel
+    if let v = obj["time"] as? String { m.time = v }
+    if let v = obj["date"] as? String { m.date = v }
+    if let v = obj["battery"] as? Int { m.battery = v }
+    else if let v = obj["battery"] as? Double { m.battery = Int(v) }
+    if let v = obj["tile"] as? Int { m.tile = max(0, min(FfsDashboard.TILE_COUNT - 1, v)) }
+    if let v = obj["calendarTitle"] as? String { m.calendarTitle = v }
+    if let v = obj["calendarSub"] as? String { m.calendarSub = v }
+    if let v = obj["stockA"] as? String { m.stockA = v }
+    if let v = obj["stockB"] as? String { m.stockB = v }
+    if let v = obj["newsTitle"] as? String { m.newsTitle = v }
+    if let v = obj["newsSub"] as? String { m.newsSub = v }
+    if let v = obj["healthA"] as? String { m.healthA = v }
+    if let v = obj["healthB"] as? String { m.healthB = v }
+    if let v = obj["todo1"] as? String { m.todo1 = v }
+    if let v = obj["todo2"] as? String { m.todo2 = v }
+    if let v = obj["statusA"] as? String { m.statusA = v }
+    if let v = obj["statusB"] as? String { m.statusB = v }
+    if let rows = obj["calendarRows"] as? [[String]] {
+      m.calendarRows = rows.compactMap { $0.count >= 2 ? ($0[0], $0[1]) : nil }
+    }
+    dashModel = m
   }
 
   /// Run `body` on the CB queue after `ms` milliseconds.
@@ -1001,6 +1098,7 @@ final class G2Central: NSObject {
     animActive = false
     animId = ""
     animContainerReady = false
+    dashActive = false   // any surface change also stops the dashboard render
   }
 
   private func ensureAnimContainerLocked(_ done: @escaping () -> Void) {

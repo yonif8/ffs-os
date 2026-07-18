@@ -210,6 +210,17 @@ interface FfsBleNativeModule {
    * Look UP to see it; any touchpad gesture repaints our OS (re-creating the page). Connect first.
    */
   showStockDashboard(): void;
+  /**
+   * FUT-176: show OUR own dashboard (app #1) — rendered as our pixels via the mode-2
+   * pipeline (tileview: header + swipeable widget tiles + expand). Connect the pair first.
+   */
+  showDashboard(): void;
+  /** FUT-176: stop rendering our dashboard (e.g. when navigating away). */
+  hideDashboard(): void;
+  /** FUT-176: navigate the dashboard — "next" | "prev" | "select" | "back". */
+  dashboardInput(action: string): void;
+  /** FUT-176: feed the dashboard JSON data (time/date/battery + widget fields), then re-render. */
+  setDashboardData(json: string): void;
   /** P3: tear down the EvenHub session (stops the keep-alive heartbeat). */
   stopSession(): void;
   addListener<E extends FfsBleEventName>(

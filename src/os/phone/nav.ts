@@ -18,7 +18,7 @@
 
 import FfsBle, { type G2GestureName } from "../../../modules/ffs-ble";
 
-export type ScreenKind = "list" | "text" | "image" | "anim" | "stockdash";
+export type ScreenKind = "list" | "text" | "image" | "anim" | "stockdash" | "ffsdash";
 
 /** Live context the dynamic screens read at paint time (connection, version, etc.). */
 export interface PhoneCtx {
@@ -87,13 +87,27 @@ export class PhoneNav {
     const k = this.top().screen.kind;
     // "stockdash" releases our page to the firmware's native dashboard — a text repaint
     // would re-grab the HUD and hide it, so treat it as surface-owning too (FUT-170).
-    return k === "image" || k === "anim" || k === "stockdash";
+    // "ffsdash" is OUR dashboard streaming its own pixels (FUT-176) — also surface-owning.
+    return k === "image" || k === "anim" || k === "stockdash" || k === "ffsdash";
   }
 
   /** Route a gesture into navigation. Repaints only if state actually changed. */
   handleGesture(name: G2GestureName): void {
     this.gestureCount++;
     const cur = this.top();
+
+    // FUT-176: OUR dashboard owns gestures — swipe changes tile, tap expands/collapses,
+    // double-tap exits. The native side re-renders its own pixels, so no JS repaint here.
+    if (cur.screen.kind === "ffsdash") {
+      switch (name) {
+        case "swipe_up": FfsBle.dashboardInput("prev"); break;
+        case "swipe_down": FfsBle.dashboardInput("next"); break;
+        case "tap": FfsBle.dashboardInput("toggle"); break;
+        case "double_tap": if (this.back()) this.onChange(); break;
+      }
+      return;
+    }
+
     const items = cur.screen.items ?? [];
     let changed = false;
 
@@ -141,6 +155,7 @@ export class PhoneNav {
   back(): boolean {
     if (this.stack.length > 1) {
       if (this.top().screen.kind === "anim") FfsBle.stopAnimation();
+      if (this.top().screen.kind === "ffsdash") FfsBle.hideDashboard();
       this.stack.pop();
       return true;
     }
@@ -150,6 +165,7 @@ export class PhoneNav {
   /** Jump straight to the root home screen. */
   goHome(): void {
     if (this.top().screen.kind === "anim") FfsBle.stopAnimation();
+    if (this.top().screen.kind === "ffsdash") FfsBle.hideDashboard();
     this.stack = [{ screen: this.stack[0].screen, sel: 0 }];
     this.onChange();
   }
@@ -171,6 +187,42 @@ export class PhoneNav {
       // Release our page so Even's OWN native dashboard shows (FUT-170). A back/goHome to a
       // text screen re-creates our page (the way out); we never paint text over it here.
       FfsBle.showStockDashboard();
+      return;
+    }
+    if (screen.kind === "ffsdash") {
+      // FUT-176: render OUR own dashboard as our pixels (mode-2 pipeline). Native tracks tile
+      // + expand state; gestures route via dashboardInput. back()/goHome() call hideDashboard.
+      // Push live time/date + widget data first (sample content for now — real data TODO),
+      // then show; both queue in order native-side so the render uses the fresh model.
+      const now = new Date();
+      const time = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      const date = now.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+      FfsBle.setDashboardData(
+        JSON.stringify({
+          time,
+          date,
+          battery: 82,
+          calendarTitle: "Standup",
+          calendarSub: "15:00 · Zoom",
+          stockA: "AAPL 231.4",
+          stockB: "+1.2%  NDX +0.6%",
+          newsTitle: "Fed holds rates",
+          newsSub: "markets steady into close",
+          healthA: "8,240 steps",
+          healthB: "68 bpm · 4.1 km",
+          todo1: "○ Ship dashboard",
+          todo2: "○ Call supplier",
+          statusA: "All synced",
+          statusB: "L ok   R ok",
+          calendarRows: [
+            ["09:00", "Standup"],
+            ["11:30", "Design review"],
+            ["15:00", "Supplier call"],
+            ["18:00", "Gym"],
+          ],
+        }),
+      );
+      FfsBle.showDashboard();
       return;
     }
     FfsBle.showText(this.renderText().join("\n"));
