@@ -44,7 +44,7 @@ const CANARY_SHA = "67759cd67ed7031d7b4c8a613b8b0fe9dc9bd51c11e82260c35f5bc80715
 // as ⟨FONT0=…hex…⟩ → gives us the s200_font.bin format ground-truth for native Hebrew. Pure
 // read, no new flash-write behavior; Restore Stock reverts. Same golden-vector safety gate.
 const FONTPEEK_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_fontpeek.bin";
-const FONTPEEK_SHA = "dfe2e9ed676dfe1dc381eb2783521b445f4cf3f760362650c7629e6ba07445b4";
+const FONTPEEK_SHA = "0c6cc7b12709a212443335b108997cc0e72d9df59065699aed1302bc7f3b2739";
 const WARRANTY_PHRASE = "my warranty is void";
 
 // FUT-167 soft precheck — a self-attested readiness checklist that must be
