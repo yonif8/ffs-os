@@ -677,8 +677,12 @@ enum G2Dashboard {
   }
 
   /// Push ONE Schedule entry (custom title/location/time) into the Schedule widget.
+  /// Push ONE Schedule entry into the native dashboard's Schedule widget. For MULTI-event,
+  /// call once per event with `scheduleTotal` = the total count and `scheduleNum` = the
+  /// 0-based index (the firmware assembles the list — MentraOS's calendarPush pattern).
   static func pushSchedule(magicRandom: Int32, scheduleId: Int32, title: String,
-                           location: String, time: String, endTimestamp: Int32) -> Data {
+                           location: String, time: String, endTimestamp: Int32,
+                           scheduleTotal: Int32 = 1, scheduleNum: Int32 = 0) -> Data {
     var sched = G2ProtobufWriter()
     sched.writeInt32Field(1, scheduleId)
     sched.writeStringField(2, title)                 // ← custom display text
@@ -686,8 +690,8 @@ enum G2Dashboard {
     sched.writeStringField(4, time)
     sched.writeInt32Field(5, endTimestamp)
     var rSched = G2ProtobufWriter()
-    rSched.writeInt32Field(1, 1)                     // scheduleTotal (0 = clear)
-    rSched.writeInt32Field(2, 0)                     // scheduleNum
+    rSched.writeInt32Field(1, scheduleTotal)         // scheduleTotal (0 = clear)
+    rSched.writeInt32Field(2, scheduleNum)           // scheduleNum (0-based)
     rSched.writeMessageField(3, sched.data)          // Schedule
     rSched.writeInt32Field(4, 1)                     // scheduleAuthority
     var comp = G2ProtobufWriter(); comp.writeMessageField(3, rSched.data)     // rWidgetComponent.f3 = Schedule
@@ -695,6 +699,24 @@ enum G2Dashboard {
     var recv = G2ProtobufWriter()
     recv.writeInt32Field(1, 1)                       // packageId
     recv.writeMessageField(3, content.data)          // DashboardReceiveFromApp.f3
+    var pkg = G2ProtobufWriter()
+    pkg.writeInt32Field(1, CMD_RECEIVE)
+    pkg.writeInt32Field(2, magicRandom)
+    pkg.writeMessageField(4, recv.data)
+    return pkg.data
+  }
+
+  /// Clear the Schedule widget (scheduleTotal=0, no stale entry) — MentraOS calendarClear.
+  static func calendarClear(magicRandom: Int32) -> Data {
+    var rSched = G2ProtobufWriter()
+    rSched.writeInt32Field(1, 0)                     // scheduleTotal = 0
+    rSched.writeInt32Field(2, 0)                     // scheduleNum
+    rSched.writeInt32Field(4, 1)                     // scheduleAuthority
+    var comp = G2ProtobufWriter(); comp.writeMessageField(3, rSched.data)
+    var content = G2ProtobufWriter(); content.writeMessageField(2, comp.data)
+    var recv = G2ProtobufWriter()
+    recv.writeInt32Field(1, 1)
+    recv.writeMessageField(3, content.data)
     var pkg = G2ProtobufWriter()
     pkg.writeInt32Field(1, CMD_RECEIVE)
     pkg.writeInt32Field(2, magicRandom)

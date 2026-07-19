@@ -55,15 +55,11 @@ const animations = list("animations", "Animations", [
 ]);
 
 // ---- Dashboard (OUR own dashboard, our pixels — FUT-176) -------------------
-// App #1: we render Even's dashboard concept as OUR pixels via the mode-2 pipeline — a
-// tileview (header + swipeable widget tiles + expand), built to the reverse-engineered
-// stock spec (FUT-178). Swipe = change tile, tap = expand/collapse, double-tap = exit.
-// Supersedes the FUT-170 "release page to firmware" approach (kept below for comparison).
-const dashboard: Screen = { id: "dashboard", title: "Dashboard", kind: "ffsdash" };
-
-// Even's OWN native firmware dashboard, brought in by releasing our page (FUT-170) — kept
-// as a separate entry for comparison against our own render above.
-const stockDash: Screen = { id: "stockdash", title: "Even Native Dash", kind: "stockdash" };
+// NOTE (FUT-194, native-first pivot): the old pixel dashboard (kind "ffsdash", mode-2
+// tileview) and the bare "release page" stock dash (kind "stockdash") are RETIRED from the
+// menu. App #1 is now the NATIVE dashboard below (`nativeDashboard`, kind "nativedash") —
+// the firmware renders it, we drive layout + content over BLE. The ffsdash/stockdash kinds
+// remain supported in nav.ts as the pixel fallback, just not surfaced here.
 
 // ---- Clock (real live time) -----------------------------------------------
 
@@ -98,6 +94,37 @@ const bluetooth = text("bt", "Bluetooth", (ctx) => {
     `L ${s.L ? "up" : "--"}   R ${s.R ? "up" : "--"}`,
   ];
 });
+
+// ---- Dashboard — App #1, NATIVE-FIRST (FUT-194) ---------------------------
+// The firmware renders its OWN dashboard (clock/battery + widgets, GPU-smooth, low-power);
+// our OS just DRIVES it over BLE — widget layout + 12/24h + °C/°F + our Schedule events. No
+// pixels streamed. Replaces the old pixel dashboard (FUT-176). Look up on the glasses to see
+// it; any gesture returns to our OS. Schedule content is sample data for v1 (phone-calendar
+// wiring is a follow-up).
+function nativeDashConfig(): string {
+  const now = Date.now();
+  const tz = -new Date().getTimezoneOffset() * 60; // seconds east of UTC
+  const at = (h: number, m: number) => {
+    const d = new Date(); d.setHours(h, m, 0, 0);
+    return Math.floor(d.getTime() / 1000) + tz;
+  };
+  const hhmm = (h: number, m: number) =>
+    `${((h + 11) % 12) + 1}:${m.toString().padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+  const schedule = [
+    { id: 1, title: "Standup", location: "Zoom", time: hhmm(9, 0), endTs: at(9, 30) },
+    { id: 2, title: "Design review", location: "Office", time: hhmm(11, 30), endTs: at(12, 30) },
+    { id: 3, title: "Supplier call", location: "Phone", time: hhmm(15, 0), endTs: at(15, 30) },
+    { id: 4, title: "Gym", location: "", time: hhmm(18, 0), endTs: at(19, 0) },
+  ].filter((e) => e.endTs * 1000 > now - 3600_000); // drop long-past events
+  return JSON.stringify({
+    halfDay: true, // 12h
+    celsius: true, // °C
+    widgetOrder: [3, 1, 2, 4, 5], // Schedule, News, Stock, Quicklist, Health
+    schedule: schedule.length ? schedule : [{ id: 1, title: "No events today", time: "", endTs: at(23, 59) }],
+  });
+}
+
+const nativeDashboard: Screen = { id: "dashboard", title: "Dashboard", kind: "nativedash", dashConfig: nativeDashConfig };
 
 // ---- Text test (FUT-191) --------------------------------------------------
 // A long, scrollable text surface: paste a story (English + Hebrew) in the phone app, it
@@ -154,8 +181,7 @@ export const homeScreen: Screen = list("home", "Home", [
   { label: "Clock", hint: ">", target: clock },
   { label: "Image Test", hint: ">", target: image("imgtest", "Image Test") },
   { label: "Text test", hint: ">", target: textTestScreen },
-  { label: "Dashboard", hint: ">", target: dashboard },
-  { label: "Even Native Dash", hint: ">", target: stockDash },
+  { label: "Dashboard", hint: ">", target: nativeDashboard },
   { label: "About", hint: ">", target: about },
   { label: "Bluetooth", hint: ">", target: bluetooth },
   // FUT-170: push custom CONTENT into Even's dashboard (Schedule widget) over BLE — proves

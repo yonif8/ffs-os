@@ -211,6 +211,13 @@ interface FfsBleNativeModule {
    */
   showStockDashboard(): void;
   /**
+   * FUT-194: App #1 native-first — show the firmware's OWN dashboard driven by our OS over
+   * BLE (widget layout + 12/24h + °C/°F + our Schedule events); no pixels, no firmware flash.
+   * config = JSON { halfDay?:boolean, celsius?:boolean, widgetOrder?:number[],
+   * schedule?:{ id:number, title:string, location?:string, time?:string, endTs?:number }[] }.
+   */
+  showNativeDashboard(config: string): void;
+  /**
    * FUT-176: show OUR own dashboard (app #1) — rendered as our pixels via the mode-2
    * pipeline (tileview: header + swipeable widget tiles + expand). Connect the pair first.
    */

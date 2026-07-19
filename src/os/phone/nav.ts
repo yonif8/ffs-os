@@ -18,7 +18,7 @@
 
 import FfsBle, { type G2GestureName } from "../../../modules/ffs-ble";
 
-export type ScreenKind = "list" | "text" | "image" | "anim" | "stockdash" | "ffsdash" | "textscroll";
+export type ScreenKind = "list" | "text" | "image" | "anim" | "stockdash" | "ffsdash" | "textscroll" | "nativedash";
 
 /** Live context the dynamic screens read at paint time (connection, version, etc.). */
 export interface PhoneCtx {
@@ -52,6 +52,9 @@ export interface Screen {
   /** For `textscroll` screens (FUT-191 Text test): the full already-wrapped body lines,
    *  read fresh at paint time so updated phone-sent content shows. Swipe up/down scrolls. */
   scrollLines?: () => string[];
+  /** For `nativedash` screens (FUT-194): JSON config passed to FfsBle.showNativeDashboard,
+   *  read fresh at paint time (widget layout + 12/24h + °C/°F + our schedule events). */
+  dashConfig?: () => string;
 }
 
 // HUD ~= 7 text rows at the default font. Reserve row 1 (status bar) + row 2 (title);
@@ -97,7 +100,7 @@ export class PhoneNav {
     // "stockdash" releases our page to the firmware's native dashboard — a text repaint
     // would re-grab the HUD and hide it, so treat it as surface-owning too (FUT-170).
     // "ffsdash" is OUR dashboard streaming its own pixels (FUT-176) — also surface-owning.
-    return k === "image" || k === "anim" || k === "stockdash" || k === "ffsdash";
+    return k === "image" || k === "anim" || k === "stockdash" || k === "ffsdash" || k === "nativedash";
   }
 
   /** Route a gesture into navigation. Repaints only if state actually changed. */
@@ -212,6 +215,13 @@ export class PhoneNav {
       // Start streaming pixel frames to the HUD (FUT-165). showText/showImage on the driver
       // side auto-stop this loop, and back()/goHome() call stopAnimation explicitly.
       if (screen.animId) FfsBle.playAnimation(screen.animId);
+      return;
+    }
+    if (screen.kind === "nativedash") {
+      // FUT-194: App #1 native-first — the firmware renders its own dashboard, driven by our
+      // OS over BLE (layout + 12/24h + °C/°F + our schedule). No pixels. Look up to see it;
+      // any gesture repaints our OS (the way back).
+      FfsBle.showNativeDashboard(screen.dashConfig ? screen.dashConfig() : "{}");
       return;
     }
     if (screen.kind === "stockdash") {
