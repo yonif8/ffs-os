@@ -61,13 +61,13 @@ const HEBREW_FULL_SHA = "45a481fc13b3cb864a9c6b63a4c428c248ab1f3a8ab770715b71965
 // build above. Flash this, browse the UI, then do the firmware-version read.
 const HEBREW_PROBE_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_hebrew_probe.bin";
 const HEBREW_PROBE_SHA = "39ea04a2964c443a1434310d929d64cf22c24ef908255f0f8d07a4b01e72cbfd";
-// FUT-197 — FFS UI probe: Hebrew-full CFW + our OWN native-LVGL element injected via CFW.
-// A ring release-long-press on the home HUD toggles a styled rounded box whose child label
-// LIVE-TICKS an MM:SS counter (1 Hz, driven by a firmware lv_timer). First on-glass proof
+// FUT-197 — FFS UI probe (ALWAYS-ON): Hebrew-full CFW + our OWN native-LVGL element via CFW.
+// A styled rounded box AUTO-SHOWS on the home HUD (no gesture) whose child label LIVE-TICKS
+// an MM:SS counter (1 Hz, driven by a firmware lv_timer armed at boot). First on-glass proof
 // that our own native UI renders + live-updates firmware-side with zero phone — the de-risk
 // step before owning the idle screen (FUT-195 Phase B).
 const FFSUI_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_ffsui.bin";
-const FFSUI_SHA = "52c8e9e62192249bb1ba769304c55572ae0bcf6e4af124b4910eb6897bd44676";
+const FFSUI_SHA = "2fb9f32f8177fb0067dcaf93a43dc594908dfa6666a81bdf0b25be08a7325f11";
 const WARRANTY_PHRASE = "my warranty is void";
 
 // FUT-167 soft precheck — a self-attested readiness checklist that must be
@@ -472,7 +472,7 @@ export default function App() {
           disabled={!armed || !bt.pairReady || flashBusy}
           onPress={() => startFlash(FFSUI_URL, FFSUI_SHA, false)}
         >
-          <Text style={styles.btnText}>🟢 FFS UI probe (ring long-press on home HUD → our box with a live MM:SS ticker)</Text>
+          <Text style={styles.btnText}>🟢 FFS UI probe (always-on: our box auto-shows on the HUD with a live MM:SS ticker)</Text>
         </Pressable>
         <View style={styles.btnRow}>
           <Pressable
