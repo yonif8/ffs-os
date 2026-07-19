@@ -102,25 +102,26 @@ const bluetooth = text("bt", "Bluetooth", (ctx) => {
 // it; any gesture returns to our OS. Schedule content is sample data for v1 (phone-calendar
 // wiring is a follow-up).
 function nativeDashConfig(): string {
-  const now = Date.now();
   const tz = -new Date().getTimezoneOffset() * 60; // seconds east of UTC
-  const at = (h: number, m: number) => {
-    const d = new Date(); d.setHours(h, m, 0, 0);
-    return Math.floor(d.getTime() / 1000) + tz;
+  // Build events relative to NOW so they're always upcoming (v1 sample data — real phone
+  // calendar wiring is the follow-up). endTs is a wall-clock unix + tz shift (Even's format).
+  const ev = (id: number, title: string, location: string, inMin: number, lenMin: number) => {
+    const start = new Date(Date.now() + inMin * 60_000);
+    const end = new Date(Date.now() + (inMin + lenMin) * 60_000);
+    const h = start.getHours(), m = start.getMinutes();
+    const time = `${((h + 11) % 12) + 1}:${m.toString().padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+    return { id, title, location, time, endTs: Math.floor(end.getTime() / 1000) + tz };
   };
-  const hhmm = (h: number, m: number) =>
-    `${((h + 11) % 12) + 1}:${m.toString().padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
-  const schedule = [
-    { id: 1, title: "Standup", location: "Zoom", time: hhmm(9, 0), endTs: at(9, 30) },
-    { id: 2, title: "Design review", location: "Office", time: hhmm(11, 30), endTs: at(12, 30) },
-    { id: 3, title: "Supplier call", location: "Phone", time: hhmm(15, 0), endTs: at(15, 30) },
-    { id: 4, title: "Gym", location: "", time: hhmm(18, 0), endTs: at(19, 0) },
-  ].filter((e) => e.endTs * 1000 > now - 3600_000); // drop long-past events
   return JSON.stringify({
     halfDay: true, // 12h
     celsius: true, // °C
     widgetOrder: [3, 1, 2, 4, 5], // Schedule, News, Stock, Quicklist, Health
-    schedule: schedule.length ? schedule : [{ id: 1, title: "No events today", time: "", endTs: at(23, 59) }],
+    schedule: [
+      ev(1, "Standup", "Zoom", 30, 30),
+      ev(2, "Design review", "Office", 120, 60),
+      ev(3, "Supplier call", "Phone", 240, 30),
+      ev(4, "Gym", "", 360, 60),
+    ],
   });
 }
 
