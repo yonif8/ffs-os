@@ -697,6 +697,58 @@ final class G2Central: NSObject {
     }
   }
 
+  /// FUT-194 — App #1 NATIVE-FIRST: show the firmware's own dashboard driven fully by OUR OS
+  /// over BLE (service 0x01), no pixels. Releases our page so the firmware owns the HUD, turns
+  /// the head-up trigger on, applies OUR widget layout + 12/24h + °C/°F, and pushes OUR
+  /// Schedule/calendar events into the native Schedule widget. Clock + battery are rendered by
+  /// the firmware. `configJSON` = { halfDay:Bool, celsius:Bool, widgetOrder:[Int],
+  /// schedule:[{ id:Int, title:String, location?:String, time?:String, endTs?:Int }] }.
+  func showNativeDashboard(configJSON: String) {
+    struct SchedItem: Decodable { let id: Int32; let title: String; let location: String?; let time: String?; let endTs: Int32? }
+    struct DashCfg: Decodable { let halfDay: Bool?; let celsius: Bool?; let widgetOrder: [UInt8]?; let schedule: [SchedItem]? }
+    let cfg = (try? JSONDecoder().decode(DashCfg.self, from: Data(configJSON.utf8)))
+    let order = cfg?.widgetOrder ?? [3, 1, 2, 4, 5]         // Schedule first by default
+    let halfDay = cfg?.halfDay ?? true
+    let celsius = cfg?.celsius ?? true
+    let items = cfg?.schedule ?? []
+
+    queue.async { [weak self] in
+      guard let self = self else { return }
+      guard self.pairReadyLocked() else {
+        self.log("showNativeDashboard ignored — pair not ready (connect both lenses first)"); return
+      }
+      let reveal: () -> Void = { [weak self] in
+        guard let self = self else { return }
+        // release our page so the firmware owns the HUD, then enable head-up + our layout.
+        self.stopAnimationLocked()
+        self.sendEvenHubLocked(
+          G2EvenHub.shutdownPage(magicRandom: self.counters.nextMagic()), to: .right)
+        self.pageCreated = false
+        self.sendG2SettingLocked(
+          G2Setting.setHeadUpSwitch(magicRandom: self.counters.nextMagic(), enabled: true), to: .both)
+        self.sendDashboardLocked(
+          G2Dashboard.displayConfig(magicRandom: self.counters.nextMagic(),
+            widgetOrder: order, halfDay: halfDay, celsius: celsius), to: .both)
+        // push OUR schedule events (one package per event, indexed — the native list assembles).
+        if items.isEmpty {
+          self.sendDashboardLocked(
+            G2Dashboard.calendarClear(magicRandom: self.counters.nextMagic()), to: .both)
+        } else {
+          let total = Int32(items.count)
+          for (i, it) in items.enumerated() {
+            self.sendDashboardLocked(
+              G2Dashboard.pushSchedule(magicRandom: self.counters.nextMagic(), scheduleId: it.id,
+                title: it.title, location: it.location ?? "", time: it.time ?? "",
+                endTimestamp: it.endTs ?? 0, scheduleTotal: total, scheduleNum: Int32(i)), to: .both)
+          }
+        }
+        self.log("showNativeDashboard: native dashboard driven — order \(order), \(items.count) events, \(halfDay ? "12h" : "24h"), \(celsius ? "°C" : "°F")")
+      }
+      if self.sessionAuthed { reveal() } else { self.runAuthLocked { [weak self] in
+        self?.startHeartbeatsLocked(); reveal() } }
+    }
+  }
+
   // MARK: - FFS Dashboard (FUT-176) — our OWN dashboard, our pixels, on the mode-2 pipeline
 
   /// Show our dashboard app: auth if needed, ensure the persistent 576×288 container,

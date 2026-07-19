@@ -126,6 +126,13 @@ public class FfsBleModule: Module {
       self?.ensureCentral().showStockDashboard()
     }
 
+    // FUT-194: App #1 native-first — show the firmware's own dashboard driven fully by our OS
+    // over BLE (widget layout + 12/24h + °C/°F + OUR schedule events). No pixels, no firmware
+    // flash. config = JSON { halfDay, celsius, widgetOrder:[Int], schedule:[{id,title,location,time,endTs}] }.
+    Function("showNativeDashboard") { [weak self] (config: String) in
+      self?.ensureCentral().showNativeDashboard(configJSON: config)
+    }
+
     // FUT-176: our OWN dashboard (app #1) — rendered as our pixels via the mode-2 pipeline.
     // showDashboard() displays it; dashboardInput(action) navigates tiles/expand;
     // setDashboardData(json) feeds time/date/battery + widget data from the phone.
