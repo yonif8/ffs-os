@@ -227,6 +227,22 @@ enum G2Flash {
   static let goldenFontpeek = GoldenVector(
     sha256: "70332b9822806a546e028ffb1b88b49a44593fe88236a3daa70866185acbb4f0",
     ps: 3_540_259, progEnd: 0x0079_8503, pass: true)
+  // FUT-190 Hebrew RTL, BIDI-ONLY (staged flash stage 1): ports LVGL v9.3 lv_bidi into
+  // the CFW + hooks the ONE per-char decoder in lv_draw_label_iterate_characters so each
+  // line reorders to visual order. NO glyph/font changes — flashed first to confirm the
+  // shared label-draw hook doesn't disturb existing English/Chinese text before Hebrew is
+  // added. Fails safe to stock LTR on any anomaly. (patches/bidi_patch.c)
+  static let goldenBidiOnly = GoldenVector(
+    sha256: "33404e1977aa7d1abaeedfb34a64f1b81e470b6ea818a1d21f61a0187ca5be1c",
+    ps: 3_545_731, progEnd: 0x0079_9A63, pass: true)
+  // FUT-189 + FUT-190 COMBINED (staged flash stage 2): bidi (above) PLUS Hebrew glyphs —
+  // an embedded 21 KB Hebrew TTF served from RAM by hooking the FreeType-cache requester
+  // (sentinel name "FFSHEB") + a fallback node appended to both font chains. This is the
+  // one that makes Hebrew actually render, correctly ordered, system-wide. (patches/
+  // hebrew_font_patch.c + bidi_patch.c) prog_end 0x0079effe = 324 KB under the ceiling.
+  static let goldenHebrewFull = GoldenVector(
+    sha256: "45a481fc13b3cb864a9c6b63a4c428c248ab1f3a8ab770715b71965bad09ed5f",
+    ps: 3_567_646, progEnd: 0x0079_EFFE, pass: true)
 
   /// Run the parse+guard on `img` and assert it reproduces the golden vector. Returns
   /// nil on success, or a failure description. Any non-nil result MUST block flashing.

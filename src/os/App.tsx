@@ -45,6 +45,16 @@ const CANARY_SHA = "67759cd67ed7031d7b4c8a613b8b0fe9dc9bd51c11e82260c35f5bc80715
 // read, no new flash-write behavior; Restore Stock reverts. Same golden-vector safety gate.
 const FONTPEEK_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_fontpeek.bin";
 const FONTPEEK_SHA = "70332b9822806a546e028ffb1b88b49a44593fe88236a3daa70866185acbb4f0";
+// FUT-179 NATIVE HEBREW — staged flash (do these IN ORDER).
+// Stage 1 (BIDI-ONLY, FUT-190): RTL reorder only, NO glyph changes. Flash this first and
+// check normal English/Chinese text still renders correctly — it isolates the shared
+// label-draw hook's blast radius before Hebrew is added. Hebrew won't appear yet.
+const HEBREW_BIDI_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_bidi_only.bin";
+const HEBREW_BIDI_SHA = "33404e1977aa7d1abaeedfb34a64f1b81e470b6ea818a1d21f61a0187ca5be1c";
+// Stage 2 (FULL, FUT-189+190): bidi + Hebrew glyphs (embedded TTF via the FreeType-cache
+// requester hook). This is the one that renders Hebrew, correctly ordered, system-wide.
+const HEBREW_FULL_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_hebrew_full.bin";
+const HEBREW_FULL_SHA = "45a481fc13b3cb864a9c6b63a4c428c248ab1f3a8ab770715b71965bad09ed5f";
 const WARRANTY_PHRASE = "my warranty is void";
 
 // FUT-167 soft precheck — a self-attested readiness checklist that must be
@@ -395,6 +405,20 @@ export default function App() {
           onPress={() => startFlash(FONTPEEK_URL, FONTPEEK_SHA, false)}
         >
           <Text style={styles.btnText}>🔤 Flash FONT-PEEK CFW (reads font, then tap “Read … firmware version”)</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.btn, { backgroundColor: theme.accent, marginBottom: 10 }, (!armed || !bt.pairReady || flashBusy) && styles.btnDisabled]}
+          disabled={!armed || !bt.pairReady || flashBusy}
+          onPress={() => startFlash(HEBREW_BIDI_URL, HEBREW_BIDI_SHA, false)}
+        >
+          <Text style={styles.btnText}>🇮🇱 Hebrew ① Flash BIDI-ONLY (check English/Chinese still OK)</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.btn, { backgroundColor: theme.accent, marginBottom: 10 }, (!armed || !bt.pairReady || flashBusy) && styles.btnDisabled]}
+          disabled={!armed || !bt.pairReady || flashBusy}
+          onPress={() => startFlash(HEBREW_FULL_URL, HEBREW_FULL_SHA, false)}
+        >
+          <Text style={styles.btnText}>🇮🇱 Hebrew ② Flash FULL (bidi + glyphs → Hebrew renders)</Text>
         </Pressable>
         <View style={styles.btnRow}>
           <Pressable
