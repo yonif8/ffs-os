@@ -67,7 +67,7 @@ const HEBREW_PROBE_SHA = "39ea04a2964c443a1434310d929d64cf22c24ef908255f0f8d07a4
 // that our own native UI renders + live-updates firmware-side with zero phone — the de-risk
 // step before owning the idle screen (FUT-195 Phase B).
 const FFSUI_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_ffsui.bin";
-const FFSUI_SHA = "2fb9f32f8177fb0067dcaf93a43dc594908dfa6666a81bdf0b25be08a7325f11";
+const FFSUI_SHA = "cfff880a93035343ad20002aea0924221c455dff5809c2315075268f8a8613a5";
 const WARRANTY_PHRASE = "my warranty is void";
 
 // FUT-167 soft precheck — a self-attested readiness checklist that must be
