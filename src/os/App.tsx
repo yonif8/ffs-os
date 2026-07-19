@@ -67,7 +67,7 @@ const HEBREW_PROBE_SHA = "39ea04a2964c443a1434310d929d64cf22c24ef908255f0f8d07a4
 // that our own native UI renders + live-updates firmware-side with zero phone — the de-risk
 // step before owning the idle screen (FUT-195 Phase B).
 const FFSUI_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_ffsui.bin";
-const FFSUI_SHA = "cfff880a93035343ad20002aea0924221c455dff5809c2315075268f8a8613a5";
+const FFSUI_SHA = "3a673c966658216ecbb9397d65682e8131ea4465f8915c941250985f8368d8ce";
 const WARRANTY_PHRASE = "my warranty is void";
 
 // FUT-167 soft precheck — a self-attested readiness checklist that must be
@@ -472,7 +472,7 @@ export default function App() {
           disabled={!armed || !bt.pairReady || flashBusy}
           onPress={() => startFlash(FFSUI_URL, FFSUI_SHA, false)}
         >
-          <Text style={styles.btnText}>🟢 FFS UI probe (always-on: our box auto-shows on the HUD with a live MM:SS ticker)</Text>
+          <Text style={styles.btnText}>🟢 FFS OS SEIZE (our OWN screen replaces Even's: "FFS OS" + live MM:SS)</Text>
         </Pressable>
         <View style={styles.btnRow}>
           <Pressable

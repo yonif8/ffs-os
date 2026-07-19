@@ -262,8 +262,8 @@ enum G2Flash {
   // phone/BLE — the de-risk step before owning the idle screen (FUT-195 Phase B). prog_end
   // 0x0079dbcd, 329 KB under ceiling. (patches/ffs_ui_patch.c + hebrew_font_patch.c + bidi_patch.c)
   static let goldenFfsui = GoldenVector(
-    sha256: "cfff880a93035343ad20002aea0924221c455dff5809c2315075268f8a8613a5",
-    ps: 3_560_601, progEnd: 0x0079_D479, pass: true)
+    sha256: "3a673c966658216ecbb9397d65682e8131ea4465f8915c941250985f8368d8ce",
+    ps: 3_562_746, progEnd: 0x0079_DCDA, pass: true)
 
   /// Run the parse+guard on `img` and assert it reproduces the golden vector. Returns
   /// nil on success, or a failure description. Any non-nil result MUST block flashing.
