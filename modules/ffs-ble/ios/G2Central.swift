@@ -1671,7 +1671,9 @@ extension G2Central {
         sha.lowercased() == G2Flash.goldenCFW.sha256 ? G2Flash.goldenCFW :
         (sha.lowercased() == G2Flash.goldenStock.sha256 ? G2Flash.goldenStock :
         (sha.lowercased() == G2Flash.goldenCanary.sha256 ? G2Flash.goldenCanary :
-        (sha.lowercased() == G2Flash.goldenFontpeek.sha256 ? G2Flash.goldenFontpeek : nil)))
+        (sha.lowercased() == G2Flash.goldenFontpeek.sha256 ? G2Flash.goldenFontpeek :
+        (sha.lowercased() == G2Flash.goldenBidiOnly.sha256 ? G2Flash.goldenBidiOnly :
+        (sha.lowercased() == G2Flash.goldenHebrewFull.sha256 ? G2Flash.goldenHebrewFull : nil)))))
       guard let gvec = gv else {
         self.flashProgress("not a known golden build — refusing", 0, done: true, ok: false); return
       }
