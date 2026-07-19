@@ -252,6 +252,17 @@ enum G2Flash {
   static let goldenHebrewProbe = GoldenVector(
     sha256: "39ea04a2964c443a1434310d929d64cf22c24ef908255f0f8d07a4b01e72cbfd",
     ps: 3_559_323, progEnd: 0x0079_CF7B, pass: true)
+  // FUT-197 FFS UI probe: the Hebrew-full CFW PLUS our OWN native-LVGL element injected via
+  // CFW — a styled, rounded box on lv_layer_top with a child label that LIVE-TICKS an MM:SS
+  // counter every 1s, driven by a firmware lv_timer we create (0x00464467, pinned by __func__
+  // xref + field-init decomp against mainapp_0x438000.bin). Toggled by a ring release-long-
+  // press on the home HUD (gesture_fwd.ring_release → ffs_ui_toggle). First on-glass proof
+  // that our own native UI renders + live-updates firmware-side with zero phone/BLE — the
+  // de-risk step before owning the idle screen (FUT-195 Phase B). prog_end 0x0079d6f5, 330 KB
+  // under ceiling. (patches/ffs_ui_patch.c + bidi_patch.c + gesture_fwd.c)
+  static let goldenFfsui = GoldenVector(
+    sha256: "52c8e9e62192249bb1ba769304c55572ae0bcf6e4af124b4910eb6897bd44676",
+    ps: 3_561_237, progEnd: 0x0079_D6F5, pass: true)
 
   /// Run the parse+guard on `img` and assert it reproduces the golden vector. Returns
   /// nil on success, or a failure description. Any non-nil result MUST block flashing.
