@@ -20,7 +20,7 @@ import { useFfsBluetooth } from "./useFfsBluetooth";
 import { useConnectionSupervisor, healthLabel, type ConnectionHealth } from "./connection";
 import { screenOwner } from "./reclaim";
 import { PhoneNav, type PhoneCtx } from "./phone/nav";
-import { homeScreen } from "./phone/screens";
+import { homeScreen, textTestScreen, setTextTestContent } from "./phone/screens";
 
 const APP_VERSION = "0.10.20";
 
@@ -101,6 +101,7 @@ export default function App() {
   const [flashFrac, setFlashFrac] = useState<number>(0);
   const [flashBusy, setFlashBusy] = useState<boolean>(false);
   const [warranty, setWarranty] = useState<string>("");
+  const [textTest, setTextTest] = useState<string>("");
   const [precheck, setPrecheck] = useState<boolean[]>(() => PRECHECK_ITEMS.map(() => false));
 
   // Live refs so the nav's context getters always read current session state.
@@ -320,6 +321,32 @@ export default function App() {
             {bt.pairReady ? "not read yet — tap above (auto-reads ~2s after connect)" : "connect both lenses first"}
           </Text>
         )}
+      </View>
+
+      <Text style={styles.section}>Text test — Hebrew/English scroll (FUT-191)</Text>
+      <View style={styles.card}>
+        <TextInput
+          style={[styles.input, { minHeight: 90, textAlignVertical: "top" }]}
+          multiline
+          value={textTest}
+          onChangeText={setTextTest}
+          placeholder="Paste a long story (English + Hebrew) to display on the glasses…"
+          placeholderTextColor={theme.textDim}
+        />
+        <Pressable
+          style={[styles.btn, { marginTop: 8 }, (!bt.pairReady || flashBusy || !textTest.trim()) && styles.btnDisabled]}
+          disabled={!bt.pairReady || flashBusy || !textTest.trim()}
+          onPress={() => {
+            setTextTestContent(textTest);
+            navRef.current?.openScreen(textTestScreen);
+            screenOwner.reclaimNow();
+          }}
+        >
+          <Text style={styles.btnText}>Send to glasses → Text test</Text>
+        </Pressable>
+        <Text style={[styles.meta, { marginTop: 6 }]}>
+          On the glasses: swipe up/down to scroll, double-tap to exit. Also reachable from the on-glass menu (Home → Text test).
+        </Text>
       </View>
 
       <Text style={styles.section}>Firmware — CFW flasher (FUT-167)</Text>

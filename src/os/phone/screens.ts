@@ -99,12 +99,61 @@ const bluetooth = text("bt", "Bluetooth", (ctx) => {
   ];
 });
 
+// ---- Text test (FUT-191) --------------------------------------------------
+// A long, scrollable text surface: paste a story (English + Hebrew) in the phone app, it
+// renders on the HUD through the firmware's normal label path — English via the bitmap
+// font, Hebrew via our FreeType fallback — so we can feel whether FreeType scrolling lags
+// vs bitmap. Swipe up/down on the glasses scrolls; double-tap exits. Phone-side only, no
+// firmware flash. Word-wrap is a fixed-width approximation (the HUD font is proportional).
+
+const TEXT_WRAP = 46; // approx chars per HUD line at the default size
+
+let textTestLines: string[] = [
+  "No text yet.",
+  "In the phone app, paste a long",
+  "story (English + Hebrew) and tap",
+  "Send to glasses. Then swipe up/",
+  "down here to scroll it.",
+];
+
+/** Word-wrap raw multi-line text into fixed-width display lines for the HUD reader. */
+export function setTextTestContent(raw: string): void {
+  const out: string[] = [];
+  for (const para of raw.replace(/\r/g, "").split("\n")) {
+    if (para.trim() === "") { out.push(""); continue; }
+    let line = "";
+    for (const word of para.split(/\s+/)) {
+      if (!word) continue;
+      let w = word;
+      // hard-break a single word longer than the wrap width
+      while (w.length > TEXT_WRAP) {
+        if (line) { out.push(line); line = ""; }
+        out.push(w.slice(0, TEXT_WRAP));
+        w = w.slice(TEXT_WRAP);
+      }
+      if (!line) line = w;
+      else if ((line + " " + w).length <= TEXT_WRAP) line += " " + w;
+      else { out.push(line); line = w; }
+    }
+    if (line) out.push(line);
+  }
+  textTestLines = out.length ? out : ["(empty)"];
+}
+
+export const textTestScreen: Screen = {
+  id: "texttest",
+  title: "Text test",
+  kind: "textscroll",
+  scrollLines: () => textTestLines,
+};
+
 // ---- Home (the 5 real apps) -----------------------------------------------
 
 export const homeScreen: Screen = list("home", "Home", [
   { label: "Animations", hint: ">", target: animations },
   { label: "Clock", hint: ">", target: clock },
   { label: "Image Test", hint: ">", target: image("imgtest", "Image Test") },
+  { label: "Text test", hint: ">", target: textTestScreen },
   { label: "Dashboard", hint: ">", target: dashboard },
   { label: "Even Native Dash", hint: ">", target: stockDash },
   { label: "About", hint: ">", target: about },
