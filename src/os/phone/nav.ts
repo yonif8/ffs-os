@@ -18,7 +18,7 @@
 
 import FfsBle, { type G2GestureName } from "../../../modules/ffs-ble";
 
-export type ScreenKind = "list" | "text" | "image" | "anim" | "stockdash" | "ffsdash";
+export type ScreenKind = "list" | "text" | "image" | "anim" | "stockdash" | "ffsdash" | "textscroll";
 
 /** Live context the dynamic screens read at paint time (connection, version, etc.). */
 export interface PhoneCtx {
@@ -49,6 +49,9 @@ export interface Screen {
   body?: (ctx: PhoneCtx) => string[];
   /** For `anim` screens: the animation id passed to FfsBle.playAnimation (FUT-165). */
   animId?: string;
+  /** For `textscroll` screens (FUT-191 Text test): the full already-wrapped body lines,
+   *  read fresh at paint time so updated phone-sent content shows. Swipe up/down scrolls. */
+  scrollLines?: () => string[];
 }
 
 // HUD ~= 7 text rows at the default font. Reserve row 1 (status bar) + row 2 (title);
@@ -58,7 +61,13 @@ const MAX_ROWS = 5;
 interface Frame {
   screen: Screen;
   sel: number;
+  /** For `textscroll` screens: index of the first visible body line. */
+  scroll?: number;
 }
+
+// A textscroll screen shows this many body rows (no status bar, to maximize reading area
+// on the ~7-row HUD). Swipe scrolls by a page minus one line of overlap.
+const TEXT_ROWS = 6;
 
 export class PhoneNav {
   private stack: Frame[];
@@ -104,6 +113,28 @@ export class PhoneNav {
         case "swipe_down": FfsBle.dashboardInput("next"); break;
         case "tap": FfsBle.dashboardInput("toggle"); break;
         case "double_tap": if (this.back()) this.onChange(); break;
+      }
+      return;
+    }
+
+    // FUT-191 Text test: swipe up/down scrolls the long body, double-tap exits.
+    if (cur.screen.kind === "textscroll") {
+      const lines = cur.screen.scrollLines?.() ?? [];
+      const maxStart = Math.max(0, lines.length - TEXT_ROWS);
+      const step = Math.max(1, TEXT_ROWS - 1);
+      const at = cur.scroll ?? 0;
+      switch (name) {
+        case "swipe_down":
+          if (at < maxStart) { cur.scroll = Math.min(at + step, maxStart); this.onChange(); }
+          break;
+        case "swipe_up":
+          if (at > 0) { cur.scroll = Math.max(at - step, 0); this.onChange(); }
+          break;
+        case "double_tap":
+          if (this.back()) this.onChange();
+          break;
+        case "tap":
+          break;
       }
       return;
     }
@@ -228,9 +259,28 @@ export class PhoneNav {
     FfsBle.showText(this.renderText().join("\n"));
   }
 
+  /** Push an arbitrary screen (used by the phone app to open Text test on demand). */
+  openScreen(screen: Screen): void {
+    this.stack.push({ screen, sel: 0, scroll: 0 });
+    this.onChange();
+  }
+
   /** Compose the current text screen: status bar + title + list window / body. */
   renderText(): string[] {
     const cur = this.top();
+
+    // FUT-191 Text test: a scrolling reader. Drop the status bar to use all ~7 HUD rows;
+    // header shows the visible line range so the scroll position is obvious.
+    if (cur.screen.kind === "textscroll") {
+      const all = cur.screen.scrollLines?.() ?? [];
+      const maxStart = Math.max(0, all.length - TEXT_ROWS);
+      const start = Math.min(cur.scroll ?? 0, maxStart);
+      const win = all.slice(start, start + TEXT_ROWS);
+      const last = Math.min(start + TEXT_ROWS, all.length);
+      const header = `${cur.screen.title}  ${all.length ? start + 1 : 0}-${last}/${all.length}`;
+      return [header, ...win];
+    }
+
     const lines: string[] = [this.statusBar()];
 
     const crumb = this.stack.length > 1 ? "‹ " : "";
