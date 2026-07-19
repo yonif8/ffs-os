@@ -55,6 +55,12 @@ const HEBREW_BIDI_SHA = "33404e1977aa7d1abaeedfb34a64f1b81e470b6ea818a1d21f61a01
 // requester hook). This is the one that renders Hebrew, correctly ordered, system-wide.
 const HEBREW_FULL_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_hebrew_full.bin";
 const HEBREW_FULL_SHA = "45a481fc13b3cb864a9c6b63a4c428c248ab1f3a8ab770715b71965bad09ed5f";
+// FUT-191 — Hebrew v2 + font probe: full-coverage Hebrew (gershayim/geresh/shekel/
+// presentation forms; no niqqud) + a diagnostic that logs the scalable font names the
+// firmware opens (read back via "Read battery + firmware version"). Supersedes the FULL
+// build above. Flash this, browse the UI, then do the firmware-version read.
+const HEBREW_PROBE_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_hebrew_probe.bin";
+const HEBREW_PROBE_SHA = "39ea04a2964c443a1434310d929d64cf22c24ef908255f0f8d07a4b01e72cbfd";
 const WARRANTY_PHRASE = "my warranty is void";
 
 // FUT-167 soft precheck — a self-attested readiness checklist that must be
@@ -419,6 +425,13 @@ export default function App() {
           onPress={() => startFlash(HEBREW_FULL_URL, HEBREW_FULL_SHA, false)}
         >
           <Text style={styles.btnText}>🇮🇱 Hebrew ② Flash FULL (bidi + glyphs → Hebrew renders)</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.btn, { backgroundColor: theme.accent, marginBottom: 10 }, (!armed || !bt.pairReady || flashBusy) && styles.btnDisabled]}
+          disabled={!armed || !bt.pairReady || flashBusy}
+          onPress={() => startFlash(HEBREW_PROBE_URL, HEBREW_PROBE_SHA, false)}
+        >
+          <Text style={styles.btnText}>🇮🇱 Hebrew v2 + PROBE (full glyphs; browse UI → tap “Read … firmware version”)</Text>
         </Pressable>
         <View style={styles.btnRow}>
           <Pressable
