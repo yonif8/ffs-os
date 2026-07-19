@@ -243,6 +243,15 @@ enum G2Flash {
   static let goldenHebrewFull = GoldenVector(
     sha256: "45a481fc13b3cb864a9c6b63a4c428c248ab1f3a8ab770715b71965bad09ed5f",
     ps: 3_567_646, progEnd: 0x0079_EFFE, pass: true)
+  // FUT-191 Hebrew v2 + font-name probe: full-coverage Hebrew (no niqqud — adds
+  // gershayim/geresh/shekel/presentation forms that the first ship's tight subset
+  // lacked) PLUS a diagnostic that logs every scalable FreeType font name the firmware
+  // opens (emitted as field 102 in the device-info read) so we can tell which native
+  // surfaces are boldable (FreeType) vs the fixed light bitmap. Everything else is the
+  // same proven glyph+bidi CFW. prog_end 0x0079cf7b, 332 KB under ceiling.
+  static let goldenHebrewProbe = GoldenVector(
+    sha256: "39ea04a2964c443a1434310d929d64cf22c24ef908255f0f8d07a4b01e72cbfd",
+    ps: 3_559_323, progEnd: 0x0079_CF7B, pass: true)
 
   /// Run the parse+guard on `img` and assert it reproduces the golden vector. Returns
   /// nil on success, or a failure description. Any non-nil result MUST block flashing.

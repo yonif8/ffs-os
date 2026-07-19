@@ -629,6 +629,14 @@ enum G2Setting {
       let hex = fp.map { String(format: "%02x", $0) }.joined()
       out.leftVersion = (out.leftVersion ?? "") + "  ⟨FONTS=" + hex + "⟩"
     }
+    // FUT-191 probe: field 102 (OUTER) = the runtime FreeType font-name log (newline-
+    // separated). Surface it as readable text on the version line — this lists every
+    // scalable font the firmware actually opened; empty means the browsed UI used the
+    // fixed bitmap font (not boldable via FreeType).
+    if let fl = f[102] as? Data, let s = String(data: fl, encoding: .utf8) {
+      let names = s.split(separator: "\n").joined(separator: ", ")
+      out.leftVersion = (out.leftVersion ?? "") + "  ⟨FTFONTS=" + (names.isEmpty ? "(none)" : names) + "⟩"
+    }
     if out.leftVersion == nil && out.rightVersion == nil && out.battery == nil && out.charging == nil {
       return nil
     }
