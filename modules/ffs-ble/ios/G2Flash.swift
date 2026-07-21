@@ -277,14 +277,16 @@ enum G2Flash {
     ps: 3_563_490, progEnd: 0x0079_DFC2, pass: true)
 
   // FUT-216 resident OTA loader ("flash-once, push-forever"). Minimal CFW (NO ffs_ui seize —
-  // inert until a payload is pushed). Boot arms a payload-runner lv_timer; BLE service 0x90
-  // receives a native payload, copies it to RAM, and runs it on the display thread. Push
-  // Payload A/B from the app to change on-glass UI over the air with NO reflash. Loader status
-  // shows in the device-info readback as ⟨LOADER LD01 gen=… ran=… ret=0x… len=…⟩.
-  // prog_end 0x0079E83E, 325 KB under ceiling. (patches/loader.c + svc-0x90 dispatch patch)
+  // inert until a payload is pushed). Boot arms a payload-runner lv_timer; a native payload
+  // arrives over the evenHub IMAGE channel (service 0xE0, "FXP1"-magic framed — the svc-0x90
+  // path was proven dead: local_dispatch keys on inner command codes, not the serviceId), gets
+  // copied to RAM, and runs on the display thread. Push Payload A/B from the app to change
+  // on-glass UI over the air with NO reflash. Status shows in the device-info readback as
+  // ⟨LOADER … gen=… ran=… ret=0x… calls=…⟩. prog_end 0x0079E99E, 325 KB under ceiling.
+  // (patches/loader.c cfw_loader_ingest + zlib_glue.c FXP1 image route)
   static let goldenLoader = GoldenVector(
-    sha256: "f9d4fe637d410211431a41762f8bded2cfbe6c2cd7eb46a50223539e3f6aa23d",
-    ps: 3_565_974, progEnd: 0x0079_E976, pass: true)
+    sha256: "373bfe9aa3645f1cda5b0204df1db3516e16347f31dcc9a39846442022c43103",
+    ps: 3_566_014, progEnd: 0x0079_E99E, pass: true)
 
   /// Run the parse+guard on `img` and assert it reproduces the golden vector. Returns
   /// nil on success, or a failure description. Any non-nil result MUST block flashing.

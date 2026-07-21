@@ -647,6 +647,40 @@ final class G2Central: NSObject {
     }
   }
 
+  /// FUT-216 (LIVE OTA delivery): push a base64 native-code payload to the resident CFW loader
+  /// over the evenHub IMAGE channel (service 0xE0). We prefix the blob with the "FXP1" magic and
+  /// send it as raw image data into the 576×288 container; the CFW's image handler recognizes the
+  /// magic and routes it to the loader (copy → display-thread runner) instead of drawing pixels.
+  /// This REPLACES the dead svc-0x90 push: local_dispatch keys on inner 16-bit command codes, not
+  /// the transport serviceId, so a svc-0x90 message never reached the CFW (FUT-216 on-glass: the
+  /// collector's calls stayed 0 across 7 pushes). The image channel is a real firmware-processed
+  /// service that demonstrably reaches our worker.
+  func pushPayloadViaImage(base64: String) {
+    queue.async { [weak self] in
+      guard let self = self else { return }
+      if self.flashActive { self.log("pushPayload ignored — flash in progress"); return }
+      guard self.pairReadyLocked() else {
+        self.log("pushPayload ignored — pair not ready (connect both lenses first)"); return
+      }
+      guard let blob = Data(base64Encoded: base64), !blob.isEmpty else {
+        self.log("pushPayload ignored — bad/empty base64"); return
+      }
+      self.stopAnimationLocked()   // don't interleave FXP1 payload frames with mode-2 anim frames
+      var payload = Data([0x46, 0x58, 0x50, 0x31])   // "FXP1" magic, then the raw code blob
+      payload.append(blob)
+      let send: () -> Void = { [weak self] in
+        guard let self = self else { return }
+        self.startHeartbeatsLocked()                 // keep the link alive during delivery
+        self.ensureAnimContainerLocked { [weak self] in
+          guard let self = self, !self.flashActive, self.pairReadyLocked() else { return }
+          self.sendAnimFrameLocked(payload)          // proven raw-bytes-over-image fragmenter
+          self.log("pushPayload → image channel (\(payload.count) B, FXP1)")
+        }
+      }
+      if self.sessionAuthed { send() } else { self.runAuthLocked(send) }
+    }
+  }
+
   /// Send a stock-dashboard (service 0x01) payload to the target side(s). (FUT-170)
   private func sendDashboardLocked(_ payload: Data, to target: G2Target) {
     let pkts = counters.packets(
