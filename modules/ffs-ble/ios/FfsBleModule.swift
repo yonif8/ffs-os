@@ -167,6 +167,13 @@ public class FfsBleModule: Module {
     Function("pushToService") { [weak self] (serviceId: Int, base64: String) in
       self?.ensureCentral().pushToService(serviceId: UInt8(serviceId & 0xff), base64: base64)
     }
+
+    // FUT-216: LIVE OTA delivery — push a base64 native payload to the resident loader over the
+    // evenHub image channel (service 0xE0), "FXP1"-magic framed. Replaces the dead pushToService
+    // 0x90 path (the dispatch table keys on inner command codes, not the transport serviceId).
+    Function("pushPayloadViaImage") { [weak self] (base64: String) in
+      self?.ensureCentral().pushPayloadViaImage(base64: base64)
+    }
   }
 
   private static func parseSide(_ raw: String) -> G2Side {

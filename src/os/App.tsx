@@ -22,7 +22,7 @@ import { screenOwner } from "./reclaim";
 import { PhoneNav, type PhoneCtx } from "./phone/nav";
 import { homeScreen, textTestScreen, setTextTestContent } from "./phone/screens";
 
-const APP_VERSION = "0.10.38";
+const APP_VERSION = "0.10.39";
 
 // FUT-167 Stage 2 — CFW + stock-restore images (hosted on the private slsrc server, NOT
 // bundled: this repo is public and the firmware is Even's copyrighted image). Downloaded
@@ -79,7 +79,7 @@ const RAMEXEC_SHA = "913a7f28cc79957ed8a5991c7434d993583070fc3d369b6c6a9e1683fd6
 // NO reflash. Loader status shows on the device-info read as ⟨LOADER LD01 gen=… ret=0x…⟩.
 const LOADER_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_loader.bin";
 // FUT-217: no gesture hooks (left touchpad); FUT-216: dispatch probe (logs service keys → svc[]).
-const LOADER_SHA = "f9d4fe637d410211431a41762f8bded2cfbe6c2cd7eb46a50223539e3f6aa23d";
+const LOADER_SHA = "373bfe9aa3645f1cda5b0204df1db3516e16347f31dcc9a39846442022c43103";
 const CFW_SERVICE = 0x90; // custom CFW loader BLE service id
 // Demo payloads = "FXP1" magic + a compiled PIC blob (payload_main draws a bordered box +
 // label on lv_layer_top). Pushing B after A visibly replaces A. (patches/payloads/payload_*.c)
@@ -511,14 +511,14 @@ export default function App() {
           <Pressable
             style={[styles.btn, !bt.pairReady && styles.btnDisabled]}
             disabled={!bt.pairReady}
-            onPress={() => { glog.emit("os", "push_a", {}); FfsBle.pushToService(CFW_SERVICE, PAYLOAD_A_B64); }}
+            onPress={() => { glog.emit("os", "push_a", {}); FfsBle.pushPayloadViaImage(PAYLOAD_A_B64); }}
           >
             <Text style={styles.btnText}>⬆️ Push Payload A (OTA)</Text>
           </Pressable>
           <Pressable
             style={[styles.btn, { backgroundColor: theme.accent }, !bt.pairReady && styles.btnDisabled]}
             disabled={!bt.pairReady}
-            onPress={() => { glog.emit("os", "push_b", {}); FfsBle.pushToService(CFW_SERVICE, PAYLOAD_B_B64); }}
+            onPress={() => { glog.emit("os", "push_b", {}); FfsBle.pushPayloadViaImage(PAYLOAD_B_B64); }}
           >
             <Text style={styles.btnText}>⬆️ Push Payload B (OTA)</Text>
           </Pressable>

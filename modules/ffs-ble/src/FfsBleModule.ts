@@ -195,6 +195,13 @@ interface FfsBleNativeModule {
    */
   pushToService(serviceId: number, base64: string): void;
   /**
+   * FUT-216 (LIVE OTA delivery): push a base64 native-code payload to the resident CFW loader
+   * over the evenHub image channel (service 0xE0), "FXP1"-magic framed. Replaces pushToService
+   * 0x90 (proven dead on-glass — the dispatch table keys on inner command codes, not the
+   * transport serviceId). Connect the pair first (isPairReady() === true).
+   */
+  pushPayloadViaImage(base64: string): void;
+  /**
    * FUT-165: play an on-glass pixel animation by id (one of: "image", "ball", "spinner",
    * "rings", "plasma", "starfield", "marquee", "video"). Streams CFW mode-2 frames to a
    * persistent 576×288 container. Connect the pair first (isPairReady() === true).
