@@ -22,7 +22,7 @@ import { screenOwner } from "./reclaim";
 import { PhoneNav, type PhoneCtx } from "./phone/nav";
 import { homeScreen, textTestScreen, setTextTestContent } from "./phone/screens";
 
-const APP_VERSION = "0.10.34";
+const APP_VERSION = "0.10.35";
 
 // FUT-167 Stage 2 — CFW + stock-restore images (hosted on the private slsrc server, NOT
 // bundled: this repo is public and the firmware is Even's copyrighted image). Downloaded
@@ -74,6 +74,18 @@ const FFSUI_SHA = "3a673c966658216ecbb9397d65682e8131ea4465f8915c941250985f8368d
 // code into RAM and running it WORKS — green light for the resident OTA loader).
 const RAMEXEC_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_ramexec.bin";
 const RAMEXEC_SHA = "913a7f28cc79957ed8a5991c7434d993583070fc3d369b6c6a9e1683fd6f3f86";
+// FUT-216 — resident OTA loader ("flash-once, push-forever"). Flash ONCE (inert, no seize —
+// glasses behave normally) then tap Push Payload A / B to change on-glass UI OVER THE AIR with
+// NO reflash. Loader status shows on the device-info read as ⟨LOADER LD01 gen=… ret=0x…⟩.
+const LOADER_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_loader.bin";
+const LOADER_SHA = "d3d13c11f4fad2e30a25b8e4a7c0ea9810fb83472b4f689f2e2a4e0730063bdd";
+const CFW_SERVICE = 0x90; // custom CFW loader BLE service id
+// Demo payloads = "FXP1" magic + a compiled PIC blob (payload_main draws a bordered box +
+// label on lv_layer_top). Pushing B after A visibly replaces A. (patches/payloads/payload_*.c)
+const PAYLOAD_A_B64 =
+  "RlhQMS3p8EFP9r9BBEbA8kQBACCIRwAoAPCOgE32g2HA8kMBiEcAKADwiYBP8sFDT/KbCMDyQwNP9KBxXCIFRsDyQwiYRyhGgCFiIsBHRPbTQcDyRwEgIIhHAChU0AZGQvZpBwAgwPJIBzBwcHCwcPBwMHFwcbBx8HEwcnBysHLwcjBzcHOwc/BzMHRwdLB08HQwdXB1sHXwdTB2cHawdvB2MHdwd7B38HcwRh0hACK4RzBGKCEDIrhHMEYkIf8iuEcwRiMhb/B/QrhHMEYMIQwiuEdE8txgwvIHAAJoErEwRjIhuEcwRjAhb/B/QrhHMEYxIf8iuEdL9hsTwPJEAyhGMUYAIphHSfIXRsDySQYoRrBHYLFA8h4BwPIAAQbxGAJ5RAZGkEcwRlQhIiLARwogJWC96PCBASC96PCBAiC96PCBT1RBIFBBWUxPQUQgQQA=";
+const PAYLOAD_B_B64 =
+  "RlhQMS3p8EFP9r9BBEbA8kQBACCIRwAoAPCOgE32g2HA8kMBiEcAKADwiYBP8sFDT/KbCMDyQwNP9L5xeCIFRsDyQwiYRyhGYiFUIsBHRPbTQcDyRwEgIIhHAChU0AZGQvZpBwAgwPJIBzBwcHCwcPBwMHFwcbBx8HEwcnBysHLwcjBzcHOwc/BzMHRwdLB08HQwdXB1sHXwdTB2cHawdvB2MHdwd7B38HcwRh0hACK4RzBGKCEFIrhHMEYkIf8iuEcwRiMhb/B/QrhHMEYMIRgiuEdE8txgwvIHAAJoErEwRjIhuEcwRjAhb/B/QrhHMEYxIf8iuEdL9hsTwPJEAyhGMUYAIphHSfIXRsDySQYoRrBHYLFA8h4BwPIAAQbxGAJ5RAZGkEcwRmAhMCLARwsgJWC96PCBASC96PCBAiC96PCBT1RBIFBBWUxPQUQgQiB2MgA=";
 const WARRANTY_PHRASE = "my warranty is void";
 
 // FUT-167 soft precheck — a self-attested readiness checklist that must be
@@ -487,6 +499,29 @@ export default function App() {
         >
           <Text style={styles.btnText}>⚡ RAM-EXEC PROBE (FUT-214: then tap “Read … firmware version” → ⟨RAMEXEC …⟩)</Text>
         </Pressable>
+        <Pressable
+          style={[styles.btn, { backgroundColor: theme.accent, marginBottom: 10 }, (!armed || !bt.pairReady || flashBusy) && styles.btnDisabled]}
+          disabled={!armed || !bt.pairReady || flashBusy}
+          onPress={() => startFlash(LOADER_URL, LOADER_SHA, false)}
+        >
+          <Text style={styles.btnText}>🚀 FLASH OTA LOADER (FUT-216: flash once — then Push A/B below to change UI over the air)</Text>
+        </Pressable>
+        <View style={styles.btnRow}>
+          <Pressable
+            style={[styles.btn, !bt.pairReady && styles.btnDisabled]}
+            disabled={!bt.pairReady}
+            onPress={() => { glog.emit("os", "push_a", {}); FfsBle.pushToService(CFW_SERVICE, PAYLOAD_A_B64); }}
+          >
+            <Text style={styles.btnText}>⬆️ Push Payload A (OTA)</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.btn, { backgroundColor: theme.accent }, !bt.pairReady && styles.btnDisabled]}
+            disabled={!bt.pairReady}
+            onPress={() => { glog.emit("os", "push_b", {}); FfsBle.pushToService(CFW_SERVICE, PAYLOAD_B_B64); }}
+          >
+            <Text style={styles.btnText}>⬆️ Push Payload B (OTA)</Text>
+          </Pressable>
+        </View>
         <View style={styles.btnRow}>
           <Pressable
             style={[styles.btn, { backgroundColor: theme.danger }, (!armed || !bt.pairReady || flashBusy) && styles.btnDisabled]}

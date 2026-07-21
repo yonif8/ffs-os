@@ -190,6 +190,11 @@ interface FfsBleNativeModule {
    */
   requestDeviceInfo(): void;
   /**
+   * FUT-216: push an arbitrary base64 payload to a raw service id (e.g. 0x90 = resident CFW
+   * OTA loader), framed + chunked through the standard 0xAA transport, to both lenses.
+   */
+  pushToService(serviceId: number, base64: string): void;
+  /**
    * FUT-165: play an on-glass pixel animation by id (one of: "image", "ball", "spinner",
    * "rings", "plasma", "starfield", "marquee", "video"). Streams CFW mode-2 frames to a
    * persistent 576×288 container. Connect the pair first (isPairReady() === true).

@@ -276,6 +276,16 @@ enum G2Flash {
     sha256: "913a7f28cc79957ed8a5991c7434d993583070fc3d369b6c6a9e1683fd6f3f86",
     ps: 3_563_490, progEnd: 0x0079_DFC2, pass: true)
 
+  // FUT-216 resident OTA loader ("flash-once, push-forever"). Minimal CFW (NO ffs_ui seize —
+  // inert until a payload is pushed). Boot arms a payload-runner lv_timer; BLE service 0x90
+  // receives a native payload, copies it to RAM, and runs it on the display thread. Push
+  // Payload A/B from the app to change on-glass UI over the air with NO reflash. Loader status
+  // shows in the device-info readback as ⟨LOADER LD01 gen=… ran=… ret=0x… len=…⟩.
+  // prog_end 0x0079E83E, 325 KB under ceiling. (patches/loader.c + svc-0x90 dispatch patch)
+  static let goldenLoader = GoldenVector(
+    sha256: "d3d13c11f4fad2e30a25b8e4a7c0ea9810fb83472b4f689f2e2a4e0730063bdd",
+    ps: 3_565_662, progEnd: 0x0079_E83E, pass: true)
+
   /// Run the parse+guard on `img` and assert it reproduces the golden vector. Returns
   /// nil on success, or a failure description. Any non-nil result MUST block flashing.
   static func selfTestGuard(_ img: [UInt8], expect gv: GoldenVector) -> String? {

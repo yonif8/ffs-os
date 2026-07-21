@@ -653,6 +653,17 @@ enum G2Setting {
         format: "  ⟨RAMEXEC %@ %@ ret=0x%X mpu_ctrl=0x%X mpu_type=0x%X ccr=0x%X buf=0x%08X⟩",
         marker, verdict, ret, mpuCtrl, mpuType, ccr, buf)
     }
+    // FUT-216 resident OTA loader: field 104 (OUTER) = "LD01" + gen + ran_gen + last_ret + len.
+    // gen = payloads received, ran = payloads executed. A push landing bumps gen; ran==gen +
+    // ret==0x0A/0x0B confirms the payload ran on-glass. Surfaced on the version line + glog.
+    if let ld = f[104] as? Data, ld.count >= 20 {
+      let b = [UInt8](ld)
+      func u32(_ o: Int) -> UInt32 {
+        UInt32(b[o]) | (UInt32(b[o+1]) << 8) | (UInt32(b[o+2]) << 16) | (UInt32(b[o+3]) << 24)
+      }
+      out.leftVersion = (out.leftVersion ?? "") + String(
+        format: "  ⟨LOADER LD01 gen=%u ran=%u ret=0x%X len=%u⟩", u32(4), u32(8), u32(12), u32(16))
+    }
     if out.leftVersion == nil && out.rightVersion == nil && out.battery == nil && out.charging == nil {
       return nil
     }
