@@ -22,7 +22,7 @@ import { screenOwner } from "./reclaim";
 import { PhoneNav, type PhoneCtx } from "./phone/nav";
 import { homeScreen, textTestScreen, setTextTestContent } from "./phone/screens";
 
-const APP_VERSION = "0.10.37";
+const APP_VERSION = "0.10.38";
 
 // FUT-167 Stage 2 — CFW + stock-restore images (hosted on the private slsrc server, NOT
 // bundled: this repo is public and the firmware is Even's copyrighted image). Downloaded
@@ -78,8 +78,8 @@ const RAMEXEC_SHA = "913a7f28cc79957ed8a5991c7434d993583070fc3d369b6c6a9e1683fd6
 // glasses behave normally) then tap Push Payload A / B to change on-glass UI OVER THE AIR with
 // NO reflash. Loader status shows on the device-info read as ⟨LOADER LD01 gen=… ret=0x…⟩.
 const LOADER_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_loader.bin";
-// FUT-217: no gesture_fwd input hooks (left touchpad); FUT-216: + delivery diagnostics (calls/first4).
-const LOADER_SHA = "3e80862a802af87fb4f5b50e550c94f8f73ae4b24624609dbd2b0f7565ca9c28";
+// FUT-217: no gesture hooks (left touchpad); FUT-216: dispatch probe (logs service keys → svc[]).
+const LOADER_SHA = "f9d4fe637d410211431a41762f8bded2cfbe6c2cd7eb46a50223539e3f6aa23d";
 const CFW_SERVICE = 0x90; // custom CFW loader BLE service id
 // Demo payloads = "FXP1" magic + a compiled PIC blob (payload_main draws a bordered box +
 // label on lv_layer_top). Pushing B after A visibly replaces A. (patches/payloads/payload_*.c)

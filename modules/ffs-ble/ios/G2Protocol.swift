@@ -667,6 +667,12 @@ enum G2Setting {
         // (>0 => the push reaches the firmware handler); first4 should be 0x31505846 ("FXP1").
         s += String(format: " calls=%u rxlen=%u first4=0x%08X", u32(20), u32(24), u32(28))
       }
+      if ld.count >= 52 {
+        // FUT-216 dispatch probe: disp = local_dispatch invocations; svc[] = last 4 service
+        // keys the firmware routed. A push should show its key here (→ set the table to match)
+        // or never appear (→ the message doesn't reach this dispatcher).
+        s += String(format: " disp=%u svc=[0x%X,0x%X,0x%X,0x%X]", u32(32), u32(36), u32(40), u32(44), u32(48))
+      }
       out.leftVersion = (out.leftVersion ?? "") + s + "⟩"
     }
     if out.leftVersion == nil && out.rightVersion == nil && out.battery == nil && out.charging == nil {
