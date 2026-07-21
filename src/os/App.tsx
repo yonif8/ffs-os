@@ -22,7 +22,7 @@ import { screenOwner } from "./reclaim";
 import { PhoneNav, type PhoneCtx } from "./phone/nav";
 import { homeScreen, textTestScreen, setTextTestContent } from "./phone/screens";
 
-const APP_VERSION = "0.10.20";
+const APP_VERSION = "0.10.34";
 
 // FUT-167 Stage 2 — CFW + stock-restore images (hosted on the private slsrc server, NOT
 // bundled: this repo is public and the firmware is Even's copyrighted image). Downloaded
@@ -68,6 +68,12 @@ const HEBREW_PROBE_SHA = "39ea04a2964c443a1434310d929d64cf22c24ef908255f0f8d07a4
 // step before owning the idle screen (FUT-195 Phase B).
 const FFSUI_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_ffsui.bin";
 const FFSUI_SHA = "3a673c966658216ecbb9397d65682e8131ea4465f8915c941250985f8368d8ce";
+// FUT-214 — RAM-exec probe: the "flash-once, push-forever" de-risk build. After flashing,
+// tap "Read battery + firmware version": the CFW runs a RAM-exec test and returns the result
+// on the firmware-L line as ⟨RAMEXEC RX01 EXEC_OK ret=0x2A …⟩ (ret==0x2A => pushing native
+// code into RAM and running it WORKS — green light for the resident OTA loader).
+const RAMEXEC_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_ramexec.bin";
+const RAMEXEC_SHA = "913a7f28cc79957ed8a5991c7434d993583070fc3d369b6c6a9e1683fd6f3f86";
 const WARRANTY_PHRASE = "my warranty is void";
 
 // FUT-167 soft precheck — a self-attested readiness checklist that must be
@@ -473,6 +479,13 @@ export default function App() {
           onPress={() => startFlash(FFSUI_URL, FFSUI_SHA, false)}
         >
           <Text style={styles.btnText}>🟢 FFS OS SEIZE (our OWN screen replaces Even's: "FFS OS" + live MM:SS)</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.btn, { backgroundColor: theme.accent, marginBottom: 10 }, (!armed || !bt.pairReady || flashBusy) && styles.btnDisabled]}
+          disabled={!armed || !bt.pairReady || flashBusy}
+          onPress={() => startFlash(RAMEXEC_URL, RAMEXEC_SHA, false)}
+        >
+          <Text style={styles.btnText}>⚡ RAM-EXEC PROBE (FUT-214: then tap “Read … firmware version” → ⟨RAMEXEC …⟩)</Text>
         </Pressable>
         <View style={styles.btnRow}>
           <Pressable

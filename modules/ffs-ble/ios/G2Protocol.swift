@@ -637,6 +637,22 @@ enum G2Setting {
       let names = s.split(separator: "\n").joined(separator: ", ")
       out.leftVersion = (out.leftVersion ?? "") + "  ⟨FTFONTS=" + (names.isEmpty ? "(none)" : names) + "⟩"
     }
+    // FUT-214 RAM-exec probe: field 103 (OUTER) = "RX01" + 5 LE u32s
+    // (ret, mpu_ctrl, mpu_type, ccr, buf_addr). Decode into a readable verdict on the
+    // version line (also ships to glog via the device_info event's `l` field).
+    // ret == 0x2A  => executing RAM-pushed code WORKS (green light for the resident loader).
+    if let pr = f[103] as? Data, pr.count >= 24 {
+      let b = [UInt8](pr)
+      func u32(_ o: Int) -> UInt32 {
+        UInt32(b[o]) | (UInt32(b[o+1]) << 8) | (UInt32(b[o+2]) << 16) | (UInt32(b[o+3]) << 24)
+      }
+      let marker = String(bytes: b[0..<4], encoding: .ascii) ?? "????"
+      let ret = u32(4), mpuCtrl = u32(8), mpuType = u32(12), ccr = u32(16), buf = u32(20)
+      let verdict = ret == 0x2A ? "EXEC_OK" : (ret == 0xDEAD0000 ? "OOM" : "UNEXPECTED")
+      out.leftVersion = (out.leftVersion ?? "") + String(
+        format: "  ⟨RAMEXEC %@ %@ ret=0x%X mpu_ctrl=0x%X mpu_type=0x%X ccr=0x%X buf=0x%08X⟩",
+        marker, verdict, ret, mpuCtrl, mpuType, ccr, buf)
+    }
     if out.leftVersion == nil && out.rightVersion == nil && out.battery == nil && out.charging == nil {
       return nil
     }
