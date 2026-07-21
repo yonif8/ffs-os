@@ -283,8 +283,8 @@ enum G2Flash {
   // shows in the device-info readback as ⟨LOADER LD01 gen=… ran=… ret=0x… len=…⟩.
   // prog_end 0x0079E83E, 325 KB under ceiling. (patches/loader.c + svc-0x90 dispatch patch)
   static let goldenLoader = GoldenVector(
-    sha256: "3e80862a802af87fb4f5b50e550c94f8f73ae4b24624609dbd2b0f7565ca9c28",
-    ps: 3_565_902, progEnd: 0x0079_E92E, pass: true)
+    sha256: "f9d4fe637d410211431a41762f8bded2cfbe6c2cd7eb46a50223539e3f6aa23d",
+    ps: 3_565_974, progEnd: 0x0079_E976, pass: true)
 
   /// Run the parse+guard on `img` and assert it reproduces the golden vector. Returns
   /// nil on success, or a failure description. Any non-nil result MUST block flashing.
