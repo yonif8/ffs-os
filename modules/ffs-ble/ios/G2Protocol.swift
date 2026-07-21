@@ -661,8 +661,13 @@ enum G2Setting {
       func u32(_ o: Int) -> UInt32 {
         UInt32(b[o]) | (UInt32(b[o+1]) << 8) | (UInt32(b[o+2]) << 16) | (UInt32(b[o+3]) << 24)
       }
-      out.leftVersion = (out.leftVersion ?? "") + String(
-        format: "  ⟨LOADER LD01 gen=%u ran=%u ret=0x%X len=%u⟩", u32(4), u32(8), u32(12), u32(16))
+      var s = String(format: "  ⟨LOADER gen=%u ran=%u ret=0x%X len=%u", u32(4), u32(8), u32(12), u32(16))
+      if ld.count >= 32 {
+        // FUT-216 delivery diagnostics: calls = every time the svc-0x90 handler fired
+        // (>0 => the push reaches the firmware handler); first4 should be 0x31505846 ("FXP1").
+        s += String(format: " calls=%u rxlen=%u first4=0x%08X", u32(20), u32(24), u32(28))
+      }
+      out.leftVersion = (out.leftVersion ?? "") + s + "⟩"
     }
     if out.leftVersion == nil && out.rightVersion == nil && out.battery == nil && out.charging == nil {
       return nil
