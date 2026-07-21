@@ -265,6 +265,17 @@ enum G2Flash {
     sha256: "3a673c966658216ecbb9397d65682e8131ea4465f8915c941250985f8368d8ce",
     ps: 3_562_746, progEnd: 0x0079_DCDA, pass: true)
 
+  // FUT-214 RAM-exec probe: the "flash-once, push-forever" de-risk build. On the first
+  // phone-triggered device-info (sid=0x09) READ, the CFW mallocs a RAM buffer, writes a
+  // tiny Thumb stub (movs r0,#0x2A; bx lr), runs the M55 cache-maintenance sequence, and
+  // blx's into it — proving we can EXECUTE code pushed into RAM (vs. baked into flash).
+  // Result comes back as sid=0x09 field 103 ("RX01" + ret + mpu/ccr snaps): ret==0x2A =>
+  // RAM-exec works. Runs lazily (never at boot) so an XN fault can't boot-loop.
+  // prog_end 0x0079DFC2, 328 KB under ceiling. (patches/ramexec_probe.c + settings_ext.c)
+  static let goldenRamexec = GoldenVector(
+    sha256: "913a7f28cc79957ed8a5991c7434d993583070fc3d369b6c6a9e1683fd6f3f86",
+    ps: 3_563_490, progEnd: 0x0079_DFC2, pass: true)
+
   /// Run the parse+guard on `img` and assert it reproduces the golden vector. Returns
   /// nil on success, or a failure description. Any non-nil result MUST block flashing.
   static func selfTestGuard(_ img: [UInt8], expect gv: GoldenVector) -> String? {
