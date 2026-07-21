@@ -622,6 +622,31 @@ final class G2Central: NSObject {
     }
   }
 
+  /// FUT-216: frame + chunk + write an arbitrary payload to a RAW service id on both lenses,
+  /// reusing the standard 0xAA transport (syncId / CRC16 / 236 B chunking). Used to push a
+  /// native code payload to the resident CFW loader's service 0x90.
+  private func sendToServiceLocked(serviceId: UInt8, payload: Data, reserveFlag: Bool = false) {
+    let pkts = counters.packets(serviceId: serviceId, payload: payload, reserveFlag: reserveFlag)
+    enqueueLocked(pkts, to: .both)
+  }
+
+  /// FUT-216: push a base64-encoded payload to a custom service id (e.g. 0x90 CFW loader).
+  /// The payload bytes are framed as one service message and reassembled firmware-side.
+  func pushToService(serviceId: UInt8, base64: String) {
+    queue.async { [weak self] in
+      guard let self = self else { return }
+      if self.flashActive { self.log("pushToService ignored — flash in progress"); return }
+      guard self.pairReadyLocked() else {
+        self.log("pushToService ignored — pair not ready (connect both lenses first)"); return
+      }
+      guard let data = Data(base64Encoded: base64), !data.isEmpty else {
+        self.log("pushToService ignored — bad/empty base64"); return
+      }
+      self.sendToServiceLocked(serviceId: serviceId, payload: data)
+      self.log("pushToService 0x\(String(serviceId, radix: 16)) → both (\(data.count) B)")
+    }
+  }
+
   /// Send a stock-dashboard (service 0x01) payload to the target side(s). (FUT-170)
   private func sendDashboardLocked(_ payload: Data, to target: G2Target) {
     let pkts = counters.packets(
@@ -1728,7 +1753,8 @@ extension G2Central {
         (sha.lowercased() == G2Flash.goldenHebrewFull.sha256 ? G2Flash.goldenHebrewFull :
         (sha.lowercased() == G2Flash.goldenHebrewProbe.sha256 ? G2Flash.goldenHebrewProbe :
         (sha.lowercased() == G2Flash.goldenFfsui.sha256 ? G2Flash.goldenFfsui :
-        (sha.lowercased() == G2Flash.goldenRamexec.sha256 ? G2Flash.goldenRamexec : nil))))))))
+        (sha.lowercased() == G2Flash.goldenRamexec.sha256 ? G2Flash.goldenRamexec :
+        (sha.lowercased() == G2Flash.goldenLoader.sha256 ? G2Flash.goldenLoader : nil)))))))))
       guard let gvec = gv else {
         self.flashProgress("not a known golden build — refusing", 0, done: true, ok: false); return
       }

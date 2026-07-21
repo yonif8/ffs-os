@@ -161,6 +161,12 @@ public class FfsBleModule: Module {
     Function("stopSession") { [weak self] in
       self?.central?.stopSession()
     }
+
+    // FUT-216: push a base64 native-code payload to a custom CFW service id (0x90 = resident
+    // OTA loader). Framed + chunked through the standard transport to both lenses.
+    Function("pushToService") { [weak self] (serviceId: Int, base64: String) in
+      self?.ensureCentral().pushToService(serviceId: UInt8(serviceId & 0xff), base64: base64)
+    }
   }
 
   private static func parseSide(_ raw: String) -> G2Side {
