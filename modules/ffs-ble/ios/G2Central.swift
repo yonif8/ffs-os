@@ -666,8 +666,12 @@ final class G2Central: NSObject {
         self.log("pushPayload ignored — bad/empty base64"); return
       }
       self.stopAnimationLocked()   // don't interleave FXP1 payload frames with mode-2 anim frames
-      var payload = Data([0x46, 0x58, 0x50, 0x31])   // "FXP1" magic, then the raw code blob
-      payload.append(blob)
+      // The base64 blob ALREADY begins with the "FXP1" magic (baked in at build time — the same
+      // blobs the old svc-0x90 path sent). Send it AS-IS. Do NOT prepend a second magic: the CFW
+      // strips exactly one FXP1, so a double prefix leaves "FXP1" as the code's first bytes and
+      // blx executes the magic as garbage instructions (crash → blank → reboot). payload_main
+      // must sit at code offset 0, which it does once the single baked-in magic is stripped.
+      let payload = blob
       let send: () -> Void = { [weak self] in
         guard let self = self else { return }
         self.startHeartbeatsLocked()                 // keep the link alive during delivery
