@@ -20,7 +20,7 @@
     },
     "ios": {
       "supportsTablet": false,
-      "buildNumber": "50",
+      "buildNumber": "51",
       "bundleIdentifier": "com.futurefounders.glassesos",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
