@@ -450,6 +450,17 @@ final class G2Central: NSObject {
       && requiredCharsFound(l) && requiredCharsFound(r)
   }
 
+  /// "Is the CURRENT connect intent satisfied?" — pair-ready when we want the pair,
+  /// or the single side ready when we want just one. Used by the recovery watchdog so
+  /// a single-side connect (which never makes `pairReadyLocked` true) still terminates.
+  private func intentReadyLocked() -> Bool {
+    if wantsPair { return pairReadyLocked() }
+    if let s = wantsSingleSide, let lens = lenses[s] {
+      return lens.connected && requiredCharsFound(lens)
+    }
+    return false
+  }
+
   /// Re-check the pair after any connect/char-discovery/disconnect. Fires
   /// onPairReady exactly once on the transition into the ready state, and
   /// re-arms once the pair is no longer ready (so a reconnect can fire again).
@@ -582,7 +593,7 @@ final class G2Central: NSObject {
     recoverTimer?.cancel()
     recoverTimer = nil
     guard wantsPair || wantsSingleSide != nil else { return }
-    guard !pairReadyLocked() else { return }
+    guard !intentReadyLocked() else { return }
     let work = DispatchWorkItem { [weak self] in
       guard let self = self else { return }
       self.recoverTimer = nil
@@ -599,8 +610,8 @@ final class G2Central: NSObject {
   /// genuinely-absent side.
   private func runRecoveryLocked() {
     guard wantsPair || wantsSingleSide != nil else { return }
-    guard !pairReadyLocked() else { return }
-    log("Recovery watchdog — pair not ready within \(G2Central.RECOVER_TIMEOUT_MS)ms; recovering")
+    guard !intentReadyLocked() else { return }
+    log("Recovery watchdog — connect intent not ready within \(G2Central.RECOVER_TIMEOUT_MS)ms; recovering")
 
     reclaimConnectedLocked()
 
