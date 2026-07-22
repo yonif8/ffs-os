@@ -197,6 +197,13 @@ final class G2Central: NSObject {
   private var wantsPair = false
   /// Single-side connect intent (testing convenience): connect only this side.
   private var wantsSingleSide: G2Side?
+
+  /// FUT-219 recovery watchdog: if we hold connect intent but the pair isn't ready
+  /// within RECOVER_TIMEOUT_MS, run a recovery pass (reclaim already-connected lenses,
+  /// re-issue discovery on a half-bound side, ensure scanning). Re-armed while not ready;
+  /// self-cancels the moment the pair is ready or intent is dropped.
+  private var recoverTimer: DispatchWorkItem?
+  private static let RECOVER_TIMEOUT_MS = 6000
   private var isScanning = false
 
   // MARK: - Init
@@ -277,11 +284,15 @@ final class G2Central: NSObject {
       self.wantsSingleSide = nil
       self.log("connectPair requested")
       self.connectDiscoveredLocked()
+      // FUT-219: bind any lens iOS already holds connected (won't advertise → scan
+      // can't find it). This is what makes a plain reconnect work without an unpair.
+      self.reclaimConnectedLocked()
       if self.lenses[.left] == nil || self.lenses[.right] == nil {
         // Missing at least one side — make sure we're scanning; connects fire
         // from didDiscover as each lens shows up.
         self.startScanLocked()
       }
+      self.armRecoverWatchdogLocked()
     }
   }
 
@@ -296,9 +307,13 @@ final class G2Central: NSObject {
       if let disc = self.discovered[side], self.lenses[side] == nil {
         self.beginConnect(to: disc)
       } else if self.lenses[side] == nil {
-        self.log("Side \(side.rawValue) not discovered yet — ensuring scan is active")
-        self.startScanLocked()
+        self.reclaimConnectedLocked()   // FUT-219: bind it if iOS already holds it connected
+        if self.lenses[side] == nil {
+          self.log("Side \(side.rawValue) not discovered yet — ensuring scan is active")
+          self.startScanLocked()
+        }
       }
+      self.armRecoverWatchdogLocked()
     }
   }
 
@@ -308,6 +323,8 @@ final class G2Central: NSObject {
       guard let self = self else { return }
       self.wantsPair = false
       self.wantsSingleSide = nil
+      self.recoverTimer?.cancel()   // FUT-219: stop the recovery watchdog on a deliberate teardown
+      self.recoverTimer = nil
       guard !self.lenses.isEmpty else {
         self.log("disconnect ignored — nothing connected")
         return
@@ -445,6 +462,9 @@ final class G2Central: NSObject {
     } else if !ready && pairReadyFired {
       pairReadyFired = false
     }
+    // FUT-219: keep the recovery watchdog in sync — armed while we hold intent and
+    // aren't ready, cancelled the moment we are (or intent is dropped).
+    armRecoverWatchdogLocked()
   }
 
   // MARK: - Connect helpers
@@ -490,6 +510,110 @@ final class G2Central: NSObject {
     } else if let side = wantsSingleSide {
       if lenses[side] != nil { stopScanLocked() }
     }
+  }
+
+  // MARK: - Reclaim already-connected / bonded lenses (FUT-219)
+
+  /// UserDefaults key → [side.rawValue : peripheral.identifier.uuidString].
+  private static let kSavedPeripheralIds = "ffs.g2.peripheralIds.v1"
+
+  /// Remember a lens's system identifier so a later launch can re-bind it via
+  /// retrievePeripherals(withIdentifiers:) even when it isn't advertising.
+  private func persistIdentifierLocked(_ peripheral: CBPeripheral, side: G2Side) {
+    guard side == .left || side == .right else { return }
+    var m = (UserDefaults.standard.dictionary(forKey: G2Central.kSavedPeripheralIds)
+             as? [String: String]) ?? [:]
+    m[side.rawValue] = peripheral.identifier.uuidString
+    UserDefaults.standard.set(m, forKey: G2Central.kSavedPeripheralIds)
+  }
+
+  private func savedPeripheralIdentifiers() -> [UUID] {
+    let m = (UserDefaults.standard.dictionary(forKey: G2Central.kSavedPeripheralIds)
+             as? [String: String]) ?? [:]
+    return m.values.compactMap { UUID(uuidString: $0) }
+  }
+
+  /// THE root-cause fix for the "R lens stuck Booting…" reconnect bug (FUT-219):
+  /// a lens iOS already holds connected/bonded does NOT advertise, so a `scanForPeripherals`
+  /// can never rediscover it (this is why unpair-both was the only recovery). Ask
+  /// CoreBluetooth for the peripherals it already holds connected for our service — plus any
+  /// we've previously bonded to by identifier — and `connect()` them directly. `connect()`
+  /// on an already-connected peripheral invokes `didConnect` immediately, so service/char
+  /// discovery + readiness proceed exactly as for a fresh connect. Only binds sides the
+  /// current intent wants and that aren't already boxed; safe to call repeatedly.
+  private func reclaimConnectedLocked() {
+    guard central.state == .poweredOn else { return }
+    guard wantsPair || wantsSingleSide != nil else { return }
+
+    var candidates = central.retrieveConnectedPeripherals(withServices: [G2Central.SERVICE_UUID])
+    let ids = savedPeripheralIdentifiers()
+    if !ids.isEmpty {
+      candidates += central.retrievePeripherals(withIdentifiers: ids)
+    }
+    guard !candidates.isEmpty else { return }
+
+    var seen = Set<UUID>()
+    for p in candidates {
+      guard seen.insert(p.identifier).inserted else { continue }
+      let nm = p.name ?? ""
+      let s = side(from: nm)
+      guard s == .left || s == .right else { continue }   // can't place an unnamed peripheral
+      guard lenses[s] == nil else { continue }             // already connecting/connected
+      guard wantsPair || wantsSingleSide == s else { continue }
+      let disc = G2Discovery(
+        peripheral: p,
+        name: nm.isEmpty ? "Even G2 (\(s.rawValue))" : nm,
+        side: s,
+        rssi: 0,
+        manufacturer: nil
+      )
+      discovered[s] = disc
+      log("Reclaiming already-known lens '\(disc.name)' side=\(s.rawValue) "
+        + "(state=\(p.state.rawValue)) — binding without an advertisement")
+      beginConnect(to: disc)
+    }
+  }
+
+  // MARK: - Recovery watchdog (FUT-219)
+
+  /// Arm/refresh the recovery watchdog. Cheap to call after any pair re-evaluation; it
+  /// cancels itself once the pair is ready or connect intent is dropped.
+  private func armRecoverWatchdogLocked() {
+    recoverTimer?.cancel()
+    recoverTimer = nil
+    guard wantsPair || wantsSingleSide != nil else { return }
+    guard !pairReadyLocked() else { return }
+    let work = DispatchWorkItem { [weak self] in
+      guard let self = self else { return }
+      self.recoverTimer = nil
+      self.runRecoveryLocked()
+    }
+    recoverTimer = work
+    queue.asyncAfter(deadline: .now() + .milliseconds(G2Central.RECOVER_TIMEOUT_MS), execute: work)
+  }
+
+  /// One recovery pass for a stuck/half-connected state, then re-arm while still not ready
+  /// (so recovery is automatic — no user unpair/re-pair). Order: (1) re-bind anything iOS
+  /// already holds connected (the non-advertising root cause), (2) re-issue GATT discovery on
+  /// a side that connected but never bound its chars, (3) ensure a scan is running for a
+  /// genuinely-absent side.
+  private func runRecoveryLocked() {
+    guard wantsPair || wantsSingleSide != nil else { return }
+    guard !pairReadyLocked() else { return }
+    log("Recovery watchdog — pair not ready within \(G2Central.RECOVER_TIMEOUT_MS)ms; recovering")
+
+    reclaimConnectedLocked()
+
+    for (s, lens) in lenses where lens.connected && !requiredCharsFound(lens) {
+      log("Recovery — re-discovering services on connected-but-incomplete side=\(s.rawValue)")
+      lens.peripheral.discoverServices(nil)
+    }
+
+    let missingSide = (wantsPair && (lenses[.left] == nil || lenses[.right] == nil))
+      || (wantsSingleSide != nil && lenses[wantsSingleSide!] == nil)
+    if missingSide { startScanLocked() }
+
+    armRecoverWatchdogLocked()
   }
 
   // MARK: - Advertisement parsing
@@ -1440,6 +1564,8 @@ extension G2Central: CBCentralManagerDelegate {
         isScanning = false  // reset; startScanLocked re-sets it
         startScanLocked()
         connectDiscoveredLocked()
+        reclaimConnectedLocked()      // FUT-219: re-bind lenses iOS already holds connected
+        armRecoverWatchdogLocked()
       }
     } else {
       // Anything other than poweredOn means our connections (if any) are gone.
@@ -1494,6 +1620,7 @@ extension G2Central: CBCentralManagerDelegate {
   ) {
     let name = peripheral.name ?? "?"
     let s = side(from: name)
+    persistIdentifierLocked(peripheral, side: s)   // FUT-219: remember it for cross-launch re-bind
     log("Connected to \(name) (side=\(s.rawValue)) — discovering services")
     onConnected?(name, s.rawValue)
     // Discover everything; we match by full UUID afterwards.
