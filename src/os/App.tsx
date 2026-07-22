@@ -84,9 +84,9 @@ const CFW_SERVICE = 0x90; // custom CFW loader BLE service id
 // Demo payloads = "FXP1" magic + a compiled PIC blob (payload_main draws a bordered box +
 // label on lv_layer_top). Pushing B after A visibly replaces A. (patches/payloads/payload_*.c)
 const PAYLOAD_A_B64 =
-  "RlhQMS3p8EFP9r9BBEbA8kQBACCIRwAoAPCOgE32g2HA8kMBiEcAKADwiYBP8sFDT/KbCMDyQwNP9KBxXCIFRsDyQwiYRyhGgCFiIsBHRPbTQcDyRwEgIIhHAChU0AZGQvZpBwAgwPJIBzBwcHCwcPBwMHFwcbBx8HEwcnBysHLwcjBzcHOwc/BzMHRwdLB08HQwdXB1sHXwdTB2cHawdvB2MHdwd7B38HcwRh0hACK4RzBGKCEDIrhHMEYkIf8iuEcwRiMhb/B/QrhHMEYMIQwiuEdE8txgwvIHAAJoErEwRjIhuEcwRjAhb/B/QrhHMEYxIf8iuEdL9hsTwPJEAyhGMUYAIphHSfIXRsDySQYoRrBHYLFA8h4BwPIAAQbxGAJ5RAZGkEcwRlQhIiLARwogJWC96PCBASC96PCBAiC96PCBT1RBIFBBWUxPQUQgQQA=";
+  "RlhQMS3p8E+DsE/2v0EERsDyRAEAIIhHACgA8MqATfaDYcDyQwGIRwAoAPDGgE/ywUNC9mkKRPbTR0v2GxlP8psIwPJDA0/0lnFYIgVGwPJICsDyRwfA8kQJwPJDCJhHKEaKIWQiwEcgILhHyLMAIQFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXcdIQAiBkbQRzBGKCEDItBHMEYkIf8i0EcwRiMhb/B/QtBHMEYMIQoi0EcoRjFGACLIR0nyF0vA8kkLKEbYRwAoWtAGRiAgT/AgCbhH2LMHRgAgOHB4cLhw+HA4cXhxuHH4cThyeHK4cvhyOHN4c7hz+HM4dHh0uHT4dDh1eHW4dfh1OHZ4drh2+HY4d3h3uHf4d0Ty3GDC8gcAAmgSsThGMiHQRzhGMCFv8H9C0Ec4RjEh/yLQR0v2GxMwRjlGACLA8kQDmEdPII34BABUII34BQBBII34BgCN+AeQjfgIAAAgjfgJAAvxGAIBqTBGkEcwRnYhHiLARyVgCiADsL3o8I8BIAOwvejwjwIgA7C96PCP";
 const PAYLOAD_B_B64 =
-  "RlhQMS3p8EFP9r9BBEbA8kQBACCIRwAoAPCOgE32g2HA8kMBiEcAKADwiYBP8sFDT/KbCMDyQwNP9L5xeCIFRsDyQwiYRyhGYiFUIsBHRPbTQcDyRwEgIIhHAChU0AZGQvZpBwAgwPJIBzBwcHCwcPBwMHFwcbBx8HEwcnBysHLwcjBzcHOwc/BzMHRwdLB08HQwdXB1sHXwdTB2cHawdvB2MHdwd7B38HcwRh0hACK4RzBGKCEFIrhHMEYkIf8iuEcwRiMhb/B/QrhHMEYMIRgiuEdE8txgwvIHAAJoErEwRjIhuEcwRjAhb/B/QrhHMEYxIf8iuEdL9hsTwPJEAyhGMUYAIphHSfIXRsDySQYoRrBHYLFA8h4BwPIAAQbxGAJ5RAZGkEcwRmAhMCLARwsgJWC96PCBASC96PCBAiC96PCBT1RBIFBBWUxPQUQgQiB2MgA=";
+  "RlhQMS3p8E+DsE/2v0EERsDyRAEAIIhHACgA8MuATfaDYcDyQwGIRwAoAPDHgE/ywUNC9mkKRPbTR0v2GxlP8psIwPJDA0/0yHGCIgVGwPJICsDyRwfA8kQJwPJDCJhHKEZYIU8iwEcgILhHyLMAIQFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXcdIQAiBkbQRzBGKCEGItBHMEYkIf8i0EcwRiMhb/B/QtBHMEYMIRoi0EcoRjFGACLIR0nyF0vA8kkLKEbYRwAoW9AGRiAgT/AgCbhH2LMHRgAgOHB4cLhw+HA4cXhxuHH4cThyeHK4cvhyOHN4c7hz+HM4dHh0uHT4dDh1eHW4dfh1OHZ4drh2+HY4d3h3uHf4d0Ty3GDC8gcAAmgSsThGMiHQRzhGMCFv8H9C0Ec4RjEh/yLQR0v2GxMwRjlGACLA8kQDmEdPII34BABUII34BQBBII34BgBCII34B5CN+AgAACCN+AkAC/EYAgGpMEaQRzBGniEyIsBHJWALIAOwvejwjwEgA7C96PCPAiADsL3o8I8=";
 const WARRANTY_PHRASE = "my warranty is void";
 
 // FUT-167 soft precheck — a self-attested readiness checklist that must be
@@ -509,7 +509,7 @@ export default function App() {
         </Pressable>
         <View style={styles.btnRow}>
           <Pressable
-            style={[styles.btn, !bt.pairReady && styles.btnDisabled]}
+            style={[styles.btn, { backgroundColor: theme.warn }, !bt.pairReady && styles.btnDisabled]}
             disabled={!bt.pairReady}
             onPress={() => { glog.emit("os", "push_a", {}); FfsBle.pushPayloadViaImage(PAYLOAD_A_B64); }}
           >
