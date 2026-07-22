@@ -24,6 +24,10 @@ IPA_NAME=FFSGlassesOS.ipa
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 WORKFLOW=ios-unsigned.yml
 ARTIFACT=FFSGlassesOS-unsigned-ipa
+# Repo to pull CI artifacts from — derive it from THIS checkout's git remote so it can
+# never drift (the repo was renamed ffs-glasses-os → ffs-os during the Phase-0 extraction;
+# the old hardcode pulled a stale v0.9.0 build). Falls back to the current repo name.
+REPO=$(cd "$APP_DIR" && gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || echo yonif8/ffs-os)
 
 RTV=$(python3 -c "import json,sys; print(json.load(open('$APP_DIR/app.json'))['expo'].get('runtimeVersion','1.0.0'))")
 APP_VERSION=$(python3 -c "import json,sys; print(json.load(open('$APP_DIR/app.json'))['expo'].get('version','0.1.0'))")
@@ -32,10 +36,11 @@ src_ipa="${1:-}"
 if [[ -z "$src_ipa" ]]; then
   echo "→ Pulling IPA from latest successful '$WORKFLOW' run (gh, private repo)…"
   tmp=$(mktemp -d)
-  run_id=$(gh run list --workflow "$WORKFLOW" --status success --limit 1 --json databaseId -q '.[0].databaseId' -R yonif8/ffs-glasses-os)
+  echo "  repo: $REPO"
+  run_id=$(gh run list --workflow "$WORKFLOW" --status success --limit 1 --json databaseId -q '.[0].databaseId' -R "$REPO")
   [[ -n "$run_id" ]] || { echo "ERROR: no successful $WORKFLOW run found"; exit 1; }
   echo "  run id: $run_id"
-  gh run download "$run_id" -n "$ARTIFACT" -D "$tmp" -R yonif8/ffs-glasses-os
+  gh run download "$run_id" -n "$ARTIFACT" -D "$tmp" -R "$REPO"
   src_ipa=$(find "$tmp" -name '*.ipa' | head -1)
   [[ -n "$src_ipa" ]] || { echo "ERROR: artifact had no .ipa"; exit 1; }
 fi
