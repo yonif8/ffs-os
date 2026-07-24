@@ -8,6 +8,16 @@
 // screens) you drive entirely by touchpad — swipe up/down to move, tap to open, double-tap
 // to go back. The phone screen here is just a connection dashboard + a couple of debug
 // controls (Home / Back / snap a photo) — everything real happens on the HUD.
+//
+// FUT-220 UX pass — this is a DENSE single-page control surface ON PURPOSE (Yoni: "keep
+// every probe/debug control visible, optimise for speed not safety"). Nothing is hidden
+// behind a Developer section and no confirm ceremony was added. What changed is
+// SCANNABILITY, so the right control is found and fired fast:
+//   • status pinned outside the scroll — link state never scrolls away
+//   • flash progress pinned + a real bar (was a 13px Menlo line during a ~5-min brick window)
+//   • the nine near-identical green flash buttons became a data-driven row list with a
+//     coloured badge per image, a plain-language name, and a WRITES / no-writes tag
+// Patterns lifted from real shipped apps via the Mobbin MCP — see FUT-220 for the refs.
 
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef, useState } from "react";
@@ -21,8 +31,9 @@ import { useConnectionSupervisor, healthLabel, type ConnectionHealth } from "./c
 import { screenOwner } from "./reclaim";
 import { PhoneNav, type PhoneCtx } from "./phone/nav";
 import { homeScreen, textTestScreen, setTextTestContent } from "./phone/screens";
+import { Group, Progress, Row, SectionLabel } from "./ui";
 
-const APP_VERSION = "0.10.40";
+const APP_VERSION = "0.11.1";
 
 // FUT-167 Stage 2 — CFW + stock-restore images (hosted on the private slsrc server, NOT
 // bundled: this repo is public and the firmware is Even's copyrighted image). Downloaded
@@ -102,6 +113,124 @@ const PRECHECK_ITEMS: string[] = [
   "Phone stays within ~1 m of the glasses the whole time — I won't walk away (~5 min)",
   "I'll keep this app open + foregrounded and my screen ON so it won't lock mid-flash",
   "Glasses are stable/worn and won't be handled or moved during the flash",
+];
+
+// FUT-220 — the flashable images as DATA, not nine copy-pasted Pressables. Order is the
+// order you'd actually run them. `badge`/`tint` group by family (baseline / Hebrew / FFS OS
+// / full CFW / revert) so a row is identifiable at a glance; risk lives in the tag, not the
+// colour. Every image that was reachable before is still reachable here — nothing removed.
+type FwImage = {
+  key: string;
+  badge: string;
+  tint: string;
+  name: string;
+  desc: string;
+  trace: string;
+  url: string;
+  sha: string;
+};
+
+const FW_IMAGES: FwImage[] = [
+  {
+    key: "canary",
+    badge: "CN",
+    tint: theme.tint.blue,
+    name: "Canary — do this first",
+    desc: "Stock + version marker → 2.2.6.77. Proves write→commit→reboot→readback on hardware.",
+    trace: "FUT-167",
+    url: CANARY_URL,
+    sha: CANARY_SHA,
+  },
+  {
+    key: "fontpeek",
+    badge: "FP",
+    tint: theme.tint.purple,
+    name: "Font-peek",
+    desc: "Adds a font-header read. Flash, then tap Read device info → ⟨FONT0=…⟩.",
+    trace: "FUT-188",
+    url: FONTPEEK_URL,
+    sha: FONTPEEK_SHA,
+  },
+  {
+    key: "bidi",
+    badge: "he1",
+    tint: theme.tint.amber,
+    name: "Hebrew ① — BIDI only",
+    desc: "RTL reorder, no glyph changes. Check English/Chinese still render.",
+    trace: "FUT-190",
+    url: HEBREW_BIDI_URL,
+    sha: HEBREW_BIDI_SHA,
+  },
+  {
+    key: "hebfull",
+    badge: "he2",
+    tint: theme.tint.amber,
+    name: "Hebrew ② — full",
+    desc: "bidi + glyphs. This is the one that actually renders Hebrew, system-wide.",
+    trace: "FUT-189",
+    url: HEBREW_FULL_URL,
+    sha: HEBREW_FULL_SHA,
+  },
+  {
+    key: "hebprobe",
+    badge: "heV",
+    tint: theme.tint.amber,
+    name: "Hebrew v2 + probe",
+    desc: "Full glyph coverage + font-name diagnostic. Browse the UI, then read device info.",
+    trace: "FUT-191",
+    url: HEBREW_PROBE_URL,
+    sha: HEBREW_PROBE_SHA,
+  },
+  {
+    key: "ffsui",
+    badge: "OS",
+    tint: theme.tint.green,
+    name: "FFS OS seize",
+    desc: "Our own screen replaces Even's — “FFS OS” + a live MM:SS ticker, phone-independent.",
+    trace: "FUT-197",
+    url: FFSUI_URL,
+    sha: FFSUI_SHA,
+  },
+  {
+    key: "ramexec",
+    badge: "RX",
+    tint: theme.tint.green,
+    name: "RAM-exec probe",
+    desc: "Proves pushing code into RAM runs. Read device info → ret=0x2A means go.",
+    trace: "FUT-214",
+    url: RAMEXEC_URL,
+    sha: RAMEXEC_SHA,
+  },
+  {
+    key: "loader",
+    badge: "LD",
+    tint: theme.tint.green,
+    name: "OTA loader — flash once",
+    desc: "Inert until used. Then push payloads over the air with no reflash.",
+    trace: "FUT-216",
+    url: LOADER_URL,
+    sha: LOADER_SHA,
+  },
+  {
+    key: "cfw",
+    badge: "FW",
+    tint: theme.tint.red,
+    name: "Full CFW",
+    desc: "The complete custom firmware image.",
+    trace: "FUT-167",
+    url: CFW_URL,
+    sha: CFW_SHA,
+  },
+  {
+    key: "stock",
+    badge: "↩",
+    tint: theme.tint.grey,
+    name: "Restore stock",
+    desc: "Back to Even 2.2.6.10. The way out of anything above.",
+    trace: "FUT-173",
+    url: STOCK_URL,
+    sha: STOCK_SHA,
+  },
 ];
 
 function healthColor(h: ConnectionHealth): string {
@@ -249,315 +378,311 @@ export default function App() {
   }, [bt.pairReady]);
 
   const health = sup.health;
+  const hc = healthColor(health);
+  const canAct = bt.pairReady && !flashBusy;
+  const batt = bt.deviceInfo?.battery;
 
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar style="light" />
+
+      {/* Pinned status — the link state is the one thing that must never scroll away. */}
+      <View style={styles.header}>
+        <View style={styles.headerTop}>
+          <Text style={styles.title}>FFS Glasses OS</Text>
+          <View style={styles.pill}>
+            <View style={[styles.dot, { backgroundColor: hc }]} />
+            <Text style={[styles.pillText, { color: hc }]}>{healthLabel(health)}</Text>
+          </View>
+        </View>
+        <Text style={styles.headerMeta}>
+          L {bt.sides.L ? "●" : "○"}  R {bt.sides.R ? "●" : "○"}  ·  pair {bt.pairReady ? "ready" : "—"}
+          {batt == null ? "" : `  ·  ${batt}%`}
+          {bt.deviceInfo?.charging ? " ⚡" : ""}  ·  v{APP_VERSION}
+        </Text>
+      </View>
+
+      {/* Pinned flash progress. A ~5-min brick-risk window deserves better than a text
+          line buried in a scroll — bar + percent + the "don't walk away" reminder, held
+          on screen the whole time (Meta AI / IKEA / Fitbit device-update pattern). */}
+      {flashMsg ? (
+        <View style={[styles.flashBar, flashBusy && styles.flashBarActive]}>
+          <View style={styles.flashRow}>
+            <Text style={styles.flashPct}>{Math.round(flashFrac * 100)}%</Text>
+            <Text style={styles.flashMsg} numberOfLines={1}>
+              {flashBusy ? "⏳ " : ""}
+              {flashMsg}
+            </Text>
+          </View>
+          <Progress frac={flashFrac} tint={flashBusy ? theme.warn : theme.accent} />
+          {flashBusy ? (
+            <Text style={styles.flashWarn}>
+              Keep the app open and stay within ~1 m of the glasses until this finishes.
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={true}
       >
-      <Text style={styles.title}>FFS Glasses OS</Text>
-      <Text style={styles.sub}>phone OS on the HUD · drive it with the touchpad</Text>
-      <Text style={styles.sub}>v{APP_VERSION} · log {session || "(starting)"}</Text>
-
-      <View style={styles.card}>
-        <View style={styles.pillRow}>
-          <View style={[styles.dot, { backgroundColor: healthColor(health) }]} />
-          <Text style={[styles.pillText, { color: healthColor(health) }]}>{healthLabel(health)}</Text>
-        </View>
-        <Text style={styles.meta}>
-          L {bt.sides.L ? "●" : "○"}   R {bt.sides.R ? "●" : "○"}   pair {bt.pairReady ? "ready" : "—"}
-        </Text>
-        {bt.lastGesture && (
-          <Text style={styles.meta}>
+        <SectionLabel note="swipe up/down · tap · double-tap">Drive on-glass</SectionLabel>
+        <Group>
+          <Row
+            badge="⌂"
+            tint={theme.tint.green}
+            title="Home"
+            subtitle="Jump the HUD back to the launcher"
+            disabled={!bt.pairReady}
+            onPress={() => navRef.current?.goHome()}
+          />
+          <Row
+            badge="‹"
+            tint={theme.tint.blue}
+            title="Back"
+            subtitle="Pop one screen on the HUD"
+            divider
+            disabled={!bt.pairReady}
+            onPress={() => {
+              const nav = navRef.current;
+              if (nav?.back()) screenOwner.reclaimNow();
+            }}
+          />
+          <Row
+            badge={swirlOn ? "■" : "▶"}
+            tint={theme.tint.purple}
+            title={swirlOn ? "Stop AI swirl" : "Start AI swirl"}
+            subtitle="Even's swirl animation on the HUD"
+            tag={swirlOn ? "ON" : undefined}
+            tagTint={theme.accent}
+            divider
+            disabled={!bt.pairReady}
+            onPress={() => {
+              const next = !swirlOn;
+              setSwirlOn(next);
+              glog.emit("os", "ai_swirl", { on: next });
+              FfsBle.showAiSwirl(next);
+            }}
+          />
+        </Group>
+        {/* Gesture readout — kept visible: it's how you tell the touchpad is actually
+            reaching the phone when the HUD looks stuck. */}
+        {bt.lastGesture ? (
+          <Text style={styles.mono}>
             last gesture: {bt.lastGesture.gesture} ({bt.lastGesture.side})
           </Text>
-        )}
-      </View>
+        ) : null}
 
-      <Text style={styles.section}>Drive on-glass</Text>
-      <View style={styles.card}>
-        <Text style={styles.help}>swipe up/down — move    tap — open    double-tap — back</Text>
-      </View>
+        <SectionLabel>Link</SectionLabel>
+        <Group>
+          <Row
+            badge="↯"
+            tint={theme.tint.green}
+            title="Connect"
+            subtitle="Scan + reclaim both lenses"
+            onPress={() => sup.reconnect()}
+          />
+          <Row
+            badge="✕"
+            tint={theme.tint.grey}
+            title="Disconnect"
+            subtitle="Drop the session"
+            divider
+            onPress={() => sup.disconnect()}
+          />
+          <Row
+            badge="i"
+            tint={theme.tint.blue}
+            title="Read battery + firmware version"
+            subtitle={
+              bt.deviceInfo
+                ? `L ${bt.deviceInfo.leftVersion ?? "?"} · R ${bt.deviceInfo.rightVersion ?? "?"}`
+                : bt.pairReady
+                  ? "not read yet — auto-reads ~2 s after connect"
+                  : "connect both lenses first"
+            }
+            trace="FUT-169"
+            divider
+            disabled={!canAct}
+            onPress={() => bt.requestDeviceInfo()}
+          />
+        </Group>
 
-      <View style={styles.btnRow}>
-        <Pressable style={styles.btn} onPress={() => sup.reconnect()}>
-          <Text style={styles.btnText}>Connect</Text>
-        </Pressable>
-        <Pressable style={[styles.btn, styles.btnAlt]} onPress={() => sup.disconnect()}>
-          <Text style={styles.btnText}>Disconnect</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.btnRow}>
-        <Pressable
-          style={[styles.btn, !bt.pairReady && styles.btnDisabled]}
-          disabled={!bt.pairReady}
-          onPress={() => navRef.current?.goHome()}
-        >
-          <Text style={styles.btnText}>Home</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.btn, styles.btnAlt, !bt.pairReady && styles.btnDisabled]}
-          disabled={!bt.pairReady}
-          onPress={() => {
-            const nav = navRef.current;
-            if (nav?.back()) screenOwner.reclaimNow();
-          }}
-        >
-          <Text style={styles.btnText}>Back</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.btn, styles.btnAlt, !bt.pairReady && styles.btnDisabled]}
-          disabled={!bt.pairReady}
-          onPress={() => {
-            const next = !swirlOn;
-            setSwirlOn(next);
-            glog.emit("os", "ai_swirl", { on: next });
-            FfsBle.showAiSwirl(next);
-          }}
-        >
-          <Text style={styles.btnText}>{swirlOn ? "Swirl ■" : "Swirl ▶"}</Text>
-        </Pressable>
-      </View>
-
-      <Text style={styles.section}>Device info — battery + firmware (FUT-169)</Text>
-      <View style={styles.card}>
-        <Pressable
-          style={[styles.btn, (!bt.pairReady || flashBusy) && styles.btnDisabled]}
-          disabled={!bt.pairReady || flashBusy}
-          onPress={() => bt.requestDeviceInfo()}
-        >
-          <Text style={styles.btnText}>Read battery + firmware version</Text>
-        </Pressable>
-        {bt.deviceInfo ? (
-          <>
-            <Text style={[styles.meta, { marginTop: 8 }]}>
-              battery: {bt.deviceInfo.battery == null ? "?" : `${bt.deviceInfo.battery}%`}
-              {bt.deviceInfo.charging == null ? "" : bt.deviceInfo.charging ? "  ⚡ charging" : "  (not charging)"}
-            </Text>
-            <Text style={styles.meta}>firmware L: {bt.deviceInfo.leftVersion ?? "?"}</Text>
-            <Text style={styles.meta}>firmware R: {bt.deviceInfo.rightVersion ?? "?"}</Text>
-          </>
-        ) : (
-          <Text style={[styles.meta, { marginTop: 8 }]}>
-            {bt.pairReady ? "not read yet — tap above (auto-reads ~2s after connect)" : "connect both lenses first"}
-          </Text>
-        )}
-      </View>
-
-      <Text style={styles.section}>Text test — Hebrew/English scroll (FUT-191)</Text>
-      <View style={styles.card}>
-        <TextInput
-          style={[styles.input, { minHeight: 90, textAlignVertical: "top" }]}
-          multiline
-          value={textTest}
-          onChangeText={setTextTest}
-          placeholder="Paste a long story (English + Hebrew) to display on the glasses…"
-          placeholderTextColor={theme.textDim}
-        />
-        <Pressable
-          style={[styles.btn, { marginTop: 8 }, (!bt.pairReady || flashBusy || !textTest.trim()) && styles.btnDisabled]}
-          disabled={!bt.pairReady || flashBusy || !textTest.trim()}
-          onPress={() => {
-            setTextTestContent(textTest);
-            navRef.current?.openScreen(textTestScreen);
-            screenOwner.reclaimNow();
-          }}
-        >
-          <Text style={styles.btnText}>Send to glasses → Text test</Text>
-        </Pressable>
-        <Text style={[styles.meta, { marginTop: 6 }]}>
-          On the glasses: swipe up/down to scroll, double-tap to exit. Also reachable from the on-glass menu (Home → Text test).
-        </Text>
-      </View>
-
-      <Text style={styles.section}>Firmware — CFW flasher (FUT-167)</Text>
-      <View style={styles.card}>
-        <View style={styles.btnRow}>
+        <SectionLabel note="FUT-191">Text test — Hebrew / English scroll</SectionLabel>
+        <View style={styles.card}>
+          <TextInput
+            style={[styles.input, { minHeight: 90, textAlignVertical: "top" }]}
+            multiline
+            value={textTest}
+            onChangeText={setTextTest}
+            placeholder="Paste a long story (English + Hebrew) to display on the glasses…"
+            placeholderTextColor={theme.textDim}
+          />
           <Pressable
-            style={[styles.btn, styles.btnAlt, (!bt.pairReady || flashBusy) && styles.btnDisabled]}
-            disabled={!bt.pairReady || flashBusy}
+            style={[styles.btn, (!canAct || !textTest.trim()) && styles.btnDisabled]}
+            disabled={!canAct || !textTest.trim()}
+            onPress={() => {
+              setTextTestContent(textTest);
+              navRef.current?.openScreen(textTestScreen);
+              screenOwner.reclaimNow();
+            }}
+          >
+            <Text style={styles.btnText}>Send to glasses → Text test</Text>
+          </Pressable>
+          <Text style={styles.help}>
+            On the glasses: swipe up/down to scroll, double-tap to exit. Also on the on-glass
+            menu (Home → Text test).
+          </Text>
+        </View>
+
+        <SectionLabel note="no writes — safe to spam">Firmware checks</SectionLabel>
+        <Group>
+          <Row
+            badge="~"
+            tint={theme.tint.blue}
+            title="Channel probe"
+            subtitle="Can the flasher reach both lenses?"
+            tag="no writes"
+            trace="FUT-167"
+            disabled={!canAct}
             onPress={() => {
               setFlashProbe("probing… (zero writes)");
               FfsBle.flashDryRun();
             }}
-          >
-            <Text style={styles.btnText}>Channel probe</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.btn, (!bt.pairReady || flashBusy) && styles.btnDisabled]}
-            disabled={!bt.pairReady || flashBusy}
+          />
+          <Row
+            badge="✓"
+            tint={theme.tint.blue}
+            title="Validate canary"
+            subtitle="Download + verify the canary image, write nothing"
+            tag="no writes"
+            divider
+            disabled={!canAct}
             onPress={() => startFlash(CANARY_URL, CANARY_SHA, true)}
-          >
-            <Text style={styles.btnText}>Validate CANARY (no writes)</Text>
-          </Pressable>
-        </View>
-        <Pressable
-          style={[styles.btn, styles.btnAlt, (!bt.pairReady || flashBusy) && styles.btnDisabled, { marginTop: 2 }]}
-          disabled={!bt.pairReady || flashBusy}
-          onPress={() => startFlash(CFW_URL, CFW_SHA, true)}
-        >
-          <Text style={styles.btnText}>Validate CFW (no writes)</Text>
-        </Pressable>
-        {flashProbe ? <Text style={styles.meta}>{flashProbe}</Text> : null}
-        {flashMsg ? (
-          <Text style={[styles.meta, { marginTop: 6 }]}>
-            {flashBusy ? "⏳ " : ""}
-            {Math.round(flashFrac * 100)}% — {flashMsg}
+          />
+          <Row
+            badge="✓"
+            tint={theme.tint.blue}
+            title="Validate CFW"
+            subtitle="Download + verify the full CFW image, write nothing"
+            tag="no writes"
+            divider
+            disabled={!canAct}
+            onPress={() => startFlash(CFW_URL, CFW_SHA, true)}
+          />
+        </Group>
+        {flashProbe ? <Text style={styles.mono}>{flashProbe}</Text> : null}
+
+        <SectionLabel note={armed ? "ARMED" : "not armed"}>Arm a real flash</SectionLabel>
+        <View style={[styles.card, armed && styles.cardArmed]}>
+          <Text style={styles.help}>
+            Self-attested — the app does not read your battery or hold your screen awake, you do.
           </Text>
-        ) : null}
-
-        <Text style={[styles.meta, { marginTop: 14, color: theme.text }]}>
-          Readiness check — confirm each before arming (self-attested; the app does not
-          read battery or hold your screen awake — you do):
-        </Text>
-        {PRECHECK_ITEMS.map((item, i) => (
-          <Pressable
-            key={i}
-            style={styles.checkRow}
-            disabled={flashBusy}
-            onPress={() =>
-              setPrecheck((prev) => {
-                const next = prev.slice();
-                next[i] = !next[i];
-                return next;
-              })
-            }
-          >
-            <Text style={[styles.checkBox, precheck[i] && styles.checkBoxOn]}>
-              {precheck[i] ? "☑" : "☐"}
-            </Text>
-            <Text style={styles.checkLabel}>{item}</Text>
-          </Pressable>
-        ))}
-        <Text style={[styles.meta, { marginTop: 8, color: theme.warn }]}>
-          Biggest real risk is BLE dropping mid-flash — keep the phone right next to the
-          glasses and the app open the whole ~5 min. A clean interrupted write can brick.
-        </Text>
-
-        <Text style={[styles.meta, { marginTop: 12, color: theme.danger }]}>
-          Real flash voids warranty + can brick. Type "{WARRANTY_PHRASE}" to arm{precheckDone ? "" : " (after the checks above)"}:
-        </Text>
-        <TextInput
-          style={styles.input}
-          value={warranty}
-          onChangeText={setWarranty}
-          placeholder="my warranty is void"
-          placeholderTextColor={theme.textDim}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-        <Pressable
-          style={[styles.btn, { backgroundColor: theme.accent, marginBottom: 10 }, (!armed || !bt.pairReady || flashBusy) && styles.btnDisabled]}
-          disabled={!armed || !bt.pairReady || flashBusy}
-          onPress={() => startFlash(CANARY_URL, CANARY_SHA, false)}
-        >
-          <Text style={styles.btnText}>⚑ Flash CANARY (stock+marker → 2.2.6.77) — do this first</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.btn, { backgroundColor: theme.accent, marginBottom: 10 }, (!armed || !bt.pairReady || flashBusy) && styles.btnDisabled]}
-          disabled={!armed || !bt.pairReady || flashBusy}
-          onPress={() => startFlash(FONTPEEK_URL, FONTPEEK_SHA, false)}
-        >
-          <Text style={styles.btnText}>🔤 Flash FONT-PEEK CFW (reads font, then tap “Read … firmware version”)</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.btn, { backgroundColor: theme.accent, marginBottom: 10 }, (!armed || !bt.pairReady || flashBusy) && styles.btnDisabled]}
-          disabled={!armed || !bt.pairReady || flashBusy}
-          onPress={() => startFlash(HEBREW_BIDI_URL, HEBREW_BIDI_SHA, false)}
-        >
-          <Text style={styles.btnText}>🇮🇱 Hebrew ① Flash BIDI-ONLY (check English/Chinese still OK)</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.btn, { backgroundColor: theme.accent, marginBottom: 10 }, (!armed || !bt.pairReady || flashBusy) && styles.btnDisabled]}
-          disabled={!armed || !bt.pairReady || flashBusy}
-          onPress={() => startFlash(HEBREW_FULL_URL, HEBREW_FULL_SHA, false)}
-        >
-          <Text style={styles.btnText}>🇮🇱 Hebrew ② Flash FULL (bidi + glyphs → Hebrew renders)</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.btn, { backgroundColor: theme.accent, marginBottom: 10 }, (!armed || !bt.pairReady || flashBusy) && styles.btnDisabled]}
-          disabled={!armed || !bt.pairReady || flashBusy}
-          onPress={() => startFlash(HEBREW_PROBE_URL, HEBREW_PROBE_SHA, false)}
-        >
-          <Text style={styles.btnText}>🇮🇱 Hebrew v2 + PROBE (full glyphs; browse UI → tap “Read … firmware version”)</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.btn, { backgroundColor: theme.accent, marginBottom: 10 }, (!armed || !bt.pairReady || flashBusy) && styles.btnDisabled]}
-          disabled={!armed || !bt.pairReady || flashBusy}
-          onPress={() => startFlash(FFSUI_URL, FFSUI_SHA, false)}
-        >
-          <Text style={styles.btnText}>🟢 FFS OS SEIZE (our OWN screen replaces Even's: "FFS OS" + live MM:SS)</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.btn, { backgroundColor: theme.accent, marginBottom: 10 }, (!armed || !bt.pairReady || flashBusy) && styles.btnDisabled]}
-          disabled={!armed || !bt.pairReady || flashBusy}
-          onPress={() => startFlash(RAMEXEC_URL, RAMEXEC_SHA, false)}
-        >
-          <Text style={styles.btnText}>⚡ RAM-EXEC PROBE (FUT-214: then tap “Read … firmware version” → ⟨RAMEXEC …⟩)</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.btn, { backgroundColor: theme.accent, marginBottom: 10 }, (!armed || !bt.pairReady || flashBusy) && styles.btnDisabled]}
-          disabled={!armed || !bt.pairReady || flashBusy}
-          onPress={() => startFlash(LOADER_URL, LOADER_SHA, false)}
-        >
-          <Text style={styles.btnText}>🚀 FLASH OTA LOADER (FUT-216: flash once — then Push A/B below to change UI over the air)</Text>
-        </Pressable>
-        <View style={styles.btnRow}>
-          <Pressable
-            style={[styles.btn, { backgroundColor: theme.warn }, !bt.pairReady && styles.btnDisabled]}
-            disabled={!bt.pairReady}
-            onPress={() => { glog.emit("os", "push_a", {}); FfsBle.pushPayloadViaImage(PAYLOAD_A_B64); }}
-          >
-            <Text style={styles.btnText}>⬆️ Push Payload A (OTA)</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.btn, { backgroundColor: theme.accent }, !bt.pairReady && styles.btnDisabled]}
-            disabled={!bt.pairReady}
-            onPress={() => { glog.emit("os", "push_b", {}); FfsBle.pushPayloadViaImage(PAYLOAD_B_B64); }}
-          >
-            <Text style={styles.btnText}>⬆️ Push Payload B (OTA)</Text>
-          </Pressable>
-        </View>
-        <View style={styles.btnRow}>
-          <Pressable
-            style={[styles.btn, { backgroundColor: theme.danger }, (!armed || !bt.pairReady || flashBusy) && styles.btnDisabled]}
-            disabled={!armed || !bt.pairReady || flashBusy}
-            onPress={() => startFlash(CFW_URL, CFW_SHA, false)}
-          >
-            <Text style={styles.btnText}>⚠️ FLASH CFW</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.btn, styles.btnAlt, (!armed || !bt.pairReady || flashBusy) && styles.btnDisabled]}
-            disabled={!armed || !bt.pairReady || flashBusy}
-            onPress={() => startFlash(STOCK_URL, STOCK_SHA, false)}
-          >
-            <Text style={styles.btnText}>Restore Stock</Text>
-          </Pressable>
-        </View>
-      </View>
-
-      <Text style={styles.section}>Connection log</Text>
-      <View style={styles.logBox}>
-        {sup.log.length === 0 ? (
-          <Text style={styles.dim}>no transitions yet…</Text>
-        ) : (
-          sup.log
-            .slice()
-            .reverse()
-            .slice(0, 30)
-            .map((e, i) => (
-              <Text key={i} style={styles.logLine}>
-                {new Date(e.at).toLocaleTimeString()}  {e.health}
-                {e.note ? ` — ${e.note}` : ""}
+          {PRECHECK_ITEMS.map((item, i) => (
+            <Pressable
+              key={i}
+              style={styles.checkRow}
+              disabled={flashBusy}
+              onPress={() =>
+                setPrecheck((prev) => {
+                  const next = prev.slice();
+                  next[i] = !next[i];
+                  return next;
+                })
+              }
+            >
+              <Text style={[styles.checkBox, precheck[i] && styles.checkBoxOn]}>
+                {precheck[i] ? "☑" : "☐"}
               </Text>
-            ))
-        )}
-      </View>
+              <Text style={styles.checkLabel}>{item}</Text>
+            </Pressable>
+          ))}
+          <Text style={styles.warnText}>
+            Biggest real risk is BLE dropping mid-flash — phone right next to the glasses, app
+            open, the whole ~5 min. A cleanly interrupted write can brick.
+          </Text>
+          <Text style={styles.dangerText}>
+            Type “{WARRANTY_PHRASE}” to arm{precheckDone ? "" : " (after the checks above)"}:
+          </Text>
+          <TextInput
+            style={styles.input}
+            value={warranty}
+            onChangeText={setWarranty}
+            placeholder={WARRANTY_PHRASE}
+            placeholderTextColor={theme.textDim}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+        </View>
+
+        <SectionLabel note={armed ? "tap to flash" : "arm above first"}>Flash images</SectionLabel>
+        <Group>
+          {FW_IMAGES.map((img, i) => (
+            <Row
+              key={img.key}
+              badge={img.badge}
+              tint={img.tint}
+              title={img.name}
+              subtitle={img.desc}
+              tag="WRITES"
+              tagTint={theme.danger}
+              trace={img.trace}
+              divider={i > 0}
+              disabled={!armed || !canAct}
+              onPress={() => startFlash(img.url, img.sha, false)}
+            />
+          ))}
+        </Group>
+
+        <SectionLabel note="FUT-216 · needs the OTA loader flashed">Push over the air</SectionLabel>
+        <Group>
+          <Row
+            badge="A"
+            tint={theme.tint.amber}
+            title="Push payload A"
+            subtitle="Draws a bordered box + label on the HUD. No reflash."
+            tag="no flash"
+            disabled={!bt.pairReady}
+            onPress={() => {
+              glog.emit("os", "push_a", {});
+              FfsBle.pushPayloadViaImage(PAYLOAD_A_B64);
+            }}
+          />
+          <Row
+            badge="B"
+            tint={theme.tint.green}
+            title="Push payload B"
+            subtitle="Same, different content — pushing B after A visibly replaces it."
+            tag="no flash"
+            divider
+            disabled={!bt.pairReady}
+            onPress={() => {
+              glog.emit("os", "push_b", {});
+              FfsBle.pushPayloadViaImage(PAYLOAD_B_B64);
+            }}
+          />
+        </Group>
+
+        <SectionLabel note={session || "starting…"}>Connection log</SectionLabel>
+        <View style={styles.logBox}>
+          {sup.log.length === 0 ? (
+            <Text style={styles.dim}>no transitions yet…</Text>
+          ) : (
+            sup.log
+              .slice()
+              .reverse()
+              .slice(0, 30)
+              .map((e, i) => (
+                <Text key={i} style={styles.logLine}>
+                  {new Date(e.at).toLocaleTimeString()}  {e.health}
+                  {e.note ? ` — ${e.note}` : ""}
+                </Text>
+              ))
+          )}
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -565,35 +690,65 @@ export default function App() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: theme.bg },
+
+  header: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.surfaceAlt,
+  },
+  headerTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  title: { color: theme.text, fontSize: 20, fontWeight: "700" },
+  pill: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: theme.surface,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderColor: theme.surfaceAlt,
+  },
+  dot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
+  pillText: { fontSize: 12, fontWeight: "700" },
+  headerMeta: { color: theme.textDim, fontSize: 11.5, fontFamily: "Menlo", marginTop: 6 },
+
+  flashBar: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: theme.surface,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.surfaceAlt,
+  },
+  flashBarActive: { backgroundColor: "#1A1508" },
+  flashRow: { flexDirection: "row", alignItems: "baseline" },
+  flashPct: { color: theme.text, fontSize: 15, fontWeight: "800", width: 52 },
+  flashMsg: { color: theme.textDim, fontSize: 12, fontFamily: "Menlo", flex: 1 },
+  flashWarn: { color: theme.warn, fontSize: 11.5, marginTop: 7, lineHeight: 15 },
+
   scroll: { flex: 1 },
-  scrollContent: { paddingHorizontal: 16, paddingBottom: 48 },
-  title: { color: theme.text, fontSize: 22, fontWeight: "700", marginTop: 10 },
-  sub: { color: theme.textDim, fontSize: 12, marginBottom: 4 },
+  scrollContent: { paddingHorizontal: 16, paddingBottom: 56 },
+
   card: {
     backgroundColor: theme.surface,
     borderRadius: theme.radius,
     padding: 14,
-    marginTop: 6,
-    marginBottom: 10,
     borderWidth: 1,
     borderColor: theme.surfaceAlt,
   },
-  pillRow: { flexDirection: "row", alignItems: "center", marginBottom: 8 },
-  dot: { width: 10, height: 10, borderRadius: 5, marginRight: 8 },
-  pillText: { fontSize: 16, fontWeight: "700" },
-  meta: { color: theme.textDim, fontSize: 13, fontFamily: "Menlo", marginTop: 2 },
-  help: { color: theme.text, fontSize: 12, fontFamily: "Menlo" },
-  btnRow: { flexDirection: "row", gap: 10, marginBottom: 10 },
+  cardArmed: { borderColor: theme.danger },
+
   btn: {
-    flex: 1,
     backgroundColor: theme.accentDim,
     paddingVertical: 12,
     borderRadius: 10,
     alignItems: "center",
+    marginTop: 8,
   },
-  btnAlt: { backgroundColor: theme.surfaceAlt },
   btnDisabled: { backgroundColor: theme.surfaceAlt, opacity: 0.5 },
   btnText: { color: theme.text, fontWeight: "600", fontSize: 14 },
+
   input: {
     backgroundColor: "#010409",
     borderRadius: 8,
@@ -603,21 +758,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 8,
     marginTop: 6,
-    marginBottom: 8,
     fontFamily: "Menlo",
     fontSize: 13,
   },
-  checkRow: { flexDirection: "row", alignItems: "flex-start", marginTop: 8 },
+
+  checkRow: { flexDirection: "row", alignItems: "flex-start", marginTop: 10 },
   checkBox: { color: theme.textDim, fontSize: 18, marginRight: 8, lineHeight: 20 },
   checkBoxOn: { color: theme.accent },
   checkLabel: { color: theme.text, fontSize: 13, flex: 1, lineHeight: 18 },
-  section: { color: theme.textDim, fontSize: 12, marginBottom: 6, marginTop: 4 },
+
+  help: { color: theme.textDim, fontSize: 12, lineHeight: 16, marginTop: 8 },
+  mono: { color: theme.textDim, fontSize: 12, fontFamily: "Menlo", marginTop: 8, lineHeight: 16 },
+  warnText: { color: theme.warn, fontSize: 12, marginTop: 12, lineHeight: 16 },
+  dangerText: { color: theme.danger, fontSize: 12, marginTop: 12, lineHeight: 16 },
   dim: { color: theme.textDim, fontSize: 12 },
+
   logBox: {
     backgroundColor: "#010409",
     borderRadius: 10,
     padding: 10,
-    marginBottom: 12,
     borderWidth: 1,
     borderColor: theme.surfaceAlt,
   },

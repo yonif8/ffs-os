@@ -26,6 +26,19 @@ export const theme = {
   // Amber — link is working but not yet solid (connecting / reconnecting / booting).
   warn: "#F5B23C",
   radius: 16,
+  // FUT-220 — per-row badge tints. A dense list of near-identical firmware images is
+  // only scannable if each row carries its own colour (Google TV settings pattern);
+  // nine identical green buttons are not. Tints group by FAMILY, not by risk:
+  // blue = baseline/no-op, amber = Hebrew line, green = FFS OS line, red = full CFW,
+  // grey = revert. Risk is carried by the right-hand tag, not the colour.
+  tint: {
+    blue: "#5AA9FF",
+    purple: "#C77DFF",
+    amber: "#F5B23C",
+    green: "#3CE28B",
+    red: "#FF5A5A",
+    grey: "#9A9AA2",
+  },
 } as const;
 
 export type Theme = typeof theme;
