@@ -53,6 +53,10 @@ export default function FfsBleTestApp() {
   const [pairReady, setPairReady] = useState(false);
   const [lastGesture, setLastGesture] = useState<string>("—");
   const [gestureCount, setGestureCount] = useState(0);
+  // R1 ring (FUT-233). Independent of the glasses pair — deliberately, since the
+  // gesture-coverage test is run with the G2 POWERED OFF.
+  const [ringState, setRingState] = useState<string>("—");
+  const [ringFrames, setRingFrames] = useState(0);
   const [log, setLog] = useState<string[]>([]);
   const [session, setSession] = useState<string>("");
   const scrollRef = useRef<ScrollView>(null);
@@ -125,10 +129,47 @@ export default function FfsBleTestApp() {
         });
       }),
       FfsBle.addListener("onGesture", (p) => {
+        // `source` is the firmware's eventSource on glasses events (FUT-233): 1/3 are
+        // the temple pads, 2 would be the ring and has never once been observed. It is
+        // shown even when null, because its absence is the finding.
+        const tag = p.device === "ring" ? "💍" : "👆";
+        const detail =
+          p.device === "ring" ? p.raw ?? "" : `src=${p.source ?? "none"}`;
         setLastGesture(`${p.gesture} (${p.side})`);
         setGestureCount((n) => n + 1);
-        append(`👆 GESTURE: ${p.gesture} [${p.side}]`);
-        glog.emit("ffsble", "gesture", { gesture: p.gesture, side: p.side });
+        append(`${tag} GESTURE: ${p.gesture} [${p.side}] ${detail}`);
+        glog.emit("ffsble", "gesture", {
+          gesture: p.gesture,
+          side: p.side,
+          device: p.device,
+          source: p.source,
+          raw: p.raw,
+        });
+      }),
+      // ---- R1 ring (FUT-233) ----
+      FfsBle.addListener("onRingConnected", (p) => {
+        setRingState(`connected — ${p.name}`);
+        append(`💍 RING READY: ${p.name}`);
+        glog.emit("ffsble", "ring_connected", { name: p.name });
+      }),
+      FfsBle.addListener("onRingDisconnected", (p) => {
+        setRingState("—");
+        append(`💍 ring disconnected${p.reason ? ` (${p.reason})` : ""}`);
+        glog.emit("ffsble", "ring_disconnected", { reason: p.reason });
+      }),
+      // EVERY frame, decoded or not. This is the evidence channel for "which of the
+      // five gestures does the phone link actually carry?" — do not filter it.
+      FfsBle.addListener("onRingRaw", (p) => {
+        setRingFrames((n) => n + 1);
+        append(`💍 rx ${p.characteristic} ← ${p.hex}`);
+        glog.emit("ffsble", "ring_raw", {
+          characteristic: p.characteristic,
+          hex: p.hex,
+        });
+      }),
+      FfsBle.addListener("onRingBattery", (p) => {
+        append(`💍 ring battery ${p.battery}%`);
+        glog.emit("ffsble", "ring_battery", { battery: p.battery });
       }),
       FfsBle.addListener("onDisconnected", (p) => {
         // Only THIS side tears down; the other lens is untouched.
@@ -271,6 +312,29 @@ export default function FfsBleTestApp() {
           <Text style={styles.btnText}>
             {pairReady ? "Show image on HUD (P4)" : "Show image — pair not ready"}
           </Text>
+        </Pressable>
+      </View>
+
+      {/* R1 ring — FUT-233. Works with the glasses off, which is exactly how the
+          gesture-coverage test must be run. */}
+      <Text style={styles.section}>
+        R1 ring — {ringState} · {ringFrames} frames
+      </Text>
+      <View style={styles.btnRow}>
+        <Pressable
+          style={styles.btn}
+          onPress={() => {
+            append("💍 ring scan — wear the ring, then tap/swipe/hold");
+            FfsBle.ringScan();
+          }}
+        >
+          <Text style={styles.btnText}>Scan ring</Text>
+        </Pressable>
+        <Pressable style={styles.btn} onPress={() => FfsBle.ringDisconnect()}>
+          <Text style={styles.btnText}>Disconnect ring</Text>
+        </Pressable>
+        <Pressable style={styles.btn} onPress={() => FfsBle.ringForget()}>
+          <Text style={styles.btnText}>Forget ring</Text>
         </Pressable>
       </View>
 
