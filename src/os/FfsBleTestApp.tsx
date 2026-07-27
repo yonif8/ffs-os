@@ -57,6 +57,8 @@ export default function FfsBleTestApp() {
   // gesture-coverage test is run with the G2 POWERED OFF.
   const [ringState, setRingState] = useState<string>("—");
   const [ringFrames, setRingFrames] = useState(0);
+  /** First lens MAC seen in a scan — advStart's payload (FUT-233). */
+  const [glassesMac, setGlassesMac] = useState<string | null>(null);
   const [log, setLog] = useState<string[]>([]);
   const [session, setSession] = useState<string>("");
   const scrollRef = useRef<ScrollView>(null);
@@ -96,6 +98,9 @@ export default function FfsBleTestApp() {
       }),
       FfsBle.addListener("onDeviceFound", (p) => {
         setDevices((prev) => ({ ...prev, [`${p.side}:${p.name}`]: p }));
+        // Remember the first lens MAC we see — advStart needs it to tell the ring
+        // which glasses to connect to (FUT-233). Ring scan results carry no MAC.
+        if (p.mac && p.side !== "ring") setGlassesMac((cur) => cur ?? p.mac);
         glog.emit("ffsble", "device_found", {
           name: p.name, side: p.side, rssi: p.rssi, sn: p.sn, mac: p.mac,
         });
@@ -335,6 +340,29 @@ export default function FfsBleTestApp() {
         </Pressable>
         <Pressable style={styles.btn} onPress={() => FfsBle.ringForget()}>
           <Text style={styles.btnText}>Forget ring</Text>
+        </Pressable>
+      </View>
+
+      {/* Settles whether the ring can hold the phone link AND a glasses link at the
+          same time. Needs the glasses MAC, which we only learn from a lens scan —
+          hence "connect the pair first, then tap this". If ring frames keep arriving
+          afterwards, both links coexist. */}
+      <View style={styles.btnRow}>
+        <Pressable
+          style={[styles.btn, !glassesMac && styles.btnDisabled]}
+          disabled={!glassesMac}
+          onPress={() => {
+            append(`💍 advStart → tell ring to also connect to ${glassesMac}`);
+            const ok = FfsBle.ringConnectToGlasses(glassesMac!);
+            append(`💍 advStart ${ok ? "sent" : "REJECTED (ring not connected?)"}`);
+            glog.emit("ffsble", "ring_adv_start", { mac: glassesMac, ok });
+          }}
+        >
+          <Text style={styles.btnText}>
+            {glassesMac
+              ? "Ring → also connect to glasses"
+              : "Ring → glasses (scan a lens first for its MAC)"}
+          </Text>
         </Pressable>
       </View>
 

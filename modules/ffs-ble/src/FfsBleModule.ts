@@ -26,13 +26,14 @@ export interface OnStateChangeEvent {
 }
 
 export interface OnDeviceFoundEvent {
-  /** Advertised name, e.g. "Even G2_XX_L_XXXXXX". */
+  /** Advertised name, e.g. "Even G2_XX_L_XXXXXX" or "EVEN R1_XXXXXX". */
   name: string;
-  side: G2Side;
+  /** A lens side, or "ring" for an R1 discovered by the ring scan (FUT-233). */
+  side: G2Side | "ring";
   rssi: number;
-  /** 14-char serial from manufacturer data, if present. */
+  /** 14-char serial from manufacturer data, if present. Always null for the ring. */
   sn: string | null;
-  /** "AA:BB:CC:DD:EE:FF" big-endian, if present. */
+  /** "AA:BB:CC:DD:EE:FF" big-endian, if present. Always null for the ring. */
   mac: string | null;
 }
 
@@ -104,9 +105,14 @@ export interface OnGestureEvent {
  *
  * This is the seam that makes the input-route pivot invisible to the UI: the ring
  * became the input device, but navigation code keeps speaking one language. The
- * ring's `single_tap` IS the glasses' `tap`; its `hold` has no nav equivalent yet
- * (the OS has no back/menu binding), so it returns null rather than being silently
- * mapped onto something it isn't.
+ * ring's `single_tap` IS the glasses' `tap`.
+ *
+ * ⚠️ `hold` returns null BY DESIGN, and must stay that way (Yoni, 2026-07-28):
+ * **`double_tap` is BACK** — verified, it routes to `back()` in every branch of
+ * `nav.handleGesture` — so hold is NOT a back button and must not be mapped to one.
+ * Hold is deliberately RESERVED for special, context-dependent actions per screen,
+ * which is why it is kept out of the global nav vocabulary rather than given a
+ * default. A screen that wants hold should handle the raw `onGesture` itself.
  */
 export function toNavGesture(g: OnGestureEvent): G2GestureName | null {
   switch (g.gesture) {
