@@ -14,6 +14,7 @@ import FfsBle, {
   type G2Side,
   type G2ConnectSide,
   type G2GestureName,
+  type R1GestureName,
   type OnDeviceFoundEvent,
 } from "../../modules/ffs-ble";
 
@@ -42,8 +43,20 @@ export interface FfsGlassesSession {
   sides: { L: boolean; R: boolean };
   /** Discovered lenses (deduped by side), newest RSSI wins. */
   devices: OnDeviceFoundEvent[];
-  /** Most recent decoded gesture (for the launcher's input routing). */
-  lastGesture: { gesture: G2GestureName; side: G2Side; at: number } | null;
+  /**
+   * Most recent decoded gesture (for the launcher's input routing). Since FUT-233
+   * this can come from the R1 ring as well as the glasses' touchpads, so it carries
+   * `device`; `gesture` is the raw device-native name (use `toNavGesture` to collapse
+   * it to the nav vocabulary).
+   */
+  lastGesture:
+    | {
+        gesture: G2GestureName | R1GestureName;
+        side: G2Side | "ring";
+        device: "glasses" | "ring";
+        at: number;
+      }
+    | null;
   /** Most recent real device info (battery / firmware version), or null if not read yet. */
   deviceInfo: FfsDeviceInfo | null;
 
@@ -72,7 +85,7 @@ export function useFfsBluetooth(options: { autoScan?: boolean } = {}): FfsGlasse
   const [scanning, setScanning] = useState(false);
   const [devices, setDevices] = useState<OnDeviceFoundEvent[]>([]);
   const [lastGesture, setLastGesture] =
-    useState<{ gesture: G2GestureName; side: G2Side; at: number } | null>(null);
+    useState<FfsGlassesSession["lastGesture"]>(null);
   const [deviceInfo, setDeviceInfo] = useState<FfsDeviceInfo | null>(null);
 
   useEffect(() => {
@@ -103,7 +116,12 @@ export function useFfsBluetooth(options: { autoScan?: boolean } = {}): FfsGlasse
         setTimeout(() => FfsBle.requestDeviceInfo(), 2000);
       }),
       FfsBle.addListener("onGesture", (g) => {
-        setLastGesture({ gesture: g.gesture, side: g.side, at: Date.now() });
+        setLastGesture({
+          gesture: g.gesture,
+          side: g.side,
+          device: g.device,
+          at: Date.now(),
+        });
       }),
       FfsBle.addListener("onDeviceInfo", (d) => {
         setDeviceInfo({

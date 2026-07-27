@@ -70,10 +70,85 @@ export interface OnNotifyEvent {
 /** A decoded touch gesture from the glasses. */
 export type G2GestureName = "tap" | "double_tap" | "swipe_up" | "swipe_down";
 
+/**
+ * The R1 ring's five discrete gestures (FUT-233).
+ * ⚠️ There is NO rotary/scroll wheel on the ring — do not design a scroll-wheel UX.
+ */
+export type R1GestureName =
+  | "hold"
+  | "single_tap"
+  | "double_tap"
+  | "swipe_up"
+  | "swipe_down";
+
 export interface OnGestureEvent {
-  gesture: G2GestureName;
-  /** Which lens's touchpad the gesture came from. */
-  side: G2Side;
+  gesture: G2GestureName | R1GestureName;
+  /** Which lens's touchpad it came from, or "ring". */
+  side: G2Side | "ring";
+  /** Which physical device produced it. The ring is the SDK's input device. */
+  device: "glasses" | "ring";
+  /**
+   * Glasses only, and often null: the firmware's `eventSource` — 1 and 3 are the
+   * temple touchpads, 2 is believed to be the ring but has never been observed.
+   * ALWAYS null for taps on text/list containers, which carry no such field, and
+   * always null for ring events (they don't traverse the firmware at all).
+   */
+  source: number | null;
+  /** Ring only: the raw `FF tt pp` frame that produced this gesture. */
+  raw?: string;
+}
+
+/**
+ * Collapse any input event — glasses touchpad OR R1 ring — into the single nav
+ * vocabulary the OS navigates with, or null if it has no navigation meaning.
+ *
+ * This is the seam that makes the input-route pivot invisible to the UI: the ring
+ * became the input device, but navigation code keeps speaking one language. The
+ * ring's `single_tap` IS the glasses' `tap`; its `hold` has no nav equivalent yet
+ * (the OS has no back/menu binding), so it returns null rather than being silently
+ * mapped onto something it isn't.
+ */
+export function toNavGesture(g: OnGestureEvent): G2GestureName | null {
+  switch (g.gesture) {
+    case "tap":
+    case "single_tap":
+      return "tap";
+    case "double_tap":
+      return "double_tap";
+    case "swipe_up":
+      return "swipe_up";
+    case "swipe_down":
+      return "swipe_down";
+    case "hold":
+      return null;
+    default:
+      return null;
+  }
+}
+
+export interface OnRingConnectedEvent {
+  name: string;
+}
+
+export interface OnRingDisconnectedEvent {
+  reason: string | null;
+}
+
+/**
+ * EVERY inbound ring frame, decoded or not — deliberately unfiltered, because the
+ * open question is which gestures the phone link actually carries (MentraOS parses
+ * all five; openCFW's capture saw only hold + double-tap reach the phone).
+ */
+export interface OnRingRawEvent {
+  /** First 8 chars of the characteristic UUID that fired. */
+  characteristic: string;
+  /** Space-separated uppercase hex. */
+  hex: string;
+}
+
+export interface OnRingBatteryEvent {
+  /** 0–100. */
+  battery: number;
 }
 
 /**
@@ -130,6 +205,10 @@ export interface FfsBleEvents {
   onDisconnected: OnDisconnectedEvent;
   onFlashProbe: OnFlashProbeEvent;
   onFlashProgress: OnFlashProgressEvent;
+  onRingConnected: OnRingConnectedEvent;
+  onRingDisconnected: OnRingDisconnectedEvent;
+  onRingRaw: OnRingRawEvent;
+  onRingBattery: OnRingBatteryEvent;
 }
 
 export type FfsBleEventName = keyof FfsBleEvents;
@@ -242,6 +321,26 @@ interface FfsBleNativeModule {
   setDashboardData(json: string): void;
   /** P3: tear down the EvenHub session (stops the keep-alive heartbeat). */
   stopSession(): void;
+
+  // ---- R1 ring — the SDK's input device (FUT-233) --------------------------
+  // The ring is a SEPARATE BLE peripheral the phone connects to directly, so none
+  // of these require the glasses to be connected — or even powered on, which is
+  // exactly the configuration the gesture-coverage test needs. Gestures arrive on
+  // the shared `onGesture` event tagged `device: "ring"`; raw frames on `onRingRaw`.
+
+  /** Scan for and connect the R1 ring (reconnects by stored UUID when known). */
+  ringScan(): void;
+  ringStopScan(): void;
+  ringDisconnect(): void;
+  /** Forget the paired ring so the next scan pairs fresh. */
+  ringForget(): void;
+  ringReadBattery(): void;
+  /**
+   * Command the ring to ALSO hold a link to the glasses at `mac` (advStart). NOT
+   * needed for input — that comes over the phone link. Returns false if the ring
+   * isn't connected or the MAC won't parse.
+   */
+  ringConnectToGlasses(mac: string): boolean;
   addListener<E extends FfsBleEventName>(
     event: E,
     listener: (payload: FfsBleEvents[E]) => void
