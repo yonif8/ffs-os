@@ -885,7 +885,15 @@ extension G2EvenHub {
   ///   f1 = ListEvent → inner f5  (interaction on a list container)
   /// OsEventType: 0=click(tap), 1=scrollTop(swipe up), 2=scrollBottom(swipe down), 3=doubleClick.
   /// (FUT-160: SysEvent-only decode missed single-tap on text pages — it arrives as TextEvent.)
-  static func parseGesture(_ payload: Data) -> String? {
+  /// Returns the gesture name plus, WHERE THE FIRMWARE PROVIDES IT, the originating
+  /// input device (FUT-233). `source` is `Sys_ItemEvent.eventSource` (inner field 2):
+  /// 1 and 3 are the temple touchpads (the only values 82 telemetry files have ever
+  /// contained); 2 is believed to be the R1 ring and has NEVER been observed.
+  /// ⚠️ `eventSource` exists ONLY on Sys events — `Text_ItemEvent` and `List_ItemEvent`
+  /// carry no such field, so a tap landing on a text/list container is permanently
+  /// source-blind and reports `nil`. That blindness is precisely why the ring's input
+  /// route was locked to the phone link instead of this one.
+  static func parseGesture(_ payload: Data) -> (name: String, source: Int32?)? {
     var r = G2ProtobufReader(payload)
     let f = r.parseFields()
     guard (f[1] as? Int32) == rspOsNotifyEvent, let devEvent = f[13] as? Data else { return nil }
@@ -894,10 +902,19 @@ extension G2EvenHub {
     // SysEvent: absent eventType => CLICK(0) => tap. Protobuf omits zero-value
     // fields, so a single-press arrives as SysEvent{eventSource} with NO eventType
     // field at all — treating "absent" as "not a gesture" was the single-tap miss.
-    if let sysData = df[3] as? Data, let g = gestureName(from: sysData, at: 1, absentIsClick: true) { return g }
-    if let textData = df[2] as? Data, let g = gestureName(from: textData, at: 3) { return g }
-    if let listData = df[1] as? Data, let g = gestureName(from: listData, at: 5) { return g }
+    if let sysData = df[3] as? Data, let g = gestureName(from: sysData, at: 1, absentIsClick: true) {
+      return (g, eventSource(from: sysData))
+    }
+    if let textData = df[2] as? Data, let g = gestureName(from: textData, at: 3) { return (g, nil) }
+    if let listData = df[1] as? Data, let g = gestureName(from: listData, at: 5) { return (g, nil) }
     return nil
+  }
+
+  /// `Sys_ItemEvent.eventSource` — inner field 2. Nil when the firmware omitted it
+  /// (protobuf zero-omission means source 0, if it exists, is indistinguishable from absent).
+  private static func eventSource(from sysData: Data) -> Int32? {
+    var r = G2ProtobufReader(sysData)
+    return r.parseFields()[2] as? Int32
   }
 
   /// Read the OsEventType at `field` inside a sub-event and map it to a nav-gesture

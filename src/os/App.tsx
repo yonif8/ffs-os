@@ -23,7 +23,7 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef, useState } from "react";
 import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
-import FfsBle from "../../modules/ffs-ble";
+import FfsBle, { toNavGesture } from "../../modules/ffs-ble";
 import { theme } from "./theme";
 import { initLoggerCore, glog } from "./log";
 import { useFfsBluetooth } from "./useFfsBluetooth";
@@ -349,8 +349,17 @@ export default function App() {
     void screenOwner.setSurface(() => nav.paint());
     glog.emit("os", "phone_os_up", {});
     const sub = FfsBle.addListener("onGesture", (g) => {
-      glog.emit("os", "nav_gesture", { gesture: g.gesture, side: g.side });
-      nav.handleGesture(g.gesture);
+      // Input can now arrive from the glasses' touchpads OR the R1 ring (FUT-233).
+      // `device`/`source` are logged so telemetry can tell them apart after the fact.
+      const nav_gesture = toNavGesture(g);
+      glog.emit("os", "nav_gesture", {
+        gesture: g.gesture,
+        side: g.side,
+        device: g.device,
+        source: g.source,
+        nav: nav_gesture,
+      });
+      if (nav_gesture) nav.handleGesture(nav_gesture);
     });
     return () => {
       sub.remove();
