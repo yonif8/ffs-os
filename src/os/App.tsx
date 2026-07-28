@@ -169,6 +169,21 @@ const PAYLOAD_WA18_B64 =
 const PAYLOAD_WA20_B64 =
   "RlhQMS3p8E+BsE/2v0GBRsDyRAEAIIhHACgA8B6CRfIAFYJGwPJ1BUz2mXjA8kQIKEZRRsBHaLEI9axxBEaIRyZoCPUCYSBGiEeuQgLRT/ABCwHgT/AAC0by0FTA8nUEIEZRRsBHoLEI9axxBEaIRyZoCPUCYSBGiEdG8tBQRvLQVMDydQDA8nUEhkIIvwvxAguQNCBGUUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwvxBAsF9TR0IEZRRsBHYLEI9axxBkaIRzdoCPUCYTBGiEenQgi/C/EIC0byLBXA8nUFBfG0BjBGUUbAR3ixCPWscQdGiEdMRtf4AJAI9QJhOEaIR7FFoUYIvwvxEAsF8dgGMEZRRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/EgCwX1kGYwRlFGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L8UALRvLQUMDydQAA8UgGMEZRRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/GAC0by0FDA8nUAAPEkBjBGUUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwv1gHtG8tBQwPJ1AADxtAYwRlFGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L9QB7RvLQUMDydQAA9ZB2MEZRRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/WAa0XyABDA8nUAAPUrdjBGUUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwv1AGsF9cZ2MEZRRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/WAWwX12HYwRlFGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L9QBbBfXqdjBGUUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwv1gEsF9fx2MEZRRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/UAS0by0FDA8nUAAPHYBjBGUUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwv1gDtG8tBQwPJ1AAD1xnYwRlFGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L9QA7KEZRRsBHYLEI9axxBkaIRzRoCPUCYTBGiEesQgi/C/WAK0XyABXA8nUFBfUHdCBGUUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwv1ACsoRlFGwEcAKF/QCPWscQRGiEdP8sFDwPJDAyBGeCF4Isn4AECYR0/ymwPA8kMDIEbkIVQimEdE9tNBwPJHASAgiEcAKEHQACFC9mkGAXBBcIFwwXABcUFxgXHBcQFyQXKBcsFyAXNBc4FzwXMBdEF0gXTBdAF1QXWBdcF1AXZBdoF2wXYBd0F3gXfBd8DySAYdIQAiBUawRyhGKCEDIrBHKEYkIf8isEcoRiMhb/B/QrBHKEYMITwisEdL9hsTwPJEAyBGKUYAIphHC/G0QAGwvejwj0/wYEABsL3o8I8=";
 
+// FUT-232 menu bisect — W12 returned 0x5A000FFF (bits 0-11 ALL set: 12 widgets proven,
+// control included) and W16 crashed, so the fault is in bits 12-15, the menu family.
+// These rungs isolate which one, and MND separates constructor vs destructor.
+const PAYLOAD_WA_13_B64 =
+  "RlhQMS3p8E+BsE/2v0GBRsDyRAEAIIhHACgA8JGBRfIAGgVGwPJ1Ckz2mXjA8kQIUEYpRsBHaLEI9axxBEaIRyZoCPUCYSBGiEdWRQLRT/ABCwHgT/AAC0byBCDA8nUAAPVzdCBGKUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwvxAgtG8hhgwPJ1AADxSAYwRilGwEd4sQj1rHEHRohHTEbX+ACQCPUCYThGiEexRaFGCL8L8QQLCvU0djBGKUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwvxCAsK9YdWMEYpRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/EQC0byBCbA8nUGMEYpRsBHgLEI9axxBkaIRzRoCPUCYTBGRvIEJsDydQaIR7RCCL8L8SALBvVqdjBGKUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwvxQAtG8hhgwPJ1AClGwEeAsQj1rHEGRohHNGgI9QJhMEaIR0byGGDA8nUAhEIIvwvxgAtG8gQgwPJ1AAD1fHYwRilGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L9YB7RvIYYMDydQAA8WwGMEYpRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/UAe0byGGDA8nUAAPHYBCBGKUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwv1gGsK9St0IEYpRsBHYLEI9axxBkaIRzdoCPUCYTBGiEenQgi/C/UAa0byBCDA8nUAAPG0BCBGKUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwv1gFtQRilGwEcAKF/QCPWscQRGiEdP8sFDwPJDAyBGeCF4Isn4AECYR0/ymwPA8kMDIEbkIVQimEdE9tNBwPJHASAgiEcAKEHQACFC9mkGAXBBcIFwwXABcUFxgXHBcQFyQXKBcsFyAXNBc4FzwXMBdEF0gXTBdAF1QXWBdcF1AXZBdoF2wXYBd0F3gXfBd8DySAYdIQAiBUawRyhGKCEDIrBHKEYkIf8isEcoRiMhb/B/QrBHKEYMITwisEdL9hsTwPJEAyBGKUYAIphHC/G0QAGwvejwj0/wYEABsL3o8I8=";
+
+const PAYLOAD_WA_14_B64 =
+  "RlhQMS3p8E+BsE/2v0GBRsDyRAEAIIhHACgA8KiBRfIAGgVGwPJ1Ckz2mXjA8kQIUEYpRsBHaLEI9axxBEaIRyZoCPUCYSBGiEdWRQLRT/ABCwHgT/AAC0byBCDA8nUAAPVzdCBGKUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwvxAgtG8hhgwPJ1AADxSAYwRilGwEd4sQj1rHEHRohHTEbX+ACQCPUCYThGiEexRaFGCL8L8QQLCvU0djBGKUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwvxCAsK9YdWMEYpRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/EQC0byBCbA8nUGMEYpRsBHgLEI9axxBkaIRzRoCPUCYTBGRvIEJsDydQaIR7RCCL8L8SALBvVqdjBGKUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwvxQAtG8hhgwPJ1AClGwEeAsQj1rHEGRohHNGgI9QJhMEaIR0byGGDA8nUAhEIIvwvxgAtG8gQgwPJ1AAD1fHYwRilGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L9YB7RvIYYMDydQAA8WwGMEYpRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/UAe0byGGDA8nUAAPHYBCBGKUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwv1gGsK9St0IEYpRsBHYLEI9axxBkaIRzdoCPUCYTBGiEenQgi/C/UAa0byBCbA8nUGBvG0BCBGKUbAR4CxCPWscQZGiEc3aAj1AmEwRkbyBCbA8nUGiEenQgi/C/WAWwbx2AQgRilGwEdgsQj1rHEGRohHN2gI9QJhMEaIR6dCCL8L9QBbUEYpRsBHAChf0Aj1rHEERohHT/LBQ8DyQwMgRngheCLJ+ABAmEdP8psDwPJDAyBG5CFUIphHRPbTQcDyRwEgIIhHAChB0AAhQvZpBgFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXfA8kgGHSEAIgVGsEcoRighAyKwRyhGJCH/IrBHKEYjIW/wf0KwRyhGDCE8IrBHS/YbE8DyRAMgRilGACKYRwvxtEABsL3o8I9P8GBAAbC96PCP";
+
+const PAYLOAD_WA_15_B64 =
+  "RlhQMS3p8E+BsE/2v0GBRsDyRAEAIIhHACgA8L+BRfIAGgVGwPJ1Ckz2mXjA8kQIUEYpRsBHaLEI9axxBEaIRyZoCPUCYSBGiEdWRQLRT/ABCwHgT/AAC0byBCDA8nUAAPVzdCBGKUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwvxAgtG8hhgwPJ1AADxSAYwRilGwEd4sQj1rHEHRohHTEbX+ACQCPUCYThGiEexRaFGCL8L8QQLCvU0djBGKUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwvxCAsK9YdWMEYpRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/EQC0byBCbA8nUGMEYpRsBHgLEI9axxBkaIRzRoCPUCYTBGRvIEJsDydQaIR7RCCL8L8SALBvVqdjBGKUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwvxQAtG8hhgwPJ1AClGwEeAsQj1rHEGRohHNGgI9QJhMEaIR0byGGDA8nUAhEIIvwvxgAtG8gQgwPJ1AAD1fHYwRilGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L9YB7RvIYYMDydQAA8WwGMEYpRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/UAe0byGGDA8nUAAPHYBCBGKUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwv1gGsK9St0IEYpRsBHYLEI9axxBkaIRzdoCPUCYTBGiEenQgi/C/UAa0byBCbA8nUGBvG0BCBGKUbAR4CxCPWscQZGiEc3aAj1AmEwRkbyBCbA8nUGiEenQgi/C/WAWwbx2AQgRilGwEeAsQj1rHEGRohHN2gI9QJhMEZG8gQmwPJ1BohHp0IIvwv1AFsG8fwEIEYpRsBHYLEI9axxBkaIRzdoCPUCYTBGiEenQgi/C/WAS1BGKUbARwAoX9AI9axxBEaIR0/ywUPA8kMDIEZ4IXgiyfgAQJhHT/KbA8DyQwMgRuQhVCKYR0T200HA8kcBICCIRwAoQdAAIUL2aQYBcEFwgXDBcAFxQXGBccFxAXJBcoFywXIBc0FzgXPBcwF0QXSBdMF0AXVBdYF1wXUBdkF2gXbBdgF3QXeBd8F3wPJIBh0hACIFRrBHKEYoIQMisEcoRiQh/yKwRyhGIyFv8H9CsEcoRgwhPCKwR0v2GxPA8kQDIEYpRgAimEcL8bRAAbC96PCPT/BgQAGwvejwjw==";
+
+const PAYLOAD_WA_MENUND_B64 =
+  "RlhQMS3p8EFP9r9BgEbA8kQBACCIRwAoAPCGgEbyuCQFRsDydQRM9pl2wPJEBiBGKUawR1ixBvWscQdGiEc4aKBCBNFB8gAExfYAJAHgT/C0REXyABDA8nUAKUawRwAoX9AG9axxBUaIR0/ywUPA8kMDKEZ4IXgiyPgAUJhHT/KbA8DyQwMoRuQhVCKYR0T200HA8kcBICCIRwAoQdAAIUL2aQcBcEFwgXDBcAFxQXGBccFxAXJBcoFywXIBc0FzgXPBcwF0QXSBdMF0AXVBdYF1wXUBdkF2gXbBdgF3QXeBd8F3wPJIBx0hACIGRrhHMEYoIQMiuEcwRiQh/yK4RzBGIyFv8H9CuEcwRgwhPCK4R0v2GxPA8kQDKEYxRgAimEcgRr3o8IFP8GBAvejwgQ==";
+
 const WARRANTY_PHRASE = "my warranty is void";
 
 // FUT-167 soft precheck — a self-attested readiness checklist that must be
@@ -389,6 +404,11 @@ export default function App() {
   // → blank lens → watchdog reboot, identically for every payload. Cost on 2026-07-28:
   // a whole session and three lens crashes. `pushMsg` is the refusal/confirmation line.
   const [pushMsg, setPushMsg] = useState<string>("");
+  // FUT-237 fix: the guard demanded positive proof of the loader, but deviceInfo starts
+  // empty — so the first tap only fired the read and the user had to tap AGAIN (Yoni hit
+  // three taps). A guard that makes you repeat yourself is a bad guard. We now park the
+  // push here and fire it automatically the moment the readback lands.
+  const pendingPushRef = useRef<{ label: string; event: string; b64: string } | null>(null);
 
   // Live refs so the nav's context getters always read current session state.
   const btRef = useRef(bt);
@@ -445,8 +465,20 @@ export default function App() {
       FfsBle.addListener("onLog", (e) => glog.emit("drv", "log", { m: e.message })),
       FfsBle.addListener("onDisconnected", (e) =>
         glog.emit("drv", "disconnected", { side: e.side, reason: e.reason ?? null })),
-      FfsBle.addListener("onDeviceInfo", (e) =>
-        glog.emit("drv", "device_info", { batt: e.battery, chg: e.charging, l: e.leftVersion, r: e.rightVersion })),
+      FfsBle.addListener("onDeviceInfo", (e) => {
+        glog.emit("drv", "device_info", { batt: e.battery, chg: e.charging, l: e.leftVersion, r: e.rightVersion });
+        const p = pendingPushRef.current;
+        if (!p) return;
+        pendingPushRef.current = null;
+        if (`${e.leftVersion ?? ""} ${e.rightVersion ?? ""}`.includes("LOADER")) {
+          setPushMsg(`✅ loader confirmed — pushed ${p.label}`);
+          glog.emit("os", p.event, {});
+          FfsBle.pushPayloadViaImage(p.b64);
+        } else {
+          setPushMsg("⛔ BLOCKED — no OTA loader on the glasses (stock firmware). Pushing would crash a lens. Flash g2_2.2.6.10_loader.bin first.");
+          glog.emit("os", "push_blocked", { label: p.label, reason: "no_loader" });
+        }
+      }),
     ];
     return () => subs.forEach((s) => s.remove());
   }, []);
@@ -472,12 +504,15 @@ export default function App() {
     if (!bt.pairReady) return;
     if (!loaderPresent()) {
       const everRead = !!bt.deviceInfo;
-      setPushMsg(
-        everRead
-          ? "⛔ BLOCKED — no OTA loader on the glasses (they're on STOCK firmware). Pushing now would crash a lens, not just fail. Flash g2_2.2.6.10_loader.bin first."
-          : "⛔ BLOCKED — haven't read the firmware yet, so I can't prove the loader is there. Reading now… tap again in a couple of seconds.",
-      );
-      glog.emit("os", "push_blocked", { label, reason: everRead ? "no_loader" : "no_reading" });
+      if (everRead) {
+        setPushMsg("⛔ BLOCKED — no OTA loader on the glasses (they're on STOCK firmware). Pushing now would crash a lens, not just fail. Flash g2_2.2.6.10_loader.bin first.");
+        glog.emit("os", "push_blocked", { label, reason: "no_loader" });
+        FfsBle.requestDeviceInfo();   // re-check in case they just flashed
+        return;
+      }
+      // Never read the firmware yet: park this push and fire it when the answer lands.
+      pendingPushRef.current = { label, event, b64 };
+      setPushMsg("⏳ checking the glasses for the OTA loader… this push will go automatically.");
       FfsBle.requestDeviceInfo();
       return;
     }
@@ -946,6 +981,58 @@ export default function App() {
             disabled={!bt.pairReady}
             onPress={() => {
               guardedPush("payload B", "push_b", PAYLOAD_B_B64);
+            }}
+          />
+          <Row
+            badge="M13"
+            tint={theme.tint.amber}
+            title="Menu bisect — M13"
+            subtitle="+ lv_menu (bit 12) — the first child-building constructor"
+            tag="no flash"
+            trace="FUT-232"
+            divider
+            disabled={!bt.pairReady}
+            onPress={() => {
+              guardedPush("M13", "push_wa_13", PAYLOAD_WA_13_B64);
+            }}
+          />
+          <Row
+            badge="M14"
+            tint={theme.tint.amber}
+            title="Menu bisect — M14"
+            subtitle="+ lv_menu_page (bit 13)"
+            tag="no flash"
+            trace="FUT-232"
+            divider
+            disabled={!bt.pairReady}
+            onPress={() => {
+              guardedPush("M14", "push_wa_14", PAYLOAD_WA_14_B64);
+            }}
+          />
+          <Row
+            badge="M15"
+            tint={theme.tint.amber}
+            title="Menu bisect — M15"
+            subtitle="+ lv_menu_cont (bit 14)"
+            tag="no flash"
+            trace="FUT-232"
+            divider
+            disabled={!bt.pairReady}
+            onPress={() => {
+              guardedPush("M15", "push_wa_15", PAYLOAD_WA_15_B64);
+            }}
+          />
+          <Row
+            badge="MND"
+            tint={theme.tint.amber}
+            title="Menu bisect — MND"
+            subtitle="lv_menu ONLY, and NOT deleted — separates a constructor fault from a destructor fault"
+            tag="no flash"
+            trace="FUT-232"
+            divider
+            disabled={!bt.pairReady}
+            onPress={() => {
+              guardedPush("MND", "push_wa_menund", PAYLOAD_WA_MENUND_B64);
             }}
           />
           <Row
