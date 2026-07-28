@@ -328,6 +328,13 @@ interface FfsBleNativeModule {
   /** P3: tear down the EvenHub session (stops the keep-alive heartbeat). */
   stopSession(): void;
 
+  /**
+   * Tiny persistent key/value store (FUT-236) — used so the calibration run knows
+   * whether it has already been completed. Returns null if never set.
+   */
+  getPref(key: string): string | null;
+  setPref(key: string, value: string): void;
+
   // ---- R1 ring — the SDK's input device (FUT-233) --------------------------
   // The ring is a SEPARATE BLE peripheral the phone connects to directly, so none
   // of these require the glasses to be connected — or even powered on, which is
