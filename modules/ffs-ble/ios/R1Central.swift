@@ -152,6 +152,7 @@ final class R1Central: NSObject {
   private var initSequenceRun = false
   private var isDisconnecting = false
   private var scanTimeoutWork: DispatchWorkItem?
+  private var initSettleWork: DispatchWorkItem?
   private var heartbeatTimer: DispatchSourceTimer?
 
   /// Persisted so a reconnect doesn't need a fresh scan.
@@ -337,6 +338,8 @@ final class R1Central: NSObject {
   }
 
   private func resetConnectionState() {
+    initSettleWork?.cancel()
+    initSettleWork = nil
     ring?.delegate = nil
     ring = nil
     writeChar1 = nil
@@ -450,8 +453,12 @@ extension R1Central: CBCentralManagerDelegate {
   }
 
   func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-    log("connected \(peripheral.name ?? "ring") — discovering services")
-    peripheral.discoverServices([R1BLE.SERVICE, R1BLE.BATTERY_SVC])
+    log("connected \(peripheral.name ?? "ring") — discovering ALL services")
+    // nil = discover EVERYTHING. Do not narrow this to the services we think we need:
+    // gestures may arrive on a characteristic we haven't catalogued, and a filtered
+    // discovery makes that invisible by construction — indistinguishable from "the ring
+    // sent nothing". (FUT-233: a filtered discovery produced exactly that false negative.)
+    peripheral.discoverServices(nil)
   }
 
   func centralManager(
@@ -481,13 +488,10 @@ extension R1Central: CBPeripheralDelegate {
       log("service discovery failed: \(error.localizedDescription)")
       return
     }
-    for service in peripheral.services ?? [] {
-      if service.uuid == R1BLE.SERVICE {
-        peripheral.discoverCharacteristics(
-          [R1BLE.WRITE_1, R1BLE.NOTIFY_1, R1BLE.WRITE_2, R1BLE.NOTIFY_2], for: service)
-      } else if service.uuid == R1BLE.BATTERY_SVC {
-        peripheral.discoverCharacteristics([R1BLE.BATTERY_CHAR], for: service)
-      }
+    let services = peripheral.services ?? []
+    log("services: \(services.map { shortUUID($0.uuid) }.joined(separator: ", "))")
+    for service in services {
+      peripheral.discoverCharacteristics(nil, for: service)  // nil = all
     }
   }
 
@@ -498,29 +502,59 @@ extension R1Central: CBPeripheralDelegate {
       log("characteristic discovery failed: \(error.localizedDescription)")
       return
     }
-    var toSubscribe: [CBCharacteristic] = []
     for c in service.characteristics ?? [] {
+      // Catalogue the ones we know how to drive…
       switch c.uuid {
       case R1BLE.WRITE_1: writeChar1 = c
       case R1BLE.WRITE_2: writeChar2 = c
-      case R1BLE.NOTIFY_1: notifyChar1 = c; toSubscribe.append(c)
-      case R1BLE.NOTIFY_2: notifyChar2 = c; toSubscribe.append(c)
+      case R1BLE.NOTIFY_1: notifyChar1 = c
+      case R1BLE.NOTIFY_2: notifyChar2 = c
       case R1BLE.BATTERY_CHAR: batteryChar = c
       default: break
       }
-    }
-    log(
-      "chars on \(shortUUID(service.uuid)): "
-        + (service.characteristics ?? []).map { shortUUID($0.uuid) }.joined(separator: ", "))
 
-    expectedSubscriptions += toSubscribe.count
-    for c in toSubscribe { peripheral.setNotifyValue(true, for: c) }
+      let p = c.properties
+      var props: [String] = []
+      if p.contains(.read) { props.append("read") }
+      if p.contains(.write) { props.append("write") }
+      if p.contains(.writeWithoutResponse) { props.append("writeNoResp") }
+      if p.contains(.notify) { props.append("notify") }
+      if p.contains(.indicate) { props.append("indicate") }
+      log("char \(shortUUID(c.uuid)) props=[\(props.joined(separator: ","))]")
 
-    // A ring exposing no notify char at all would otherwise hang here forever.
-    if expectedSubscriptions == 0, service.uuid == R1BLE.SERVICE {
-      log("no notify characteristics found on the ring service")
-      runInitSequence()
+      // …but subscribe to EVERY notifying characteristic, known or not. If the ring
+      // reports gestures somewhere we didn't anticipate, this is what catches it.
+      if p.contains(.notify) || p.contains(.indicate) {
+        expectedSubscriptions += 1
+        peripheral.setNotifyValue(true, for: c)
+      }
+
+      // And READ every readable characteristic. This is not for the value: a read of an
+      // encrypted characteristic is what triggers iOS to BOND. Without it, a ring that
+      // was unpaired can connect and accept subscriptions while never delivering a
+      // single notification — silence that looks identical to a dead protocol.
+      if p.contains(.read) {
+        peripheral.readValue(for: c)
+      }
     }
+
+    // Discovery arrives per-service, so "all subscriptions confirmed" can't be known
+    // up front. Kick the handshake on a settle timer instead of an exact count — a ring
+    // exposing no notify characteristic at all must not hang here forever.
+    scheduleInitAfterDiscovery()
+  }
+
+  /// Run the init handshake once discovery has stopped producing new characteristics.
+  private func scheduleInitAfterDiscovery() {
+    initSettleWork?.cancel()
+    let work = DispatchWorkItem { [weak self] in
+      guard let self, !self.initSequenceRun else { return }
+      self.log(
+        "discovery settled — \(self.notifySubscriptions)/\(self.expectedSubscriptions) subscriptions confirmed")
+      self.runInitSequence()
+    }
+    initSettleWork = work
+    queue.asyncAfter(deadline: .now() + 1.2, execute: work)
   }
 
   func peripheral(
@@ -534,7 +568,9 @@ extension R1Central: CBPeripheralDelegate {
     guard characteristic.isNotifying else { return }
     notifySubscriptions += 1
     log("subscribed \(shortUUID(characteristic.uuid)) (\(notifySubscriptions)/\(expectedSubscriptions))")
-    if notifySubscriptions >= expectedSubscriptions { runInitSequence() }
+    // Push the settle timer out on every confirmation, so the handshake waits for
+    // discovery to genuinely finish rather than firing after the first service.
+    scheduleInitAfterDiscovery()
   }
 
   func peripheral(

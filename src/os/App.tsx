@@ -25,6 +25,7 @@ import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View 
 
 import FfsBle, { toNavGesture } from "../../modules/ffs-ble";
 import { theme } from "./theme";
+import Constants from "expo-constants";
 import { initLoggerCore, glog } from "./log";
 import { useFfsBluetooth } from "./useFfsBluetooth";
 import { useConnectionSupervisor, healthLabel, type ConnectionHealth } from "./connection";
@@ -33,7 +34,12 @@ import { PhoneNav, type PhoneCtx } from "./phone/nav";
 import { homeScreen, textTestScreen, setTextTestContent } from "./phone/screens";
 import { Group, Progress, Row, SectionLabel } from "./ui";
 
-const APP_VERSION = "0.11.1";
+// Read the REAL shipped version rather than a hand-maintained copy. A hardcoded
+// "0.11.1" had drifted three releases behind app.json, so telemetry reported the
+// wrong build — which is actively dangerous: reading a log and believing it came
+// from a build it didn't come from sends every diagnosis in the wrong direction.
+// (FUT-233, 2026-07-28: a log said 0.11.1 while 0.11.4 was installed.)
+const APP_VERSION = (Constants.expoConfig?.version ?? "unknown") as string;
 
 // FUT-167 Stage 2 — CFW + stock-restore images (hosted on the private slsrc server, NOT
 // bundled: this repo is public and the firmware is Even's copyrighted image). Downloaded
@@ -263,6 +269,15 @@ export default function App() {
   // test that matters is performed with the glasses off (FUT-233).
   useEffect(() => {
     const subs = [
+      // Bluetooth being off is the single most likely reason a scan finds nothing, and
+      // the panel used to just say "scanning…" forever while the driver logged the real
+      // reason where only Rico could see it. Say it on screen. (FUT-233, 2026-07-28.)
+      FfsBle.addListener("onStateChange", (p) => {
+        if (p.state !== "poweredOn") {
+          setRingState(`Bluetooth is ${p.state} — turn Bluetooth on`);
+          setRingLog((l) => [`bluetooth ${p.state}`, ...l].slice(0, 12));
+        }
+      }),
       FfsBle.addListener("onRingConnected", (p) => {
         setRingState(`connected — ${p.name}`);
         setRingLog((l) => [`READY: ${p.name}`, ...l].slice(0, 12));
