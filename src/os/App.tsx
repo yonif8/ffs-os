@@ -105,6 +105,16 @@ const PAYLOAD_A_B64 =
   "RlhQMS3p8E+DsE/2v0EERsDyRAEAIIhHACgA8MqATfaDYcDyQwGIRwAoAPDGgE/ywUNC9mkKRPbTR0v2GxlP8psIwPJDA0/0lnFYIgVGwPJICsDyRwfA8kQJwPJDCJhHKEaKIWQiwEcgILhHyLMAIQFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXcdIQAiBkbQRzBGKCEDItBHMEYkIf8i0EcwRiMhb/B/QtBHMEYMIQoi0EcoRjFGACLIR0nyF0vA8kkLKEbYRwAoWtAGRiAgT/AgCbhH2LMHRgAgOHB4cLhw+HA4cXhxuHH4cThyeHK4cvhyOHN4c7hz+HM4dHh0uHT4dDh1eHW4dfh1OHZ4drh2+HY4d3h3uHf4d0Ty3GDC8gcAAmgSsThGMiHQRzhGMCFv8H9C0Ec4RjEh/yLQR0v2GxMwRjlGACLA8kQDmEdPII34BABUII34BQBBII34BgCN+AeQjfgIAAAgjfgJAAvxGAIBqTBGkEcwRnYhHiLARyVgCiADsL3o8I8BIAOwvejwjwIgA7C96PCP";
 const PAYLOAD_B_B64 =
   "RlhQMS3p8E+DsE/2v0EERsDyRAEAIIhHACgA8MuATfaDYcDyQwGIRwAoAPDHgE/ywUNC9mkKRPbTR0v2GxlP8psIwPJDA0/0yHGCIgVGwPJICsDyRwfA8kQJwPJDCJhHKEZYIU8iwEcgILhHyLMAIQFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXcdIQAiBkbQRzBGKCEGItBHMEYkIf8i0EcwRiMhb/B/QtBHMEYMIRoi0EcoRjFGACLIR0nyF0vA8kkLKEbYRwAoW9AGRiAgT/AgCbhH2LMHRgAgOHB4cLhw+HA4cXhxuHH4cThyeHK4cvhyOHN4c7hz+HM4dHh0uHT4dDh1eHW4dfh1OHZ4drh2+HY4d3h3uHf4d0Ty3GDC8gcAAmgSsThGMiHQRzhGMCFv8H9C0Ec4RjEh/yLQR0v2GxMwRjlGACLA8kQDmEdPII34BABUII34BQBBII34BgBCII34B5CN+AgAACCN+AkAC/EYAgGpMEaQRzBGniEyIsBHJWALIAOwvejwjwEgA7C96PCPAiADsL3o8I8=";
+// FUT-234 — THE FIRST ANIMATION. A box slides left→right across the HUD, 3× over 4.5 s,
+// driven by the firmware's own lv_anim engine (lv_anim_init → set_values → lv_anim_start)
+// with a custom exec_cb living inside the payload itself. Even's SDK has no animation
+// primitive at all, so this is capability we have and they structurally cannot offer.
+// Source: g2flash/payloads/payload_anim.c. Verified by disassembly before first push —
+// notably +0x20 (path_cb, a CODE POINTER whose corruption reboots the glasses) is never
+// written; lv_anim_init installs lv_anim_path_linear there.
+const PAYLOAD_ANIM_B64 =
+  "RlhQMS3p8E+DsE/2v0gFRsDyRAgAIMBHACgA8PCATfaDYcDyQwGIRwAoAPDsgE/ywUNC9mkLRPbTSUv2GxdP8psGwPJDA8ghRiIERsDySAvA8kcJwPJEB8DyQwaYRyBGFCFtIrBHICDIR8izACEBcEFwgXDBcAFxQXGBccFxAXJBcoFywXIBc0FzgXPBcwF0QXSBdMF0AXVBdYF1wXUBdkF2gXbBdgF3QXeBd8F3HSEAIgZG2EcwRighAyLYRzBGJCH/IthHMEYjIW/wf0LYRzBGDCEKIthHIEYxRgAiuEdJ8hdKwPJJCiBG0EcAKFvQBkYgIMhH2LMHRgAgOHB4cLhw+HA4cXhxuHH4cThyeHK4cvhyOHN4c7hz+HM4dHh0uHT4dDh1eHW4dfh1OHZ4drh2+HY4d3h3uHf4d0Ty3GDC8gcAAmgSsThGMiHYRzhGMCFv8H9C2Ec4RjEh/yLYR0v2GxMwRjlGACLA8kQDmEdBII34BABOII34BQBJII34BgBNII34BwAAII34CAAK8RgCAakwRpBHT/KbAzBGRiEWIsDyQwOYR2AgLGDIRwVGAChP8AMAH9AI9eNiKEYDJpBHLGBA8kEAwPIAAHhEQPLPY2hgwPJFAyhGFCFP9LJymEdA8txQQPIJQShjwPJFAShGbmSIRxogA7C96PCPASADsL3o8I8CIAOwvejwjwC/T/KbA8DyQwNtIhhH";
+
 const WARRANTY_PHRASE = "my warranty is void";
 
 // FUT-167 soft precheck — a self-attested readiness checklist that must be
@@ -406,6 +416,13 @@ export default function App() {
   // phone-OS screen, and route touchpad gestures into navigation. Tear down on disconnect.
   useEffect(() => {
     if (!bt.pairReady) return;
+    // FUT-236: while a calibration run is active the OS must NOT act on gestures.
+    // Measured 2026-07-28: during the temple-touchpad steps, taps were routed into
+    // navigation, which activated a menu item and started streaming an 11.6 KB image
+    // animation to the glasses — and BOTH lenses then dropped with "connection has
+    // timed out unexpectedly", corrupting that step and the two after it.
+    // An instrument that changes the thing it is measuring is not an instrument.
+    if (calibrating) return;
     const nav = navRef.current!;
     screenOwner.start();
     void screenOwner.setSurface(() => nav.paint());
@@ -427,7 +444,7 @@ export default function App() {
       sub.remove();
       screenOwner.stop();
     };
-  }, [bt.pairReady]);
+  }, [bt.pairReady, calibrating]);
 
   // Keep the HUD status-bar clock live: re-paint the current screen at each minute
   // boundary while the pair is ready — but skip while the image screen is up (a re-paint
@@ -831,6 +848,20 @@ export default function App() {
             onPress={() => {
               glog.emit("os", "push_b", {});
               FfsBle.pushPayloadViaImage(PAYLOAD_B_B64);
+            }}
+          />
+          <Row
+            badge="AN"
+            tint={theme.tint.blue}
+            title="Push animation"
+            subtitle="A box SLIDES across the HUD, 3× over ~4.5 s. First real animation on the G2."
+            tag="no flash"
+            trace="FUT-234"
+            divider
+            disabled={!bt.pairReady}
+            onPress={() => {
+              glog.emit("os", "push_anim", {});
+              FfsBle.pushPayloadViaImage(PAYLOAD_ANIM_B64);
             }}
           />
         </Group>
