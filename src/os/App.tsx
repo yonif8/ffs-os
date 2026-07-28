@@ -193,6 +193,22 @@ const PAYLOAD_WA_U16_B64 =
 const PAYLOAD_WA_U16B_B64 =
   "RlhQMS3p8E+BsE/2v0GBRsDyRAEAIIhHACgA8J2ARvKoagRGwPJ1Ckz2mXvA8kQLUEYhRthHaLEL9axxB0aIRz5oC/UCYThGiEdWRQLRT/SAOAHgT/AACArxtAYwRiFG2EdgsQv1rHEHRohHPWgL9QJhOEaIR7VCCL8I9QA4RfIAEMDydQAhRthHAChf0Av1rHEERohHT/LBQ8DyQwMgRngheCLJ+ABAmEdP8psDwPJDAyBG5CFUIphHRPbTQcDyRwEgIIhHAChB0AAhQvZpBgFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXfA8kgGHSEAIgVGsEcoRighAyKwRyhGJCH/IrBHKEYjIW/wf0KwRyhGDCE8IrBHS/YbE8DyRAMgRilGACKYRwjxtEABsL3o8I9P8GBAAbC96PCP";
 
+// FUT-232 narrow range probes. Confirmed: bit 13 (lv_menu_page) crashes — M13 (bits
+// 0-12) passed and M14 (bits 0-13) did not. And U16 (bits 16-21, which skips the menu
+// family entirely) ALSO crashed, so there is a SECOND independent crasher up there.
+// These probes isolate each remaining suspect without any known-bad index in the way.
+const PAYLOAD_WA_P14_B64 =
+  "RlhQMS3p8E+BsE/2v0GARsDyRAEAIIhHACgA8J2ARvIAOgRGwPJ1Ckz2mXbA8kQGUEYhRrBHaLEG9axxB0aIRz1oBvUCYThGiEdVRQLRT/SASQHgT/AACUbyJDvA8nULWEYhRrBHYLEG9axxBUaIRy9oBvUCYShGiEdfRQi/CfUASar1kFAhRrBHAChf0Ab1rHEERohHT/LBQ8DyQwMgRngheCLI+ABAmEdP8psDwPJDAyBG5CFUIphHRPbTQcDyRwEgIIhHAChB0AAhQvZpBgFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXfA8kgGHSEAIgVGsEcoRighAyKwRyhGJCH/IrBHKEYjIW/wf0KwRyhGDCE8IrBHS/YbE8DyRAMgRilGACKYRwnxtEABsL3o8I9P8GBAAbC96PCP";
+
+const PAYLOAD_WA_P16_B64 =
+  "RlhQMS3p8EOBsE/2v0GARsDyRAEAIIhHACgA8IeARvKoaQVGwPJ1CUz2mXbA8kQGSEYpRrBHcLEG9axxB0aIRzxoBvUCYThGiEdMRQPRACTF9gEkAeBP8LRERfIAEMDydQApRrBHAChi0Ab1rHEFRohHT/LBQ8DyQwMoRngheCLI+ABQmEdP8psDwPJDAyhG5CFUIphHRPbTQcDyRwEgIIhHAChE0AAhQvZpBwFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXfA8kgHHSEAIgZGuEcwRighAyK4RzBGJCH/IrhHMEYjIW/wf0K4RzBGDCE8IrhHS/YbE8DyRAMoRjFGACKYRwHgT/BgRCBGAbC96PCD";
+
+const PAYLOAD_WA_P18_B64 =
+  "RlhQMS3p8EOBsE/2v0GARsDyRAEAIIhHACgA8IeARvIsGQVGwPJ1CUz2mXbA8kQGSEYpRrBHcLEG9axxB0aIRzxoBvUCYThGiEdMRQPRACTF9gQkAeBP8LRERfIAEMDydQApRrBHAChi0Ab1rHEFRohHT/LBQ8DyQwMoRngheCLI+ABQmEdP8psDwPJDAyhG5CFUIphHRPbTQcDyRwEgIIhHAChE0AAhQvZpBwFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXfA8kgHHSEAIgZGuEcwRighAyK4RzBGJCH/IrhHMEYjIW/wf0K4RzBGDCE8IrhHS/YbE8DyRAMoRjFGACKYRwHgT/BgRCBGAbC96PCD";
+
+const PAYLOAD_WA_P19_B64 =
+  "RlhQMS3p8E+BsE/2v0GARsDyRAEAIIhHACgA8K6ARfIcOgVGwPJ1Ckz2mXvA8kQLUEYpRthHaLEL9axxB0aIRzxoC/UCYThGiEdURQLRT/QAKQHgT/AACQrxJAc4RilG2EdgsQv1rHEERohHJmgL9QJhIEaIR75CCL8J9YAZCvFsBzhGKUbYR2CxC/WscQRGiEcmaAv1AmEgRohHvkIIvwn1ABmq9QdwKUbYRwAoX9AL9axxBUaIR0/ywUPA8kMDKEZ4IXgiyPgAUJhHT/KbA8DyQwMoRuQhVCKYR0T200HA8kcBICCIRwAoQdAAIUL2aQYBcEFwgXDBcAFxQXGBccFxAXJBcoFywXIBc0FzgXPBcwF0QXSBdMF0AXVBdYF1wXUBdkF2gXbBdgF3QXeBd8F3wPJIBh0hACIERrBHIEYoIQMisEcgRiQh/yKwRyBGIyFv8H9CsEcgRgwhPCKwR0v2GxPA8kQDKEYhRgAimEcJ8bRAAbC96PCPT/BgQAGwvejwjw==";
+
 const WARRANTY_PHRASE = "my warranty is void";
 
 // FUT-167 soft precheck — a self-attested readiness checklist that must be
@@ -1006,6 +1022,58 @@ export default function App() {
             disabled={!bt.pairReady}
             onPress={() => {
               guardedPush("payload B", "push_b", PAYLOAD_B_B64);
+            }}
+          />
+          <Row
+            badge="R14"
+            tint={theme.tint.green}
+            title="Range probe — R14"
+            subtitle="bits 14-15 only: menu_cont + menu_section (skips the bad menu_page)"
+            tag="no flash"
+            trace="FUT-232"
+            divider
+            disabled={!bt.pairReady}
+            onPress={() => {
+              guardedPush("R14", "push_wa_p14", PAYLOAD_WA_P14_B64);
+            }}
+          />
+          <Row
+            badge="R16"
+            tint={theme.tint.green}
+            title="Range probe — R16"
+            subtitle="bit 16 only: tabview"
+            tag="no flash"
+            trace="FUT-232"
+            divider
+            disabled={!bt.pairReady}
+            onPress={() => {
+              guardedPush("R16", "push_wa_p16", PAYLOAD_WA_P16_B64);
+            }}
+          />
+          <Row
+            badge="R18"
+            tint={theme.tint.green}
+            title="Range probe — R18"
+            subtitle="bit 18 only: keyboard"
+            tag="no flash"
+            trace="FUT-232"
+            divider
+            disabled={!bt.pairReady}
+            onPress={() => {
+              guardedPush("R18", "push_wa_p18", PAYLOAD_WA_P18_B64);
+            }}
+          />
+          <Row
+            badge="R19"
+            tint={theme.tint.green}
+            title="Range probe — R19"
+            subtitle="bits 19-21: calendar x3"
+            tag="no flash"
+            trace="FUT-232"
+            divider
+            disabled={!bt.pairReady}
+            onPress={() => {
+              guardedPush("R19", "push_wa_p19", PAYLOAD_WA_P19_B64);
             }}
           />
           <Row
