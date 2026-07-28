@@ -26,6 +26,7 @@ import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View 
 import FfsBle, { toNavGesture } from "../../modules/ffs-ble";
 import { theme } from "./theme";
 import Constants from "expo-constants";
+import CalibrationScreen from "./calibration/CalibrationScreen";
 import { initLoggerCore, glog } from "./log";
 import { useFfsBluetooth } from "./useFfsBluetooth";
 import { useConnectionSupervisor, healthLabel, type ConnectionHealth } from "./connection";
@@ -253,6 +254,18 @@ function healthColor(h: ConnectionHealth): string {
 }
 
 export default function App() {
+  // FUT-236 — the calibration run owns the whole screen when active, and on a fresh
+  // install it comes up FIRST, before the OS shell. Yoni asked for it to start "when I
+  // open the app for the first time with both glasses and ring unpaired". Resolved
+  // synchronously from a persisted flag so there is no flash of the normal UI first.
+  const [calibrating, setCalibrating] = useState<boolean>(() => {
+    try {
+      return FfsBle.getPref("calib.v1.completed") === null;
+    } catch {
+      return false; // never block the app on the harness
+    }
+  });
+
   const bt = useFfsBluetooth({ autoScan: true });
   const sup = useConnectionSupervisor(bt);
   const [session, setSession] = useState<string>("");
@@ -440,6 +453,26 @@ export default function App() {
   const canAct = bt.pairReady && !flashBusy;
   const batt = bt.deviceInfo?.battery;
 
+  // Placed AFTER every hook above, so hook order stays identical whether or not the
+  // harness is showing — an early return above any hook would break the rules of hooks.
+  if (calibrating) {
+    return (
+      <CalibrationScreen
+        appVersion={APP_VERSION}
+        onExit={(completed) => {
+          // Record completion either way: an abandoned run should not re-ambush Yoni
+          // on every launch. It stays re-runnable from the Developer section.
+          try {
+            FfsBle.setPref("calib.v1.completed", completed ? "done" : "skipped");
+          } catch {
+            /* non-fatal — worst case it offers again next launch */
+          }
+          setCalibrating(false);
+        }}
+      />
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar style="light" />
@@ -491,6 +524,21 @@ export default function App() {
             deliberately NOT gated on `pairReady`: the discriminating test is run with
             the glasses POWERED OFF, so anything requiring a lens link would make the
             test impossible to perform. */}
+        {/* FUT-236 — re-runnable on demand, not just on a fresh install. Every run is
+            a fresh labelled dataset, so re-running after a firmware or app change is
+            the cheapest way to re-establish ground truth. */}
+        <SectionLabel note="FUT-236 · ~5 min, guided">Calibration run</SectionLabel>
+        <Group>
+          <Row
+            badge="◎"
+            tint={theme.tint.amber}
+            title="Run SDK calibration"
+            subtitle="Guided capture of everything the ring and glasses expose"
+            trace="FUT-236"
+            onPress={() => setCalibrating(true)}
+          />
+        </Group>
+
         <SectionLabel note="FUT-233 · works with the glasses OFF">R1 ring — input test</SectionLabel>
         <Group>
           <Row

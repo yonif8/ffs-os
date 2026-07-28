@@ -50,6 +50,18 @@ public class FfsBleModule: Module {
       "onRingBattery"
     )
 
+    // Tiny persistent key/value store (FUT-236). Needed so the calibration run can
+    // remember it already happened across launches. Deliberately NOT a new dependency:
+    // UserDefaults is already in use by the ring driver, and adding an async-storage
+    // package for two strings would mean a native rebuild for no capability.
+    Function("getPref") { (key: String) -> String? in
+      UserDefaults.standard.string(forKey: "ffs_pref_" + key)
+    }
+
+    Function("setPref") { (key: String, value: String) in
+      UserDefaults.standard.set(value, forKey: "ffs_pref_" + key)
+    }
+
     // ---- R1 ring (FUT-233) ----
 
     Function("ringScan") { [weak self] in
