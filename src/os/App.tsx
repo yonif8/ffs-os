@@ -209,6 +209,24 @@ const PAYLOAD_WA_P18_B64 =
 const PAYLOAD_WA_P19_B64 =
   "RlhQMS3p8E+BsE/2v0GARsDyRAEAIIhHACgA8K6ARfIcOgVGwPJ1Ckz2mXvA8kQLUEYpRthHaLEL9axxB0aIRzxoC/UCYThGiEdURQLRT/QAKQHgT/AACQrxJAc4RilG2EdgsQv1rHEERohHJmgL9QJhIEaIR75CCL8J9YAZCvFsBzhGKUbYR2CxC/WscQRGiEcmaAv1AmEgRohHvkIIvwn1ABmq9QdwKUbYRwAoX9AL9axxBUaIR0/ywUPA8kMDKEZ4IXgiyPgAUJhHT/KbA8DyQwMoRuQhVCKYR0T200HA8kcBICCIRwAoQdAAIUL2aQYBcEFwgXDBcAFxQXGBccFxAXJBcoFywXIBc0FzgXPBcwF0QXSBdMF0AXVBdYF1wXUBdkF2gXbBdgF3QXeBd8F3wPJIBh0hACIERrBHIEYoIQMisEcgRiQh/yKwRyBGIyFv8H9CsEcgRgwhPCKwR0v2GxPA8kQDKEYhRgAimEcJ8bRAAbC96PCPT/BgQAGwvejwjw==";
 
+// FUT-232 endgame. 17 of 22 proven: bits 0-12 (M13), 14-15 (R14 0xC000), 16 (R16),
+// 18 (R18). Remaining: 13 menu_page (confirmed crasher), 17 win (never tested alone),
+// and 19-21 calendar (R19 crashed, so >=1 of the three is bad). Single-bit probes.
+const PAYLOAD_WA_S17_B64 =
+  "RlhQMS3p8EOBsE/2v0GARsDyRAEAIIhHACgA8IeARvJceQVGwPJ1CUz2mXbA8kQGSEYpRrBHcLEG9axxB0aIRzxoBvUCYThGiEdMRQPRACTF9gIkAeBP8LRERfIAEMDydQApRrBHAChi0Ab1rHEFRohHT/LBQ8DyQwMoRngheCLI+ABQmEdP8psDwPJDAyhG5CFUIphHRPbTQcDyRwEgIIhHAChE0AAhQvZpBwFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXfA8kgHHSEAIgZGuEcwRighAyK4RzBGJCH/IrhHMEYjIW/wf0K4RzBGDCE8IrhHS/YbE8DyRAMoRjFGACKYRwHgT/BgRCBGAbC96PCD";
+
+const PAYLOAD_WA_S19_B64 =
+  "RlhQMS3p8EOBsE/2v0GARsDyRAEAIIhHACgA8IWARfIcOQVGwPJ1CUz2mXbA8kQGSEYpRrBHcLEG9axxBEaIRydoBvUCYSBGiEdPRQPRACTF9ggkAeBP8LREqfUHcClGsEcAKGLQBvWscQVGiEdP8sFDwPJDAyhGeCF4Isj4AFCYR0/ymwPA8kMDKEbkIVQimEdE9tNBwPJHASAgiEcAKETQACFC9mkHAXBBcIFwwXABcUFxgXHBcQFyQXKBcsFyAXNBc4FzwXMBdEF0gXTBdAF1QXWBdcF1AXZBdoF2wXYBd0F3gXfBd8DySAcdIQAiBka4RzBGKCEDIrhHMEYkIf8iuEcwRiMhb/B/QrhHMEYMITwiuEdL9hsTwPJEAyhGMUYAIphHAeBP8GBEIEYBsL3o8IM=";
+
+const PAYLOAD_WA_S20_B64 =
+  "RlhQMS3p8EOBsE/2v0GARsDyRAEAIIhHACgA8IWARfJAOQVGwPJ1CUz2mXbA8kQGSEYpRrBHcLEG9axxBEaIRydoBvUCYSBGiEdPRQPRACTF9hAkAeBP8LREqfUQcClGsEcAKGLQBvWscQVGiEdP8sFDwPJDAyhGeCF4Isj4AFCYR0/ymwPA8kMDKEbkIVQimEdE9tNBwPJHASAgiEcAKETQACFC9mkHAXBBcIFwwXABcUFxgXHBcQFyQXKBcsFyAXNBc4FzwXMBdEF0gXTBdAF1QXWBdcF1AXZBdoF2wXYBd0F3gXfBd8DySAcdIQAiBka4RzBGKCEDIrhHMEYkIf8iuEcwRiMhb/B/QrhHMEYMITwiuEdL9hsTwPJEAyhGMUYAIphHAeBP8GBEIEYBsL3o8IM=";
+
+const PAYLOAD_WA_S21_B64 =
+  "RlhQMS3p8EOBsE/2v0GARsDyRAEAIIhHACgA8IWARfKIOQVGwPJ1CUz2mXbA8kQGSEYpRrBHcLEG9axxBEaIRydoBvUCYSBGiEdPRQPRACTF9iAkAeBP8LREqfUicClGsEcAKGLQBvWscQVGiEdP8sFDwPJDAyhGeCF4Isj4AFCYR0/ymwPA8kMDKEbkIVQimEdE9tNBwPJHASAgiEcAKETQACFC9mkHAXBBcIFwwXABcUFxgXHBcQFyQXKBcsFyAXNBc4FzwXMBdEF0gXTBdAF1QXWBdcF1AXZBdoF2wXYBd0F3gXfBd8DySAcdIQAiBka4RzBGKCEDIrhHMEYkIf8iuEcwRiMhb/B/QrhHMEYMITwiuEdL9hsTwPJEAyhGMUYAIphHAeBP8GBEIEYBsL3o8IM=";
+
+const PAYLOAD_WA_S13_B64 =
+  "RlhQMS3p8EOBsE/2v0GARsDyRAEAIIhHACgA8IiARvLcKQVGwPJ1CUz2mXbA8kQGSEYpRrBHeLEG9axxB0aIRzxoBvUCYThGiEdMRQTRQvIABMX2ACQB4E/wtERF8gAQwPJ1AClGsEcAKGLQBvWscQVGiEdP8sFDwPJDAyhGeCF4Isj4AFCYR0/ymwPA8kMDKEbkIVQimEdE9tNBwPJHASAgiEcAKETQACFC9mkHAXBBcIFwwXABcUFxgXHBcQFyQXKBcsFyAXNBc4FzwXMBdEF0gXTBdAF1QXWBdcF1AXZBdoF2wXYBd0F3gXfBd8DySAcdIQAiBka4RzBGKCEDIrhHMEYkIf8iuEcwRiMhb/B/QrhHMEYMITwiuEdL9hsTwPJEAyhGMUYAIphHAeBP8GBEIEYBsL3o8IM=";
+
 const WARRANTY_PHRASE = "my warranty is void";
 
 // FUT-167 soft precheck — a self-attested readiness checklist that must be
@@ -1022,6 +1040,71 @@ export default function App() {
             disabled={!bt.pairReady}
             onPress={() => {
               guardedPush("payload B", "push_b", PAYLOAD_B_B64);
+            }}
+          />
+          <Row
+            badge="S17"
+            tint={theme.tint.amber}
+            title="Single probe — S17"
+            subtitle="bit 17 ONLY: win — never tested alone, it was hidden inside U16"
+            tag="no flash"
+            trace="FUT-232"
+            divider
+            disabled={!bt.pairReady}
+            onPress={() => {
+              guardedPush("S17", "push_wa_s17", PAYLOAD_WA_S17_B64);
+            }}
+          />
+          <Row
+            badge="S19"
+            tint={theme.tint.amber}
+            title="Single probe — S19"
+            subtitle="bit 19 ONLY: calendar"
+            tag="no flash"
+            trace="FUT-232"
+            divider
+            disabled={!bt.pairReady}
+            onPress={() => {
+              guardedPush("S19", "push_wa_s19", PAYLOAD_WA_S19_B64);
+            }}
+          />
+          <Row
+            badge="S20"
+            tint={theme.tint.amber}
+            title="Single probe — S20"
+            subtitle="bit 20 ONLY: calendar_hdr_arrow"
+            tag="no flash"
+            trace="FUT-232"
+            divider
+            disabled={!bt.pairReady}
+            onPress={() => {
+              guardedPush("S20", "push_wa_s20", PAYLOAD_WA_S20_B64);
+            }}
+          />
+          <Row
+            badge="S21"
+            tint={theme.tint.amber}
+            title="Single probe — S21"
+            subtitle="bit 21 ONLY: calendar_hdr_drop"
+            tag="no flash"
+            trace="FUT-232"
+            divider
+            disabled={!bt.pairReady}
+            onPress={() => {
+              guardedPush("S21", "push_wa_s21", PAYLOAD_WA_S21_B64);
+            }}
+          />
+          <Row
+            badge="S13"
+            tint={theme.tint.amber}
+            title="Single probe — S13"
+            subtitle="bit 13 ONLY: menu_page — the confirmed crasher, isolated to double-check it"
+            tag="no flash"
+            trace="FUT-232"
+            divider
+            disabled={!bt.pairReady}
+            onPress={() => {
+              guardedPush("S13", "push_wa_s13", PAYLOAD_WA_S13_B64);
             }}
           />
           <Row
