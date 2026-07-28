@@ -46,18 +46,54 @@ if [[ -z "$src_ipa" ]]; then
 fi
 
 [[ -f "$src_ipa" ]] || { echo "ERROR: IPA not found: $src_ipa"; exit 1; }
+
+# SideStore validates the manifest's version/buildVersion against the IPA's actual
+# CFBundleShortVersionString / CFBundleVersion — so read them FROM the IPA, never guess.
+# Read from the SOURCE ipa, BEFORE copying: the guard below must be able to abort without
+# having already overwritten the served binary (which would leave apps.json describing a
+# file of a different size).
+pl=$(mktemp)
+unzip -p "$src_ipa" 'Payload/*.app/Info.plist' > "$pl" 2>/dev/null
+read APP_VERSION BUILD_VERSION < <(python3 -c "import plistlib,sys;d=plistlib.load(open('$pl','rb'));print(d.get('CFBundleShortVersionString','0.0.0'),d.get('CFBundleVersion','1'))")
+rm -f "$pl"
+echo "  version=$APP_VERSION build=$BUILD_VERSION (from IPA Info.plist)"
+
+# ---- GUARD: refuse a publish that SideStore will ignore (FUT-233, 2026-07-28) ----
+# SideStore keys a release on `version`. Publishing an IPA whose version equals the one
+# already being served is a silent no-op: the file changes, the manifest reports success,
+# and no update button ever appears. That happened TWICE in one session — a build was
+# published under a label already installed, and the tooling said "Published" both times.
+# `buildVersion` is NOT enough: bumping only the build number reproduced the same silence.
+# Override with FORCE_SAME_VERSION=1 for a deliberate re-publish (e.g. a corrupted upload).
+prev_version=$(python3 - "$SRV/apps.json" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    print(json.load(open(sys.argv[1]))["apps"][0]["versions"][0]["version"])
+except Exception:
+    pass
+PY
+)
+if [[ -n "${prev_version:-}" && "$prev_version" == "$APP_VERSION" && "${FORCE_SAME_VERSION:-0}" != "1" ]]; then
+  cat >&2 <<EOM
+
+✖ REFUSING TO PUBLISH — this would be invisible in SideStore.
+  currently served : $prev_version
+  this build       : $APP_VERSION   (identical)
+
+  SideStore compares 'version'. Republishing the same version shows NO update button,
+  no matter how much the binary changed. Bumping only ios.buildNumber does NOT help.
+
+  Fix: bump "version" in app.json, rebuild in CI, then re-run this script.
+  Deliberate re-publish of the same version: FORCE_SAME_VERSION=1 $0
+EOM
+  exit 1
+fi
+
+# Only now is it safe to touch what's being served.
 [[ "$(readlink -f "$src_ipa")" == "$(readlink -f "$SRV/$IPA_NAME")" ]] || cp "$src_ipa" "$SRV/$IPA_NAME"
 size=$(stat -c%s "$SRV/$IPA_NAME")
 today=$(date -u +%Y-%m-%d)
 echo "  IPA: $size bytes → $SRV/$IPA_NAME"
-
-# SideStore validates the manifest's version/buildVersion against the IPA's actual
-# CFBundleShortVersionString / CFBundleVersion — so read them FROM the IPA, never guess.
-pl=$(mktemp)
-unzip -p "$SRV/$IPA_NAME" 'Payload/*.app/Info.plist' > "$pl" 2>/dev/null
-read APP_VERSION BUILD_VERSION < <(python3 -c "import plistlib,sys;d=plistlib.load(open('$pl','rb'));print(d.get('CFBundleShortVersionString','0.0.0'),d.get('CFBundleVersion','1'))")
-rm -f "$pl"
-echo "  version=$APP_VERSION build=$BUILD_VERSION (from IPA Info.plist)"
 
 # AltStore / SideStore source manifest.
 python3 - "$SRV/apps.json" "$APP_VERSION" "$BUILD_VERSION" "$RTV" "$size" "$today" <<'PY'
