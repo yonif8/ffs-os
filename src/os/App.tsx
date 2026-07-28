@@ -346,6 +346,11 @@ export default function App() {
   const [warranty, setWarranty] = useState<string>("");
   const [textTest, setTextTest] = useState<string>("");
   const [precheck, setPrecheck] = useState<boolean[]>(() => PRECHECK_ITEMS.map(() => false));
+  // FUT-237 — the loader guard. Pushing a payload with no resident OTA loader is
+  // DESTRUCTIVE, not inert: the stock image decoder parses our Thumb-2 code as a bitmap
+  // → blank lens → watchdog reboot, identically for every payload. Cost on 2026-07-28:
+  // a whole session and three lens crashes. `pushMsg` is the refusal/confirmation line.
+  const [pushMsg, setPushMsg] = useState<string>("");
 
   // Live refs so the nav's context getters always read current session state.
   const btRef = useRef(bt);
@@ -413,6 +418,36 @@ export default function App() {
   // CFW and Restore Stock buttons gate on `armed`; there is no other arming path.
   const precheckDone = precheck.every(Boolean);
   const armed = warranty.trim() === WARRANTY_PHRASE && precheckDone;
+  // FUT-237 — GUARD: never push a payload unless the resident OTA loader has actually
+  // been SEEN in a device-info readback. The CFW appends ⟨LOADER gen=… ran=… ret=0x…⟩ to
+  // the firmware version string (G2Protocol.swift field 104); on stock that field is
+  // absent entirely, so the version line is a bare "2.2.6.10".
+  //
+  // We deliberately require POSITIVE evidence rather than trying to detect stock: an
+  // unread deviceInfo is treated as "not proven", which fails safe. First tap with no
+  // reading triggers the read; tap again once it lands.
+  const loaderPresent = (): boolean => {
+    const di = bt.deviceInfo;
+    return `${di?.leftVersion ?? ""} ${di?.rightVersion ?? ""}`.includes("LOADER");
+  };
+  const guardedPush = (label: string, event: string, b64: string) => {
+    if (!bt.pairReady) return;
+    if (!loaderPresent()) {
+      const everRead = !!bt.deviceInfo;
+      setPushMsg(
+        everRead
+          ? "⛔ BLOCKED — no OTA loader on the glasses (they're on STOCK firmware). Pushing now would crash a lens, not just fail. Flash g2_2.2.6.10_loader.bin first."
+          : "⛔ BLOCKED — haven't read the firmware yet, so I can't prove the loader is there. Reading now… tap again in a couple of seconds.",
+      );
+      glog.emit("os", "push_blocked", { label, reason: everRead ? "no_loader" : "no_reading" });
+      FfsBle.requestDeviceInfo();
+      return;
+    }
+    setPushMsg(`✅ loader confirmed — pushed ${label}`);
+    glog.emit("os", event, {});
+    FfsBle.pushPayloadViaImage(b64);
+  };
+
   const startFlash = (url: string, sha: string, dryRun: boolean) => {
     if (!bt.pairReady || flashBusy) return;
     setFlashBusy(true);
@@ -839,7 +874,18 @@ export default function App() {
           ))}
         </Group>
 
-        <SectionLabel note="FUT-216 · needs the OTA loader flashed">Push over the air</SectionLabel>
+        <SectionLabel
+          note={
+            loaderPresent()
+              ? "FUT-216 · ✅ OTA loader detected — pushes are safe"
+              : bt.deviceInfo
+                ? "FUT-216 · ⛔ NO loader (stock firmware) — pushes are BLOCKED"
+                : "FUT-216 · loader unverified — read the firmware version first"
+          }
+        >
+          Push over the air
+        </SectionLabel>
+        {pushMsg ? <Text style={styles.dim}>{pushMsg}</Text> : null}
         <Group>
           <Row
             badge="A"
@@ -849,8 +895,7 @@ export default function App() {
             tag="no flash"
             disabled={!bt.pairReady}
             onPress={() => {
-              glog.emit("os", "push_a", {});
-              FfsBle.pushPayloadViaImage(PAYLOAD_A_B64);
+              guardedPush("payload A", "push_a", PAYLOAD_A_B64);
             }}
           />
           <Row
@@ -862,8 +907,7 @@ export default function App() {
             divider
             disabled={!bt.pairReady}
             onPress={() => {
-              glog.emit("os", "push_b", {});
-              FfsBle.pushPayloadViaImage(PAYLOAD_B_B64);
+              guardedPush("payload B", "push_b", PAYLOAD_B_B64);
             }}
           />
           <Row
@@ -876,8 +920,7 @@ export default function App() {
             divider
             disabled={!bt.pairReady}
             onPress={() => {
-              glog.emit("os", "push_an1", { stage: 1 });
-              FfsBle.pushPayloadViaImage(PAYLOAD_AN1_B64);
+              guardedPush("AN1", "push_an1", PAYLOAD_AN1_B64);
             }}
           />
           <Row
@@ -890,8 +933,7 @@ export default function App() {
             divider
             disabled={!bt.pairReady}
             onPress={() => {
-              glog.emit("os", "push_an2", { stage: 2 });
-              FfsBle.pushPayloadViaImage(PAYLOAD_AN2_B64);
+              guardedPush("AN2", "push_an2", PAYLOAD_AN2_B64);
             }}
           />
           <Row
@@ -905,8 +947,7 @@ export default function App() {
             divider
             disabled={!bt.pairReady}
             onPress={() => {
-              glog.emit("os", "push_anim", {});
-              FfsBle.pushPayloadViaImage(PAYLOAD_ANIM_B64);
+              guardedPush("animation", "push_anim", PAYLOAD_ANIM_B64);
             }}
           />
         </Group>
