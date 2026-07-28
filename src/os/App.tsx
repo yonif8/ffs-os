@@ -143,6 +143,17 @@ const PAYLOAD_AN2_B64 =
 const PAYLOAD_WIDGET_B64 =
   "RlhQMfC1gbBP9r9BBkbA8kQBACCIRwAoctBF8gAUwPJ1BEz2mXcBRsDyRAcgRrhHACho0Af1rHEFRohHT/LBQ8DyQwMoRowhjCI1YJhHT/KbA8DyQwMoRtohSiKYR0T200HA8kcBICCIRwAoQdAAIUL2aQcBcEFwgXDBcAFxQXGBccFxAXJBcoFywXIBc0FzgXPBcwF0QXSBdMF0AXVBdYF1wXUBdkF2gXbBdgF3QXeBd8F3wPJIBx0hACIGRrhHMEYoIQMiuEcwRiQh/yK4RzBGIyFv8H9CuEcwRgwhRiK4R0v2GxPA8kQDKEYxRgAimEcpaOIgoUIIv8cgAbDwveAgAbDwveEgAbDwvQ==";
 
+// FUT-232 sweep — ALL 22 ORPHAN widget classes in one push. Each is created via the
+// generic door, its obj->class_p verified, then immediately DELETED (so nothing is ever
+// drawn and nothing accumulates). Result is a 32-bit BITMASK in the loader's ret=:
+//   ret = 0x5A?????? where the low 22 bits are the widgets that constructed + verified.
+//   bit0=arc(CONTROL, must be set) 1=slider 2=switch 3=checkbox 4=led 5=line 6=scale
+//   7=spinner 8=spinbox 9=table 10=textarea 11=chart 12=menu 13=menu_page 14=menu_cont
+//   15=menu_section 16=tabview 17=win 18=keyboard 19=calendar 20=cal_hdr_arrow 21=cal_hdr_drop
+// A visible arc is left behind. Source: g2flash/payloads/payload_widgets_all.c
+const PAYLOAD_WIDGETS_ALL_B64 =
+  "RlhQMS3p8E+BsE/2v0GBRsDyRAEAIIhHACgA8ESCRfIAFYJGwPJ1BUz2mXjA8kQIKEZRRsBHaLEI9axxBEaIRyZoCPUCYSBGiEeuQgLRT/ABCwHgT/AAC0by0FTA8nUEIEZRRsBHoLEI9axxBEaIRyZoCPUCYSBGiEdG8tBQRvLQVMDydQDA8nUEhkIIvwvxAguQNCBGUUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwvxBAsF9TR0IEZRRsBHYLEI9axxBkaIRzdoCPUCYTBGiEenQgi/C/EIC0byLBXA8nUFBfG0BjBGUUbAR3ixCPWscQdGiEdMRtf4AJAI9QJhOEaIR7FFoUYIvwvxEAsF8dgGMEZRRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/EgCwX1kGYwRlFGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L8UALRvLQUMDydQAA8UgGMEZRRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/GAC0by0FDA8nUAAPEkBjBGUUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwv1gHtG8tBQwPJ1AADxtAYwRlFGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L9QB7RvLQUMDydQAA9ZB2MEZRRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/WAa0XyABDA8nUAAPUrdjBGUUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwv1AGsF9cZ2MEZRRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/WAWwX12HYwRlFGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L9QBbBfXqdjBGUUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwv1gEsF9fx2MEZRRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/UAS0by0FDA8nUAAPHYBjBGUUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwv1gDtG8tBQwPJ1AAD1xnYwRlFGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L9QA7KEZRRsBHYLEI9axxBkaIRzRoCPUCYTBGiEesQgi/C/WAK0XyABXA8nUFBfUHdCBGUUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwv1ACsF9RB0IEZRRsBHYLEI9axxBkaIRzdoCPUCYTBGiEenQgi/C/WAGwX1InQgRlFGwEdgsQj1rHEGRohHN2gI9QJhMEaIR6dCCL8L9QAbKEZRRsBHAChf0Aj1rHEERohHT/LBQ8DyQwMgRngheCLJ+ABAmEdP8psDwPJDAyBG5CFUIphHRPbTQcDyRwEgIIhHAChB0AAhQvZpBgFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXfA8kgGHSEAIgVGsEcoRighAyKwRyhGJCH/IrBHKEYjIW/wf0KwRyhGDCE8IrBHS/YbE8DyRAMgRilGACKYRwvxtEABsL3o8I9P8GBAAbC96PCP";
+
 const WARRANTY_PHRASE = "my warranty is void";
 
 // FUT-167 soft precheck — a self-attested readiness checklist that must be
@@ -920,6 +931,19 @@ export default function App() {
             disabled={!bt.pairReady}
             onPress={() => {
               guardedPush("payload B", "push_b", PAYLOAD_B_B64);
+            }}
+          />
+          <Row
+            badge="W22"
+            tint={theme.tint.green}
+            title="Widget sweep \u2014 all 22 orphan classes (FUT-232)"
+            subtitle="Creates + verifies + deletes every widget Even never builds. ret=0x5A?????? is a bitmask; bit0 (arc) is the control."
+            tag="no flash"
+            trace="FUT-232"
+            divider
+            disabled={!bt.pairReady}
+            onPress={() => {
+              guardedPush("widget sweep", "push_widgets_all", PAYLOAD_WIDGETS_ALL_B64);
             }}
           />
           <Row
