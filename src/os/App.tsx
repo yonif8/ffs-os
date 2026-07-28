@@ -184,6 +184,15 @@ const PAYLOAD_WA_15_B64 =
 const PAYLOAD_WA_MENUND_B64 =
   "RlhQMS3p8EFP9r9BgEbA8kQBACCIRwAoAPCGgEbyuCQFRsDydQRM9pl2wPJEBiBGKUawR1ixBvWscQdGiEc4aKBCBNFB8gAExfYAJAHgT/C0REXyABDA8nUAKUawRwAoX9AG9axxBUaIR0/ywUPA8kMDKEZ4IXgiyPgAUJhHT/KbA8DyQwMoRuQhVCKYR0T200HA8kcBICCIRwAoQdAAIUL2aQcBcEFwgXDBcAFxQXGBccFxAXJBcoFywXIBc0FzgXPBcwF0QXSBdMF0AXVBdYF1wXUBdkF2gXbBdgF3QXeBd8F3wPJIBx0hACIGRrhHMEYoIQMiuEcwRiQh/yK4RzBGIyFv8H9CuEcwRgwhPCK4R0v2GxPA8kQDKEYxRgAimEcgRr3o8IFP8GBAvejwgQ==";
 
+// FUT-232 upper range — M13 returned 0x5A001FFF (13 widgets incl. lv_menu) and W16
+// crashed, so the fault is in bits 13-15. -DFROM lets us probe bits 16-21 WITHOUT
+// touching the menu family, so a bad index in the middle can't mask everything above.
+const PAYLOAD_WA_U16_B64 =
+  "RlhQMS3p8E+BsE/2v0GARsDyRAEAIIhHACgA8OqARvKoZgVGwPJ1Bkz2mXrA8kQKMEYpRtBHaLEK9axxB0aIRzxoCvUCYThGiEe0QgLRT/SAOQHgT/AACbQ2MEYpRtBHYLEK9axxB0aIRzxoCvUCYThGiEe0Qgi/CfUAOUbyLBbA8nUGMEYpRtBHYLEK9axxB0aIRzxoCvUCYThGiEe0Qgi/CfWAKUXyHDvA8nULWEYpRtBHYLEK9axxB0aIRzxoCvUCYThGiEdcRQi/CfUAKQvxJAc4RilG0EdgsQr1rHEERohHJmgK9QJhIEaIR75CCL8J9YAZC/FsBzhGKUbQR2CxCvWscQRGiEcmaAr1AmEgRohHvkIIvwn1ABmr9QdwKUbQRwAoX9AK9axxBUaIR0/ywUPA8kMDKEZ4IXgiyPgAUJhHT/KbA8DyQwMoRuQhVCKYR0T200HA8kcBICCIRwAoQdAAIUL2aQYBcEFwgXDBcAFxQXGBccFxAXJBcoFywXIBc0FzgXPBcwF0QXSBdMF0AXVBdYF1wXUBdkF2gXbBdgF3QXeBd8F3wPJIBh0hACIERrBHIEYoIQMisEcgRiQh/yKwRyBGIyFv8H9CsEcgRgwhPCKwR0v2GxPA8kQDKEYhRgAimEcJ8bRAAbC96PCPT/BgQAGwvejwjw==";
+
+const PAYLOAD_WA_U16B_B64 =
+  "RlhQMS3p8E+BsE/2v0GBRsDyRAEAIIhHACgA8J2ARvKoagRGwPJ1Ckz2mXvA8kQLUEYhRthHaLEL9axxB0aIRz5oC/UCYThGiEdWRQLRT/SAOAHgT/AACArxtAYwRiFG2EdgsQv1rHEHRohHPWgL9QJhOEaIR7VCCL8I9QA4RfIAEMDydQAhRthHAChf0Av1rHEERohHT/LBQ8DyQwMgRngheCLJ+ABAmEdP8psDwPJDAyBG5CFUIphHRPbTQcDyRwEgIIhHAChB0AAhQvZpBgFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXfA8kgGHSEAIgVGsEcoRighAyKwRyhGJCH/IrBHKEYjIW/wf0KwRyhGDCE8IrBHS/YbE8DyRAMgRilGACKYRwjxtEABsL3o8I9P8GBAAbC96PCP";
+
 const WARRANTY_PHRASE = "my warranty is void";
 
 // FUT-167 soft precheck — a self-attested readiness checklist that must be
@@ -409,6 +418,14 @@ export default function App() {
   // three taps). A guard that makes you repeat yourself is a bad guard. We now park the
   // push here and fire it automatically the moment the readback lands.
   const pendingPushRef = useRef<{ label: string; event: string; b64: string } | null>(null);
+  // FUT-237 fix #2. My first fix assumed the problem was "never read the firmware yet".
+  // WRONG — device-info arrives as SEVERAL events and only some carry the ⟨LOADER⟩ markers
+  // (they ride the L-lens version string), so a marker-less event pushed us down the
+  // blocked path and Yoni still had to tap repeatedly. Loader presence cannot vanish
+  // without a reflash, so LATCH it: once seen in any readback, it stays seen.
+  const loaderSeenRef = useRef<boolean>(false);
+  const [loaderSeen, setLoaderSeen] = useState(false);
+  const readTriesRef = useRef<number>(0);
 
   // Live refs so the nav's context getters always read current session state.
   const btRef = useRef(bt);
@@ -467,16 +484,28 @@ export default function App() {
         glog.emit("drv", "disconnected", { side: e.side, reason: e.reason ?? null })),
       FfsBle.addListener("onDeviceInfo", (e) => {
         glog.emit("drv", "device_info", { batt: e.battery, chg: e.charging, l: e.leftVersion, r: e.rightVersion });
+        if (`${e.leftVersion ?? ""} ${e.rightVersion ?? ""}`.includes("LOADER")) {
+          loaderSeenRef.current = true;
+          setLoaderSeen(true);
+        }
         const p = pendingPushRef.current;
         if (!p) return;
-        pendingPushRef.current = null;
-        if (`${e.leftVersion ?? ""} ${e.rightVersion ?? ""}`.includes("LOADER")) {
+        if (loaderSeenRef.current) {
+          pendingPushRef.current = null;
           setPushMsg(`✅ loader confirmed — pushed ${p.label}`);
           glog.emit("os", p.event, {});
           FfsBle.pushPayloadViaImage(p.b64);
-        } else {
+          return;
+        }
+        // Marker-less readback. Some events legitimately lack it, so try a few times
+        // before concluding the loader really is absent.
+        readTriesRef.current += 1;
+        if (readTriesRef.current >= 3) {
+          pendingPushRef.current = null;
           setPushMsg("⛔ BLOCKED — no OTA loader on the glasses (stock firmware). Pushing would crash a lens. Flash g2_2.2.6.10_loader.bin first.");
           glog.emit("os", "push_blocked", { label: p.label, reason: "no_loader" });
+        } else {
+          FfsBle.requestDeviceInfo();
         }
       }),
     ];
@@ -497,28 +526,24 @@ export default function App() {
   // unread deviceInfo is treated as "not proven", which fails safe. First tap with no
   // reading triggers the read; tap again once it lands.
   const loaderPresent = (): boolean => {
+    if (loaderSeenRef.current) return true;
     const di = bt.deviceInfo;
     return `${di?.leftVersion ?? ""} ${di?.rightVersion ?? ""}`.includes("LOADER");
   };
   const guardedPush = (label: string, event: string, b64: string) => {
     if (!bt.pairReady) return;
-    if (!loaderPresent()) {
-      const everRead = !!bt.deviceInfo;
-      if (everRead) {
-        setPushMsg("⛔ BLOCKED — no OTA loader on the glasses (they're on STOCK firmware). Pushing now would crash a lens, not just fail. Flash g2_2.2.6.10_loader.bin first.");
-        glog.emit("os", "push_blocked", { label, reason: "no_loader" });
-        FfsBle.requestDeviceInfo();   // re-check in case they just flashed
-        return;
-      }
-      // Never read the firmware yet: park this push and fire it when the answer lands.
-      pendingPushRef.current = { label, event, b64 };
-      setPushMsg("⏳ checking the glasses for the OTA loader… this push will go automatically.");
-      FfsBle.requestDeviceInfo();
+    if (loaderPresent()) {
+      loaderSeenRef.current = true;
+      setPushMsg(`✅ loader confirmed — pushed ${label}`);
+      glog.emit("os", event, {});
+      FfsBle.pushPayloadViaImage(b64);
       return;
     }
-    setPushMsg(`✅ loader confirmed — pushed ${label}`);
-    glog.emit("os", event, {});
-    FfsBle.pushPayloadViaImage(b64);
+    // Not proven yet — park the push and let the readback fire it. ONE tap.
+    pendingPushRef.current = { label, event, b64 };
+    readTriesRef.current = 0;
+    setPushMsg("⏳ checking the glasses for the OTA loader… this push will go automatically.");
+    FfsBle.requestDeviceInfo();
   };
 
   const startFlash = (url: string, sha: string, dryRun: boolean) => {
@@ -949,7 +974,7 @@ export default function App() {
 
         <SectionLabel
           note={
-            loaderPresent()
+            loaderSeen || loaderPresent()
               ? "FUT-216 · ✅ OTA loader detected — pushes are safe"
               : bt.deviceInfo
                 ? "FUT-216 · ⛔ NO loader (stock firmware) — pushes are BLOCKED"
@@ -981,6 +1006,32 @@ export default function App() {
             disabled={!bt.pairReady}
             onPress={() => {
               guardedPush("payload B", "push_b", PAYLOAD_B_B64);
+            }}
+          />
+          <Row
+            badge="U16"
+            tint={theme.tint.blue}
+            title="Upper range — U16"
+            subtitle="bits 16-21 ONLY: tabview, win, keyboard, calendar x3 — skips the menu family entirely"
+            tag="no flash"
+            trace="FUT-232"
+            divider
+            disabled={!bt.pairReady}
+            onPress={() => {
+              guardedPush("U16", "push_wa_u16", PAYLOAD_WA_U16_B64);
+            }}
+          />
+          <Row
+            badge="U18"
+            tint={theme.tint.blue}
+            title="Upper range — U18"
+            subtitle="bits 16-17 ONLY: tabview + win (the safer half of the upper group)"
+            tag="no flash"
+            trace="FUT-232"
+            divider
+            disabled={!bt.pairReady}
+            onPress={() => {
+              guardedPush("U18", "push_wa_u16b", PAYLOAD_WA_U16B_B64);
             }}
           />
           <Row
