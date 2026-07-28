@@ -131,6 +131,18 @@ const PAYLOAD_AN1_B64 =
 const PAYLOAD_AN2_B64 =
   "RlhQMS3p8E+DsE/2v0gFRsDyRAgAIMBHACgA8O2ATfaDYcDyQwGIRwAoAPDpgE/ywUNC9mkLRPbTSUv2GxdP8psGwPJDA8ghRiIERsDySAvA8kcJwPJEB8DyQwaYRyBGFCFtIrBHICDIR8izACEBcEFwgXDBcAFxQXGBccFxAXJBcoFywXIBc0FzgXPBcwF0QXSBdMF0AXVBdYF1wXUBdkF2gXbBdgF3QXeBd8F3HSEAIgZG2EcwRighAyLYRzBGJCH/IthHMEYjIW/wf0LYRzBGDCEKIthHIEYxRgAiuEdJ8hdKwPJJCiBG0EcAKFjQBkYgIMhH2LMHRgAgOHB4cLhw+HA4cXhxuHH4cThyeHK4cvhyOHN4c7hz+HM4dHh0uHT4dDh1eHW4dfh1OHZ4drh2+HY4d3h3uHf4d0Ty3GDC8gcAAmgSsThGMiHYRzhGMCFv8H9C2Ec4RjEh/yLYR0v2GxMwRjlGACLA8kQDmEdBII34BABOII34BQAyII34BgAAII34BwAK8RgCAakwRpBHT/KbAzBGRiEWIsDyQwOYR2AgLGDIRwVGAChP8AMAH9AI9eNiKEYDJpBHLGBA8j8AwPIAAHhEQPLPY2hgwPJFAyhGFCFP9LJymEdA8txQQPIJQShjwPJFAShGbmSIR7IgA7C96PCPASADsL3o8I8CIAOwvejwj3BH";
 
+// FUT-232 — THE GENERIC WIDGET DOOR. Constructs lv_arc, a widget Even's own firmware
+// NEVER creates ("orphan" in g2fw.h), via lv_obj_class_create_obj + lv_obj_class_init_obj.
+// LVGL v9's create is TWO calls — allocate, then run the constructor chain; we only had
+// the first until class_init_obj was resolved 2026-07-28. If this works, ~25 widgets open.
+// Proof is STRUCTURAL, not visual (lv_layer_top has no theme, so appearance is unreliable):
+// the payload reads back obj->class_p (+0x00) and reports via the loader's ret=
+//   0xC7 = arc constructed AND class verified   0xE1 = create returned NULL
+//   0xE2 = created but class_p mismatch (our class table is wrong)   0xE0 = no layer_top
+// Source: g2flash/payloads/payload_widget.c
+const PAYLOAD_WIDGET_B64 =
+  "RlhQMfC1gbBP9r9BBkbA8kQBACCIRwAoctBF8gAUwPJ1BEz2mXcBRsDyRAcgRrhHACho0Af1rHEFRohHT/LBQ8DyQwMoRowhjCI1YJhHT/KbA8DyQwMoRtohSiKYR0T200HA8kcBICCIRwAoQdAAIUL2aQcBcEFwgXDBcAFxQXGBccFxAXJBcoFywXIBc0FzgXPBcwF0QXSBdMF0AXVBdYF1wXUBdkF2gXbBdgF3QXeBd8F3wPJIBx0hACIGRrhHMEYoIQMiuEcwRiQh/yK4RzBGIyFv8H9CuEcwRgwhRiK4R0v2GxPA8kQDKEYxRgAimEcpaOIgoUIIv8cgAbDwveAgAbDwveEgAbDwvQ==";
+
 const WARRANTY_PHRASE = "my warranty is void";
 
 // FUT-167 soft precheck — a self-attested readiness checklist that must be
@@ -908,6 +920,19 @@ export default function App() {
             disabled={!bt.pairReady}
             onPress={() => {
               guardedPush("payload B", "push_b", PAYLOAD_B_B64);
+            }}
+          />
+          <Row
+            badge="W"
+            tint={theme.tint.green}
+            title="Widget door \u2014 build an lv_arc (FUT-232)"
+            subtitle="Constructs a widget Even never builds. ret=0xC7 means it worked; 0xE2 means our class table is wrong."
+            tag="no flash"
+            trace="FUT-232"
+            divider
+            disabled={!bt.pairReady}
+            onPress={() => {
+              guardedPush("widget arc", "push_widget", PAYLOAD_WIDGET_B64);
             }}
           />
           <Row
