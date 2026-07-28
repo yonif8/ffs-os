@@ -115,6 +115,22 @@ const PAYLOAD_B_B64 =
 const PAYLOAD_ANIM_B64 =
   "RlhQMS3p8E+DsE/2v0gFRsDyRAgAIMBHACgA8PCATfaDYcDyQwGIRwAoAPDsgE/ywUNC9mkLRPbTSUv2GxdP8psGwPJDA8ghRiIERsDySAvA8kcJwPJEB8DyQwaYRyBGFCFtIrBHICDIR8izACEBcEFwgXDBcAFxQXGBccFxAXJBcoFywXIBc0FzgXPBcwF0QXSBdMF0AXVBdYF1wXUBdkF2gXbBdgF3QXeBd8F3HSEAIgZG2EcwRighAyLYRzBGJCH/IthHMEYjIW/wf0LYRzBGDCEKIthHIEYxRgAiuEdJ8hdKwPJJCiBG0EcAKFvQBkYgIMhH2LMHRgAgOHB4cLhw+HA4cXhxuHH4cThyeHK4cvhyOHN4c7hz+HM4dHh0uHT4dDh1eHW4dfh1OHZ4drh2+HY4d3h3uHf4d0Ty3GDC8gcAAmgSsThGMiHYRzhGMCFv8H9C2Ec4RjEh/yLYR0v2GxMwRjlGACLA8kQDmEdBII34BABOII34BQBJII34BgBNII34BwAAII34CAAK8RgCAakwRpBHT/KbAzBGRiEWIsDyQwOYR2AgLGDIRwVGAChP8AMAH9AI9eNiKEYDJpBHLGBA8kEAwPIAAHhEQPLPY2hgwPJFAyhGFCFP9LJymEdA8txQQPIJQShjwPJFAShGbmSIRxogA7C96PCPASADsL3o8I8CIAOwvejwjwC/T/KbA8DyQwNtIhhH";
 
+// FUT-234 crash bisect. payload_anim (above) crashed the glasses: right lens blank ~15-20 s,
+// then a watchdog reboot of both. The three lv_anim addresses have since been VERIFIED GENUINE
+// by disassembly against a known-good control, so a bad address is NOT the cause. These two
+// stages split what's left. Source: g2flash/payloads/payload_anim_bisect.c
+//   AN1 — box + lv_anim_init + set_values + all field writes, but NO lv_anim_start. Nothing is
+//         ever ticked. Answers: does our payload render AT ALL?  (returns 0xB1)
+//   AN2 — AN1 + lv_anim_start with a NO-OP exec_cb. The engine ticks and calls into our RAM
+//         blob 60x/s, touching nothing. Answers: do the engine + a callback into our resident
+//         payload survive?  (returns 0xB2)
+// AN1 crashes → not the animation at all. AN1 ok, AN2 crashes → calling our RAM blob from the
+// tick. Both ok → the per-frame lv_obj_set_pos redraw is the culprit.
+const PAYLOAD_AN1_B64 =
+  "RlhQMS3p8E+DsE/2v0gFRsDyRAgAIMBHACgA8OWATfaDYcDyQwGIRwAoAPDhgE/ywUNC9mkLRPbTSUv2GxdP8psGwPJDA8ghRiIERsDySAvA8kcJwPJEB8DyQwaYRyBGFCFtIrBHICDIR8izACEBcEFwgXDBcAFxQXGBccFxAXJBcoFywXIBc0FzgXPBcwF0QXSBdMF0AXVBdYF1wXUBdkF2gXbBdgF3QXeBd8F3HSEAIgZG2EcwRighAyLYRzBGJCH/IthHMEYjIW/wf0LYRzBGDCEKIthHIEYxRgAiuEdJ8hdKwPJJCiBG0EcAKFjQBkYgIMhH2LMHRgAgOHB4cLhw+HA4cXhxuHH4cThyeHK4cvhyOHN4c7hz+HM4dHh0uHT4dDh1eHW4dfh1OHZ4drh2+HY4d3h3uHf4d0Ty3GDC8gcAAmgSsThGMiHYRzhGMCFv8H9C2Ec4RjEh/yLYR0v2GxMwRjlGACLA8kQDmEdBII34BABOII34BQAxII34BgAAII34BwAK8RgCAakwRpBHT/KbAzBGRiEWIsDyQwOYR2AgLGDIRwVGAChP8AMAF9AI9eNiKEYDJpBHLGBA8i8AwPIAAHhEaGAI9SFjKEYUIU/0snKYR0Dy3FAoY7EgbmQDsL3o8I8BIAOwvejwjwIgA7C96PCPcEc=";
+const PAYLOAD_AN2_B64 =
+  "RlhQMS3p8E+DsE/2v0gFRsDyRAgAIMBHACgA8O2ATfaDYcDyQwGIRwAoAPDpgE/ywUNC9mkLRPbTSUv2GxdP8psGwPJDA8ghRiIERsDySAvA8kcJwPJEB8DyQwaYRyBGFCFtIrBHICDIR8izACEBcEFwgXDBcAFxQXGBccFxAXJBcoFywXIBc0FzgXPBcwF0QXSBdMF0AXVBdYF1wXUBdkF2gXbBdgF3QXeBd8F3HSEAIgZG2EcwRighAyLYRzBGJCH/IthHMEYjIW/wf0LYRzBGDCEKIthHIEYxRgAiuEdJ8hdKwPJJCiBG0EcAKFjQBkYgIMhH2LMHRgAgOHB4cLhw+HA4cXhxuHH4cThyeHK4cvhyOHN4c7hz+HM4dHh0uHT4dDh1eHW4dfh1OHZ4drh2+HY4d3h3uHf4d0Ty3GDC8gcAAmgSsThGMiHYRzhGMCFv8H9C2Ec4RjEh/yLYR0v2GxMwRjlGACLA8kQDmEdBII34BABOII34BQAyII34BgAAII34BwAK8RgCAakwRpBHT/KbAzBGRiEWIsDyQwOYR2AgLGDIRwVGAChP8AMAH9AI9eNiKEYDJpBHLGBA8j8AwPIAAHhEQPLPY2hgwPJFAyhGFCFP9LJymEdA8txQQPIJQShjwPJFAShGbmSIR7IgA7C96PCPASADsL3o8I8CIAOwvejwj3BH";
+
 const WARRANTY_PHRASE = "my warranty is void";
 
 // FUT-167 soft precheck — a self-attested readiness checklist that must be
@@ -851,11 +867,40 @@ export default function App() {
             }}
           />
           <Row
-            badge="AN"
+            badge="AN1"
             tint={theme.tint.blue}
-            title="Push animation"
-            subtitle="A box SLIDES across the HUD, 3× over ~4.5 s. First real animation on the G2."
+            title="Bisect 1 — box only, animation NOT started"
+            subtitle="Builds the anim struct but never starts it. Should just show a static box labelled AN1."
             tag="no flash"
+            trace="FUT-234"
+            divider
+            disabled={!bt.pairReady}
+            onPress={() => {
+              glog.emit("os", "push_an1", { stage: 1 });
+              FfsBle.pushPayloadViaImage(PAYLOAD_AN1_B64);
+            }}
+          />
+          <Row
+            badge="AN2"
+            tint={theme.tint.blue}
+            title="Bisect 2 — animation runs, callback does nothing"
+            subtitle="Starts the real animation with a no-op callback. Box labelled AN2 should sit still and survive."
+            tag="no flash"
+            trace="FUT-234"
+            divider
+            disabled={!bt.pairReady}
+            onPress={() => {
+              glog.emit("os", "push_an2", { stage: 2 });
+              FfsBle.pushPayloadViaImage(PAYLOAD_AN2_B64);
+            }}
+          />
+          <Row
+            badge="AN"
+            tint={theme.danger}
+            title="Push animation — KNOWN CRASH, don't tap"
+            subtitle="The original FUT-234 payload. Crashed both lenses. Kept only for a controlled re-test."
+            tag="CRASHES"
+            tagTint={theme.danger}
             trace="FUT-234"
             divider
             disabled={!bt.pairReady}
