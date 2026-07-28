@@ -54,6 +54,16 @@ jobs:
       - name: Install JS deps
         run: bun install
 
+      # FUT-233 — fail BEFORE spending ~4 min on a native build that ships a screen
+      # nobody can reach. A ring-input UI was once built, signed, published and
+      # installed with nothing to tap, because its screen was not in the import graph:
+      # typecheck passed, CI was green, the IPA was valid, the feature did not exist.
+      - name: Check every screen is reachable from the entry point
+        run: python3 scripts/check-reachable.py
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
       # FUT-142 — ccache: install + restore. expo-build-properties (ios.ccacheEnabled)
       # wires the Pods build to route clang/ld through ccache; we just provide the
       # binary + a persistent cache dir. Rolling key: save fresh each run, restore latest.
