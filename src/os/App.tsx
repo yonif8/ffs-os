@@ -252,6 +252,40 @@ export default function App() {
   const [session, setSession] = useState<string>("");
   const [swirlOn, setSwirlOn] = useState(false);
   const [flashProbe, setFlashProbe] = useState<string>("");
+  // FUT-233 — R1 ring. Independent of the glasses link by design.
+  const [ringState, setRingState] = useState<string>("—");
+  const [ringFrames, setRingFrames] = useState(0);
+  const [ringLog, setRingLog] = useState<string[]>([]);
+  /** advStart needs the glasses' MAC, which only a lens scan reveals. */
+  const glassesMac = bt.devices.find((d) => d.side !== "ring" && d.mac)?.mac ?? null;
+
+  // Ring events. Mounted unconditionally — NOT gated on the glasses link, because the
+  // test that matters is performed with the glasses off (FUT-233).
+  useEffect(() => {
+    const subs = [
+      FfsBle.addListener("onRingConnected", (p) => {
+        setRingState(`connected — ${p.name}`);
+        setRingLog((l) => [`READY: ${p.name}`, ...l].slice(0, 12));
+      }),
+      FfsBle.addListener("onRingDisconnected", (p) => {
+        setRingState("—");
+        setRingLog((l) => [`disconnected${p.reason ? ` (${p.reason})` : ""}`, ...l].slice(0, 12));
+      }),
+      // Every frame, decoded or not — an unmapped code is a finding, not noise.
+      FfsBle.addListener("onRingRaw", (p) => {
+        setRingFrames((n) => n + 1);
+        setRingLog((l) => [`rx ${p.hex}`, ...l].slice(0, 12));
+      }),
+      FfsBle.addListener("onRingBattery", (p) => {
+        setRingLog((l) => [`battery ${p.battery}%`, ...l].slice(0, 12));
+      }),
+      FfsBle.addListener("onGesture", (g) => {
+        if (g.device !== "ring") return;
+        setRingLog((l) => [`👆 ${g.gesture}`, ...l].slice(0, 12));
+      }),
+    ];
+    return () => subs.forEach((s) => s.remove());
+  }, []);
   const [flashMsg, setFlashMsg] = useState<string>("");
   const [flashFrac, setFlashFrac] = useState<number>(0);
   const [flashBusy, setFlashBusy] = useState<boolean>(false);
@@ -438,6 +472,69 @@ export default function App() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={true}
       >
+        {/* FUT-233 — the R1 ring is the SDK's input device. Deliberately FIRST and
+            deliberately NOT gated on `pairReady`: the discriminating test is run with
+            the glasses POWERED OFF, so anything requiring a lens link would make the
+            test impossible to perform. */}
+        <SectionLabel note="FUT-233 · works with the glasses OFF">R1 ring — input test</SectionLabel>
+        <Group>
+          <Row
+            badge="💍"
+            tint={theme.tint.purple}
+            title={ringState === "—" ? "Scan for ring" : "Rescan ring"}
+            subtitle={
+              ringState === "—"
+                ? "Wear the ring, then tap — glasses can stay off"
+                : ringState
+            }
+            tag={ringFrames > 0 ? `${ringFrames} frames` : undefined}
+            tagTint={theme.accent}
+            trace="FUT-233"
+            onPress={() => {
+              setRingLog((l) => ["scanning for ring…", ...l].slice(0, 12));
+              FfsBle.ringScan();
+            }}
+          />
+          <Row
+            badge="⛓"
+            tint={theme.tint.blue}
+            title="Ring → also connect to glasses"
+            subtitle={
+              glassesMac
+                ? `advStart → ${glassesMac} (does both links coexist?)`
+                : "Scan for the glasses first — needs their MAC"
+            }
+            divider
+            disabled={!glassesMac}
+            onPress={() => {
+              const ok = FfsBle.ringConnectToGlasses(glassesMac!);
+              setRingLog((l) =>
+                [`advStart ${ok ? "sent" : "REJECTED — ring not connected?"}`, ...l].slice(0, 12)
+              );
+            }}
+          />
+          <Row
+            badge="✕"
+            tint={theme.tint.blue}
+            title="Forget ring"
+            subtitle="Unpair, so the next scan starts fresh"
+            divider
+            onPress={() => {
+              FfsBle.ringForget();
+              setRingState("—");
+              setRingFrames(0);
+              setRingLog([]);
+            }}
+          />
+        </Group>
+        <Text style={styles.help}>
+          Glasses OFF → Scan → do all five: single tap · double tap · swipe up · swipe down ·
+          hold. Every frame below is also sent to telemetry, so Rico reads the result.
+        </Text>
+        {ringLog.length > 0 ? (
+          <Text style={styles.mono}>{ringLog.join("\n")}</Text>
+        ) : null}
+
         <SectionLabel note="swipe up/down · tap · double-tap">Drive on-glass</SectionLabel>
         <Group>
           <Row
