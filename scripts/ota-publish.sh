@@ -4,7 +4,12 @@
 # This is the "one command" for shipping a JS/TS change to Yoni's already-installed
 # app. It bundles the current JS with Metro and publishes it to the `production`
 # EAS Update branch; the installed app (which embeds expo-updates, runtimeVersion
-# 1.0.0) fetches it on next launch (ON_LOAD) or on foreground re-check. NO re-sideload.
+# 1.2.0 — see app.json, this comment said 1.0.0 until 2026-07-28) fetches it on next
+# launch (ON_LOAD) or on foreground re-check. NO re-sideload.
+#
+# ⚠️ The runtimeVersion here MUST match the one baked into Yoni's INSTALLED app, not
+# just the one in app.json. They differ if app.json's rtv was bumped after his last
+# IPA install — and then the app silently ignores every OTA.
 #
 # Usage:  scripts/ota-publish.sh "what changed in this update"
 #
