@@ -99,6 +99,20 @@ const LOADER_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_loader.bin";
 // FUT-217: no gesture hooks (left touchpad); FUT-216: dispatch probe (logs service keys → svc[]).
 const LOADER_SHA = "373bfe9aa3645f1cda5b0204df1db3516e16347f31dcc9a39846442022c43103";
 const CFW_SERVICE = 0x90; // custom CFW loader BLE service id
+// FUT-238 — STYLE PROPS ORACLE (one tap, one answer). Runs the firmware's OWN
+// lv_style_set_* thunks, then asks lv_style_set_prop whether the prop it wrote is the
+// id we claim: an id already held is OVERWRITTEN (prop_cnt unchanged), an id not held is
+// APPENDED (prop_cnt+1). prop_cnt's struct offset is DISCOVERED at runtime, not assumed.
+// Returns a bitmask on the firmware-L line as ret=0x……  Decode (full table on FUT-238):
+//   0x5B18FFFD / 0x5B18FFFE = ✅ full PASS (layout A / layout B) — the recovered v9.3.0 map is right
+//   0x5B1F000D = 🔴 the OLD numbering was right; 0x5B00000D = thunk addresses wrong
+//   0x5BE10000 / 0x5BE00000 = oracle couldn't run (bad struct layout / no layer_top)
+// It should ALSO draw a rounded outlined box with legible "FUT238 OK" mid-HUD — the
+// semantic proof, because the same intent under the OLD ids rendered an invisible label
+// (FUT-197). Built from payloads/payload_style_props.c, blob 2420 B,
+// sha256 8b035cdb…49143a, + the 4-byte FXP1 magic = 2424 B on the wire.
+const PAYLOAD_STYLE_PROPS_B64 =
+  "RlhQMS3p8E+DsE/2v0GCRgAmwPJEAQAgxfbhNohH4LNE9tNJBEbA8kcJICDIRwAoAPCehAdGQvZpCAAgwPJICDhweHC4cPhwOHF4cbhx+HE4cnhyuHL4cjhzeHO4c/hzOHR4dLh0+HQ4dXh1uHX4dTh2eHa4dvh2OHd4d7h3+Hc4RgwhESLARzh5CCgJ0Th6ASgG0QEnCCUN4Kb1gDYA8Ge8OHoIKEDwY4Q4ewEoQPBfhAInDCUgIMhHYLMAIQFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXcMIQEiBkbARzBGDCECIsBHcF0BKAi/BDcgIMhHYLMAIQFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXcMIQEiBkbARzBGHSECIsBHcF0CKAi/CDdE9iEbICDA8k0LyEeIswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/WUcjBGACGQR3BdASgH0TBGWiEiIsBHcF0BKAi/EDcgIMhHeLMGRgAgMHBwcLBw8HAwcXBxsHHwcTBycHKwcvByMHNwc7Bz8HMwdHB0sHTwdDB1cHWwdfB1MHZwdrB28HYwd3B3sHfwdzBGACHYR3BdASgH0TBGMCEiIsBHcF0BKAi/IDcgIMhHiLMGRgAgMHBwcLBw8HAwcXBxsHHwcTBycHKwcvByMHNwc7Bz8HMwdHB0sHTwdDB1cHWwdfB1MHZwdrB28HYwd3B3sHfwd6vxDgIwRgAhkEdwXQEoB9EwRjIhIiLAR3BdASgIv0A3ICDIR4izBkYAIDBwcHCwcPBwMHFwcbBx8HEwcnBysHLwcjBzcHOwc/BzMHRwdLB08HQwdXB1sHXwdTB2cHawdvB2MHdwd7B38Her8VwCMEYAIZBHcF0BKAfRMEYdISIiwEdwXQEoCL+ANyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/WncjBGACGQR3BdASgI0TBGDCEiIsBHcF0BKAi/B/WAdyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3q/G+AjBGACGQR3BdASgI0TBGECEiIsBHcF0BKAi/B/UAdyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/HaAjBGACGQR3BdASgI0TBGUCEiIsBHcF0BKAi/B/WAZyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/G0AjBGACGQR3BdASgI0TBGSCEiIsBHcF0BKAi/B/UAZyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/WacjBGACGQR3BdASgI0TBGXCEiIsBHcF0BKAi/B/WAVyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3q/E0AjBGACGQR3BdASgI0TBGKCEiIsBHcF0BKAi/B/UAVyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/WHcjBGACGQR3BdASgI0TBGWCEiIsBHcF0BKAi/B/WARyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3q/EoAjBGACGQR3BdASgI0TBGMSEiIsBHcF0BKAi/B/UARyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/WUcjBGACGQR3BdASgI0TBGMiEiIsBHcF0BKAi/B/WANyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/WHcjBGACGQR3BdASgI0TBGMCEiIsBHcF0BKAi/B/UANyAgyEeAswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3MEYAIdhHcF0BKAjRMEYoISIiwEdwXQEoCL8H9YAnRPLcYMLyBwAGaE32g2HA8kMBIEYALhi/B/WAF4hHACgA8MOAT/LBQ0v2GxtP8psEwPJDA0/0lnFaIgVGwPJEC8DyQwTK+AAAmEcoRoohYyKgRyAgyEfIswAhAXBBcIFwwXABcUFxgXHBcQFyQXKBcsFyAXNBc4FzwXMBdEF0gXTBdAF1QXWBdcF1AXZBdoF2wXYBd0F3gXfBdx0hACIERsBHIEYwIQMiwEcgRjIh/yLARyBGMSFv8H9CwEcgRgwhDCLARyhGIUYAIthH2kZJ8hdLwPJJCyhG2EcAKGXQBEYgIMhHmLMFRgAgKHBocKhw6HAocWhxqHHocShyaHKocuhyKHNoc6hz6HModGh0qHTodCh1aHWodeh1KHZodqh26HYod2h3qHfodx6xKEZaITJGwEcoRlghb/B/QsBHKEZZIf8iwEcgRilGACLQR0YgjfgCAFUgjfgDAFQgjfgEADIgjfgFADMgjfgGADggjfgHACAgjfgIAE8gjfgJAEsgjfgKAAAgjfgLAAvxGAIN8QIBIEaQR0/ymwMgRhQhHiLA8kMDmEdH9AAnB/G2RjBGA7C96PCP";
 // Demo payloads = "FXP1" magic + a compiled PIC blob (payload_main draws a bordered box +
 // label on lv_layer_top). Pushing B after A visibly replaces A. (patches/payloads/payload_*.c)
 const PAYLOAD_A_B64 =
@@ -1020,6 +1034,19 @@ export default function App() {
         {pushMsg ? <Text style={styles.dim}>{pushMsg}</Text> : null}
         <Group>
           <Row
+            badge="★"
+            tint={theme.tint.red}
+            title="⭐ FUT238 STYLE PROBE — TAP THIS ONE"
+            subtitle="THE NEW ROW. One tap → read back ret=0x… from the firmware-L line, and look for a rounded outlined box with legible “FUT238 OK” mid-HUD."
+            tag="no flash"
+            trace="FUT-238"
+            divider
+            disabled={!bt.pairReady}
+            onPress={() => {
+              guardedPush("FUT238 STYLE PROBE", "push_style_props", PAYLOAD_STYLE_PROPS_B64);
+            }}
+          />
+          <Row
             badge="A"
             tint={theme.tint.amber}
             title="Push payload A"
@@ -1173,16 +1200,16 @@ export default function App() {
             }}
           />
           <Row
-            badge="U18"
+            badge="U16b"
             tint={theme.tint.blue}
-            title="Upper range — U18"
+            title="Upper range — U16b (bits 16-17)"
             subtitle="bits 16-17 ONLY: tabview + win (the safer half of the upper group)"
             tag="no flash"
             trace="FUT-232"
             divider
             disabled={!bt.pairReady}
             onPress={() => {
-              guardedPush("U18", "push_wa_u16b", PAYLOAD_WA_U16B_B64);
+              guardedPush("U16b", "push_wa_u16b", PAYLOAD_WA_U16B_B64);
             }}
           />
           <Row
