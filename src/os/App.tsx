@@ -34,6 +34,7 @@ import { screenOwner } from "./reclaim";
 import { PhoneNav, type PhoneCtx } from "./phone/nav";
 import { homeScreen, textTestScreen, setTextTestContent } from "./phone/screens";
 import { Group, Progress, Row, SectionLabel } from "./ui";
+import { GENERATED_PAYLOADS } from "./payloads.generated";
 
 // Read the REAL shipped version rather than a hand-maintained copy. A hardcoded
 // "0.11.1" had drifted three releases behind app.json, so telemetry reported the
@@ -113,12 +114,21 @@ const CFW_SERVICE = 0x90; // custom CFW loader BLE service id
 // sha256 8b035cdb…49143a, + the 4-byte FXP1 magic = 2424 B on the wire.
 const PAYLOAD_STYLE_PROPS_B64 =
   "RlhQMS3p8E+DsE/2v0GCRgAmwPJEAQAgxfbhNohH4LNE9tNJBEbA8kcJICDIRwAoAPCehAdGQvZpCAAgwPJICDhweHC4cPhwOHF4cbhx+HE4cnhyuHL4cjhzeHO4c/hzOHR4dLh0+HQ4dXh1uHX4dTh2eHa4dvh2OHd4d7h3+Hc4RgwhESLARzh5CCgJ0Th6ASgG0QEnCCUN4Kb1gDYA8Ge8OHoIKEDwY4Q4ewEoQPBfhAInDCUgIMhHYLMAIQFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXcMIQEiBkbARzBGDCECIsBHcF0BKAi/BDcgIMhHYLMAIQFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXcMIQEiBkbARzBGHSECIsBHcF0CKAi/CDdE9iEbICDA8k0LyEeIswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/WUcjBGACGQR3BdASgH0TBGWiEiIsBHcF0BKAi/EDcgIMhHeLMGRgAgMHBwcLBw8HAwcXBxsHHwcTBycHKwcvByMHNwc7Bz8HMwdHB0sHTwdDB1cHWwdfB1MHZwdrB28HYwd3B3sHfwdzBGACHYR3BdASgH0TBGMCEiIsBHcF0BKAi/IDcgIMhHiLMGRgAgMHBwcLBw8HAwcXBxsHHwcTBycHKwcvByMHNwc7Bz8HMwdHB0sHTwdDB1cHWwdfB1MHZwdrB28HYwd3B3sHfwd6vxDgIwRgAhkEdwXQEoB9EwRjIhIiLAR3BdASgIv0A3ICDIR4izBkYAIDBwcHCwcPBwMHFwcbBx8HEwcnBysHLwcjBzcHOwc/BzMHRwdLB08HQwdXB1sHXwdTB2cHawdvB2MHdwd7B38Her8VwCMEYAIZBHcF0BKAfRMEYdISIiwEdwXQEoCL+ANyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/WncjBGACGQR3BdASgI0TBGDCEiIsBHcF0BKAi/B/WAdyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3q/G+AjBGACGQR3BdASgI0TBGECEiIsBHcF0BKAi/B/UAdyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/HaAjBGACGQR3BdASgI0TBGUCEiIsBHcF0BKAi/B/WAZyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/G0AjBGACGQR3BdASgI0TBGSCEiIsBHcF0BKAi/B/UAZyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/WacjBGACGQR3BdASgI0TBGXCEiIsBHcF0BKAi/B/WAVyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3q/E0AjBGACGQR3BdASgI0TBGKCEiIsBHcF0BKAi/B/UAVyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/WHcjBGACGQR3BdASgI0TBGWCEiIsBHcF0BKAi/B/WARyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3q/EoAjBGACGQR3BdASgI0TBGMSEiIsBHcF0BKAi/B/UARyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/WUcjBGACGQR3BdASgI0TBGMiEiIsBHcF0BKAi/B/WANyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/WHcjBGACGQR3BdASgI0TBGMCEiIsBHcF0BKAi/B/UANyAgyEeAswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3MEYAIdhHcF0BKAjRMEYoISIiwEdwXQEoCL8H9YAnRPLcYMLyBwAGaE32g2HA8kMBIEYALhi/B/WAF4hHACgA8MOAT/LBQ0v2GxtP8psEwPJDA0/0lnFaIgVGwPJEC8DyQwTK+AAAmEcoRoohYyKgRyAgyEfIswAhAXBBcIFwwXABcUFxgXHBcQFyQXKBcsFyAXNBc4FzwXMBdEF0gXTBdAF1QXWBdcF1AXZBdoF2wXYBd0F3gXfBdx0hACIERsBHIEYwIQMiwEcgRjIh/yLARyBGMSFv8H9CwEcgRgwhDCLARyhGIUYAIthH2kZJ8hdLwPJJCyhG2EcAKGXQBEYgIMhHmLMFRgAgKHBocKhw6HAocWhxqHHocShyaHKocuhyKHNoc6hz6HModGh0qHTodCh1aHWodeh1KHZodqh26HYod2h3qHfodx6xKEZaITJGwEcoRlghb/B/QsBHKEZZIf8iwEcgRilGACLQR0YgjfgCAFUgjfgDAFQgjfgEADIgjfgFADMgjfgGADggjfgHACAgjfgIAE8gjfgJAEsgjfgKAAAgjfgLAAvxGAIN8QIBIEaQR0/ymwMgRhQhHiLA8kMDmEdH9AAnB/G2RjBGA7C96PCP";
+// ── The 26 pushable payloads now come from GENERATED DATA ──────────────────────
+// FUT-228: these used to be 26 hand-pasted base64 literals with no record of what
+// produced them. They now live in ./payloads.generated.ts, emitted by
+//   cd ~/Downloads/g2cfw/g2flash && ./tools/ffs-sdk gen
+// from g2flash/payloads/manifest.json (source .c + exact -D flags per variant).
+// The generator reproduces the previously-shipped strings BYTE-EXACT — that 26-way
+// comparison is the migration's regression test (tools/ffs_sdk/tests/test_parity.py).
+// The notes below are kept because they explain what each payload DOES; only the
+// base64 moved. The FUT238 STYLE PROBE above is deliberately still a literal: it is
+// published and load-bearing, so it is not regenerated.
+
 // Demo payloads = "FXP1" magic + a compiled PIC blob (payload_main draws a bordered box +
 // label on lv_layer_top). Pushing B after A visibly replaces A. (patches/payloads/payload_*.c)
-const PAYLOAD_A_B64 =
-  "RlhQMS3p8E+DsE/2v0EERsDyRAEAIIhHACgA8MqATfaDYcDyQwGIRwAoAPDGgE/ywUNC9mkKRPbTR0v2GxlP8psIwPJDA0/0lnFYIgVGwPJICsDyRwfA8kQJwPJDCJhHKEaKIWQiwEcgILhHyLMAIQFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXcdIQAiBkbQRzBGMCEDItBHMEYyIf8i0EcwRjEhb/B/QtBHMEYMIQoi0EcoRjFGACLIR0nyF0vA8kkLKEbYRwAoWtAGRiAgT/AgCbhH2LMHRgAgOHB4cLhw+HA4cXhxuHH4cThyeHK4cvhyOHN4c7hz+HM4dHh0uHT4dDh1eHW4dfh1OHZ4drh2+HY4d3h3uHf4d0Ty3GDC8gcAAmgSsThGWiHQRzhGWCFv8H9C0Ec4Rlkh/yLQR0v2GxMwRjlGACLA8kQDmEdPII34BABUII34BQBBII34BgCN+AeQjfgIAAAgjfgJAAvxGAIBqTBGkEcwRnYhHiLARyVgCiADsL3o8I8BIAOwvejwjwIgA7C96PCP";
-const PAYLOAD_B_B64 =
-  "RlhQMS3p8E+DsE/2v0EERsDyRAEAIIhHACgA8MuATfaDYcDyQwGIRwAoAPDHgE/ywUNC9mkKRPbTR0v2GxlP8psIwPJDA0/0yHGCIgVGwPJICsDyRwfA8kQJwPJDCJhHKEZYIU8iwEcgILhHyLMAIQFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXcdIQAiBkbQRzBGMCEGItBHMEYyIf8i0EcwRjEhb/B/QtBHMEYMIRoi0EcoRjFGACLIR0nyF0vA8kkLKEbYRwAoW9AGRiAgT/AgCbhH2LMHRgAgOHB4cLhw+HA4cXhxuHH4cThyeHK4cvhyOHN4c7hz+HM4dHh0uHT4dDh1eHW4dfh1OHZ4drh2+HY4d3h3uHf4d0Ty3GDC8gcAAmgSsThGWiHQRzhGWCFv8H9C0Ec4Rlkh/yLQR0v2GxMwRjlGACLA8kQDmEdPII34BABUII34BQBBII34BgBCII34B5CN+AgAACCN+AkAC/EYAgGpMEaQRzBGniEyIsBHJWALIAOwvejwjwEgA7C96PCPAiADsL3o8I8=";
+//   -> ffs-sdk id "PAYLOAD_A_B64"
+//   -> ffs-sdk id "PAYLOAD_B_B64"
 // FUT-234 — THE FIRST ANIMATION. A box slides left→right across the HUD, 3× over 4.5 s,
 // driven by the firmware's own lv_anim engine (lv_anim_init → set_values → lv_anim_start)
 // with a custom exec_cb living inside the payload itself. Even's SDK has no animation
@@ -126,8 +136,7 @@ const PAYLOAD_B_B64 =
 // Source: g2flash/payloads/payload_anim.c. Verified by disassembly before first push —
 // notably +0x20 (path_cb, a CODE POINTER whose corruption reboots the glasses) is never
 // written; lv_anim_init installs lv_anim_path_linear there.
-const PAYLOAD_ANIM_B64 =
-  "RlhQMS3p8E+DsE/2v0gFRsDyRAgAIMBHACgA8PCATfaDYcDyQwGIRwAoAPDsgE/ywUNC9mkLRPbTSUv2GxdP8psGwPJDA8ghRiIERsDySAvA8kcJwPJEB8DyQwaYRyBGFCFtIrBHICDIR8izACEBcEFwgXDBcAFxQXGBccFxAXJBcoFywXIBc0FzgXPBcwF0QXSBdMF0AXVBdYF1wXUBdkF2gXbBdgF3QXeBd8F3HSEAIgZG2EcwRjAhAyLYRzBGMiH/IthHMEYxIW/wf0LYRzBGDCEKIthHIEYxRgAiuEdJ8hdKwPJJCiBG0EcAKFvQBkYgIMhH2LMHRgAgOHB4cLhw+HA4cXhxuHH4cThyeHK4cvhyOHN4c7hz+HM4dHh0uHT4dDh1eHW4dfh1OHZ4drh2+HY4d3h3uHf4d0Ty3GDC8gcAAmgSsThGWiHYRzhGWCFv8H9C2Ec4Rlkh/yLYR0v2GxMwRjlGACLA8kQDmEdBII34BABOII34BQBJII34BgBNII34BwAAII34CAAK8RgCAakwRpBHT/KbAzBGRiEWIsDyQwOYR2AgLGDIRwVGAChP8AMAH9AI9eNiKEYDJpBHLGBA8kEAwPIAAHhEQPLPY2hgwPJFAyhGFCFP9LJymEdA8txQQPIJQShjwPJFAShGbmSIRxogA7C96PCPASADsL3o8I8CIAOwvejwjwC/T/KbA8DyQwNtIhhH";
+//   -> ffs-sdk id "PAYLOAD_ANIM_B64"
 
 // FUT-234 crash bisect. payload_anim (above) crashed the glasses: right lens blank ~15-20 s,
 // then a watchdog reboot of both. The three lv_anim addresses have since been VERIFIED GENUINE
@@ -140,10 +149,8 @@ const PAYLOAD_ANIM_B64 =
 //         payload survive?  (returns 0xB2)
 // AN1 crashes → not the animation at all. AN1 ok, AN2 crashes → calling our RAM blob from the
 // tick. Both ok → the per-frame lv_obj_set_pos redraw is the culprit.
-const PAYLOAD_AN1_B64 =
-  "RlhQMS3p8E+DsE/2v0gFRsDyRAgAIMBHACgA8OWATfaDYcDyQwGIRwAoAPDhgE/ywUNC9mkLRPbTSUv2GxdP8psGwPJDA8ghRiIERsDySAvA8kcJwPJEB8DyQwaYRyBGFCFtIrBHICDIR8izACEBcEFwgXDBcAFxQXGBccFxAXJBcoFywXIBc0FzgXPBcwF0QXSBdMF0AXVBdYF1wXUBdkF2gXbBdgF3QXeBd8F3HSEAIgZG2EcwRjAhAyLYRzBGMiH/IthHMEYxIW/wf0LYRzBGDCEKIthHIEYxRgAiuEdJ8hdKwPJJCiBG0EcAKFjQBkYgIMhH2LMHRgAgOHB4cLhw+HA4cXhxuHH4cThyeHK4cvhyOHN4c7hz+HM4dHh0uHT4dDh1eHW4dfh1OHZ4drh2+HY4d3h3uHf4d0Ty3GDC8gcAAmgSsThGWiHYRzhGWCFv8H9C2Ec4Rlkh/yLYR0v2GxMwRjlGACLA8kQDmEdBII34BABOII34BQAxII34BgAAII34BwAK8RgCAakwRpBHT/KbAzBGRiEWIsDyQwOYR2AgLGDIRwVGAChP8AMAF9AI9eNiKEYDJpBHLGBA8i8AwPIAAHhEaGAI9SFjKEYUIU/0snKYR0Dy3FAoY7EgbmQDsL3o8I8BIAOwvejwjwIgA7C96PCPcEc=";
-const PAYLOAD_AN2_B64 =
-  "RlhQMS3p8E+DsE/2v0gFRsDyRAgAIMBHACgA8O2ATfaDYcDyQwGIRwAoAPDpgE/ywUNC9mkLRPbTSUv2GxdP8psGwPJDA8ghRiIERsDySAvA8kcJwPJEB8DyQwaYRyBGFCFtIrBHICDIR8izACEBcEFwgXDBcAFxQXGBccFxAXJBcoFywXIBc0FzgXPBcwF0QXSBdMF0AXVBdYF1wXUBdkF2gXbBdgF3QXeBd8F3HSEAIgZG2EcwRjAhAyLYRzBGMiH/IthHMEYxIW/wf0LYRzBGDCEKIthHIEYxRgAiuEdJ8hdKwPJJCiBG0EcAKFjQBkYgIMhH2LMHRgAgOHB4cLhw+HA4cXhxuHH4cThyeHK4cvhyOHN4c7hz+HM4dHh0uHT4dDh1eHW4dfh1OHZ4drh2+HY4d3h3uHf4d0Ty3GDC8gcAAmgSsThGWiHYRzhGWCFv8H9C2Ec4Rlkh/yLYR0v2GxMwRjlGACLA8kQDmEdBII34BABOII34BQAyII34BgAAII34BwAK8RgCAakwRpBHT/KbAzBGRiEWIsDyQwOYR2AgLGDIRwVGAChP8AMAH9AI9eNiKEYDJpBHLGBA8j8AwPIAAHhEQPLPY2hgwPJFAyhGFCFP9LJymEdA8txQQPIJQShjwPJFAShGbmSIR7IgA7C96PCPASADsL3o8I8CIAOwvejwj3BH";
+//   -> ffs-sdk id "PAYLOAD_AN1_B64"
+//   -> ffs-sdk id "PAYLOAD_AN2_B64"
 
 // FUT-232 — THE GENERIC WIDGET DOOR. Constructs lv_arc, a widget Even's own firmware
 // NEVER creates ("orphan" in g2fw.h), via lv_obj_class_create_obj + lv_obj_class_init_obj.
@@ -154,8 +161,7 @@ const PAYLOAD_AN2_B64 =
 //   0xC7 = arc constructed AND class verified   0xE1 = create returned NULL
 //   0xE2 = created but class_p mismatch (our class table is wrong)   0xE0 = no layer_top
 // Source: g2flash/payloads/payload_widget.c
-const PAYLOAD_WIDGET_B64 =
-  "RlhQMfC1gbBP9r9BBkbA8kQBACCIRwAoctBF8gAUwPJ1BEz2mXcBRsDyRAcgRrhHACho0Af1rHEFRohHT/LBQ8DyQwMoRowhjCI1YJhHT/KbA8DyQwMoRtohSiKYR0T200HA8kcBICCIRwAoQdAAIUL2aQcBcEFwgXDBcAFxQXGBccFxAXJBcoFywXIBc0FzgXPBcwF0QXSBdMF0AXVBdYF1wXUBdkF2gXbBdgF3QXeBd8F3wPJIBx0hACIGRrhHMEYoIQMiuEcwRiQh/yK4RzBGIyFv8H9CuEcwRgwhRiK4R0v2GxPA8kQDKEYxRgAimEcpaOIgoUIIv8cgAbDwveAgAbDwveEgAbDwvQ==";
+//   -> ffs-sdk id "PAYLOAD_WIDGET_B64"
 
 // FUT-232 sweep — ALL 22 ORPHAN widget classes in one push. Each is created via the
 // generic door, its obj->class_p verified, then immediately DELETED (so nothing is ever
@@ -165,81 +171,62 @@ const PAYLOAD_WIDGET_B64 =
 //   7=spinner 8=spinbox 9=table 10=textarea 11=chart 12=menu 13=menu_page 14=menu_cont
 //   15=menu_section 16=tabview 17=win 18=keyboard 19=calendar 20=cal_hdr_arrow 21=cal_hdr_drop
 // A visible arc is left behind. Source: g2flash/payloads/payload_widgets_all.c
-const PAYLOAD_WIDGETS_ALL_B64 =
-  "RlhQMS3p8E+BsE/2v0GBRsDyRAEAIIhHACgA8ESCRfIAFYJGwPJ1BUz2mXjA8kQIKEZRRsBHaLEI9axxBEaIRyZoCPUCYSBGiEeuQgLRT/ABCwHgT/AAC0by0FTA8nUEIEZRRsBHoLEI9axxBEaIRyZoCPUCYSBGiEdG8tBQRvLQVMDydQDA8nUEhkIIvwvxAguQNCBGUUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwvxBAsF9TR0IEZRRsBHYLEI9axxBkaIRzdoCPUCYTBGiEenQgi/C/EIC0byLBXA8nUFBfG0BjBGUUbAR3ixCPWscQdGiEdMRtf4AJAI9QJhOEaIR7FFoUYIvwvxEAsF8dgGMEZRRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/EgCwX1kGYwRlFGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L8UALRvLQUMDydQAA8UgGMEZRRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/GAC0by0FDA8nUAAPEkBjBGUUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwv1gHtG8tBQwPJ1AADxtAYwRlFGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L9QB7RvLQUMDydQAA9ZB2MEZRRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/WAa0XyABDA8nUAAPUrdjBGUUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwv1AGsF9cZ2MEZRRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/WAWwX12HYwRlFGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L9QBbBfXqdjBGUUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwv1gEsF9fx2MEZRRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/UAS0by0FDA8nUAAPHYBjBGUUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwv1gDtG8tBQwPJ1AAD1xnYwRlFGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L9QA7KEZRRsBHYLEI9axxBkaIRzRoCPUCYTBGiEesQgi/C/WAK0XyABXA8nUFBfUHdCBGUUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwv1ACsF9RB0IEZRRsBHYLEI9axxBkaIRzdoCPUCYTBGiEenQgi/C/WAGwX1InQgRlFGwEdgsQj1rHEGRohHN2gI9QJhMEaIR6dCCL8L9QAbKEZRRsBHAChf0Aj1rHEERohHT/LBQ8DyQwMgRngheCLJ+ABAmEdP8psDwPJDAyBG5CFUIphHRPbTQcDyRwEgIIhHAChB0AAhQvZpBgFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXfA8kgGHSEAIgVGsEcoRighAyKwRyhGJCH/IrBHKEYjIW/wf0KwRyhGDCE8IrBHS/YbE8DyRAMgRilGACKYRwvxtEABsL3o8I9P8GBAAbC96PCP";
+//   -> ffs-sdk id "PAYLOAD_WIDGETS_ALL_B64"
 
 // FUT-232 bisect ladder — the full 22-widget sweep HARDFAULTED (no ret at all), so a
 // prefix ladder finds the culprit. Each returns the 0x5A|mask for the first N widgets,
 // so a passing rung is not just a bisect step, it PROVES those N widgets.
-const PAYLOAD_WA12_B64 =
-  "RlhQMS3p8E+BsE/2v0EERsDyRAEAIIhHACgA8GWBRfIAGYJGwPJ1CUz2mXjA8kQISEZRRgCUwEdosQj1rHEERohHJmgI9QJhIEaIR05FAtFP8AELAeBP8AALRvIEJcDydQUF9XN3OEZRRsBHYLEI9axxBkaIRzRoCPUCYTBGiEe8Qgi/C/ECC0byGGDA8nUAAPFIBjBGUUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwvxBAsJ9TR2MEZRRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/EICwn1h1YwRlFGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L8RALKEZRRsBHYLEI9axxBkaIRzRoCPUCYTBGiEesQgi/C/EgCwX1anYwRlFGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L8UALRvIYZ8DydQc4RlFGwEdgsQj1rHEGRohHNGgI9QJhMEaIR7xCCL8L8YALBfV8dCBGUUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwv1gHtG8hhlwPJ1BQXxbAQgRlFGwEdgsQj1rHEGRohHN2gI9QJhMEaIR6dCCL8L9QB7BfHYBCBGUUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwv1gGsJ9St0IEZRRsBHYLEI9axxBkaIRzdoCPUCYTBGiEenQgi/C/UAa0hGUUbARwAoX9AI9axxBEaIRwCYT/LBQwRgwPJDAyBGeCF4IphHT/KbA8DyQwMgRuQhVCKYR0T200HA8kcBICCIRwAoQdAAIUL2aQYBcEFwgXDBcAFxQXGBccFxAXJBcoFywXIBc0FzgXPBcwF0QXSBdMF0AXVBdYF1wXUBdkF2gXbBdgF3QXeBd8F3wPJIBh0hACIFRrBHKEYoIQMisEcoRiQh/yKwRyhGIyFv8H9CsEcoRgwhPCKwR0v2GxPA8kQDIEYpRgAimEcL8bRAAbC96PCPT/BgQAGwvejwjw==";
+//   -> ffs-sdk id "PAYLOAD_WA12_B64"
 
-const PAYLOAD_WA16_B64 =
-  "RlhQMS3p8E+BsE/2v0EERsDyRAEAIIhHACgA8LiBRfIAGgVGwPJ1Ckz2mXjA8kQIUEYpRgCUwEdosQj1rHEERohHJmgI9QJhIEaIR1ZFAtFP8AEJAeBP8AAJRvIEK8DydQsL9XN0IEYpRsBHYLEI9axxBkaIRzdoCPUCYTBGiEenQgi/CfECCUbyGGDA8nUAAPFIBjBGKUbAR2CxCPWscQRGiEcnaAj1AmEgRohHt0IIvwnxBAkK9TR2MEYpRsBHYLEI9axxBEaIRydoCPUCYSBGiEe3Qgi/CfEICQr1h1YwRilGwEdgsQj1rHEERohHJ2gI9QJhIEaIR7dCCL8J8RAJWEYpRsBHYLEI9axxBEaIRyZoCPUCYSBGiEdeRQi/CfEgCQv1anYwRilGwEdgsQj1rHEERohHJ2gI9QJhIEaIR7dCCL8J8UAJRvIYYMDydQApRsBHgLEI9axxBEaIRyZoCPUCYSBGiEdG8hhgwPJ1AIZCCL8J8YAJC/V8djBGKUbAR2CxCPWscQRGiEcnaAj1AmEgRohHt0IIvwn1gHlG8hhgwPJ1AADxbAYwRilGwEdgsQj1rHEERohHJ2gI9QJhIEaIR7dCCL8J9QB5RvIYYMDydQAA8dgEIEYpRsBHYLEI9axxBkaIRzdoCPUCYTBGiEenQgi/CfWAaQr1K3QgRilGwEdgsQj1rHEGRohHN2gI9QJhMEaIR6dCCL8J9QBpC/G0BCBGKUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwn1gFkL8dgEIEYpRsBHYLEI9axxBkaIRzdoCPUCYTBGiEenQgi/CfUAWQvx/AQgRilGwEdgsQj1rHEGRohHN2gI9QJhMEaIR6dCCL8J9YBJC/WQdCBGKUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwn1AElQRilGwEcAKF/QCPWscQRGiEcAmE/ywUMEYMDyQwMgRngheCKYR0/ymwPA8kMDIEbkIVQimEdE9tNBwPJHASAgiEcAKEHQACFC9mkGAXBBcIFwwXABcUFxgXHBcQFyQXKBcsFyAXNBc4FzwXMBdEF0gXTBdAF1QXWBdcF1AXZBdoF2wXYBd0F3gXfBd8DySAYdIQAiBUawRyhGKCEDIrBHKEYkIf8isEcoRiMhb/B/QrBHKEYMITwisEdL9hsTwPJEAyBGKUYAIphHCfG0QAGwvejwj0/wYEABsL3o8I8=";
+//   -> ffs-sdk id "PAYLOAD_WA16_B64"
 
-const PAYLOAD_WA18_B64 =
-  "RlhQMS3p8E+BsE/2v0EERsDyRAEAIIhHACgA8OCBRfIAGgVGwPJ1Ckz2mXjA8kQIUEYpRgCUwEdosQj1rHEERohHJmgI9QJhIEaIR1ZFAtFP8AELAeBP8AALRvIEKcDydQkJ9XN3OEYpRsBHYLEI9axxBkaIRzRoCPUCYTBGiEe8Qgi/C/ECC0byGGDA8nUAAPFIBjBGKUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwvxBAsK9TR2MEYpRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/EICwr1h1YwRilGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L8RALSEYpRsBHYLEI9axxBkaIRzRoCPUCYTBGiEdMRQi/C/EgCwn1anYwRilGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L8UALRvIYZ8DydQc4RilGwEdgsQj1rHEGRohHNGgI9QJhMEaIR7xCCL8L8YALCfV8djBGKUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwv1gHtG8hhgwPJ1AADxbAYwRilGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L9QB7RvIYYMDydQAA8dgGMEYpRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/WAawr1K3YwRilGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L9QBrCfG0BjBGKUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwv1gFsJ8dgGMEYpRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/UAWwnx/AYwRilGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L9YBLCfWQdCBGKUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwv1AEvRRkbyGGrA8nUKCvGQBCBGKUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwv1gDsK9aJ0IEYpRsBHYLEI9axxBkaIRzdoCPUCYTBGiEenQgi/C/UAO0hGKUbARwAoX9AI9axxBEaIRwCYT/LBQwRgwPJDAyBGeCF4IphHT/KbA8DyQwMgRuQhVCKYR0T200HA8kcBICCIRwAoQdAAIUL2aQYBcEFwgXDBcAFxQXGBccFxAXJBcoFywXIBc0FzgXPBcwF0QXSBdMF0AXVBdYF1wXUBdkF2gXbBdgF3QXeBd8F3wPJIBh0hACIFRrBHKEYoIQMisEcoRiQh/yKwRyhGIyFv8H9CsEcoRgwhPCKwR0v2GxPA8kQDIEYpRgAimEcL8bRAAbC96PCPT/BgQAGwvejwjw==";
+//   -> ffs-sdk id "PAYLOAD_WA18_B64"
 
-const PAYLOAD_WA20_B64 =
-  "RlhQMS3p8E+BsE/2v0GBRsDyRAEAIIhHACgA8B6CRfIAFYJGwPJ1BUz2mXjA8kQIKEZRRsBHaLEI9axxBEaIRyZoCPUCYSBGiEeuQgLRT/ABCwHgT/AAC0by0FTA8nUEIEZRRsBHoLEI9axxBEaIRyZoCPUCYSBGiEdG8tBQRvLQVMDydQDA8nUEhkIIvwvxAguQNCBGUUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwvxBAsF9TR0IEZRRsBHYLEI9axxBkaIRzdoCPUCYTBGiEenQgi/C/EIC0byLBXA8nUFBfG0BjBGUUbAR3ixCPWscQdGiEdMRtf4AJAI9QJhOEaIR7FFoUYIvwvxEAsF8dgGMEZRRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/EgCwX1kGYwRlFGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L8UALRvLQUMDydQAA8UgGMEZRRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/GAC0by0FDA8nUAAPEkBjBGUUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwv1gHtG8tBQwPJ1AADxtAYwRlFGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L9QB7RvLQUMDydQAA9ZB2MEZRRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/WAa0XyABDA8nUAAPUrdjBGUUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwv1AGsF9cZ2MEZRRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/WAWwX12HYwRlFGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L9QBbBfXqdjBGUUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwv1gEsF9fx2MEZRRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/UAS0by0FDA8nUAAPHYBjBGUUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwv1gDtG8tBQwPJ1AAD1xnYwRlFGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L9QA7KEZRRsBHYLEI9axxBkaIRzRoCPUCYTBGiEesQgi/C/WAK0XyABXA8nUFBfUHdCBGUUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwv1ACsoRlFGwEcAKF/QCPWscQRGiEdP8sFDwPJDAyBGeCF4Isn4AECYR0/ymwPA8kMDIEbkIVQimEdE9tNBwPJHASAgiEcAKEHQACFC9mkGAXBBcIFwwXABcUFxgXHBcQFyQXKBcsFyAXNBc4FzwXMBdEF0gXTBdAF1QXWBdcF1AXZBdoF2wXYBd0F3gXfBd8DySAYdIQAiBUawRyhGKCEDIrBHKEYkIf8isEcoRiMhb/B/QrBHKEYMITwisEdL9hsTwPJEAyBGKUYAIphHC/G0QAGwvejwj0/wYEABsL3o8I8=";
+//   -> ffs-sdk id "PAYLOAD_WA20_B64"
 
 // FUT-232 menu bisect — W12 returned 0x5A000FFF (bits 0-11 ALL set: 12 widgets proven,
 // control included) and W16 crashed, so the fault is in bits 12-15, the menu family.
 // These rungs isolate which one, and MND separates constructor vs destructor.
-const PAYLOAD_WA_13_B64 =
-  "RlhQMS3p8E+BsE/2v0GBRsDyRAEAIIhHACgA8JGBRfIAGgVGwPJ1Ckz2mXjA8kQIUEYpRsBHaLEI9axxBEaIRyZoCPUCYSBGiEdWRQLRT/ABCwHgT/AAC0byBCDA8nUAAPVzdCBGKUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwvxAgtG8hhgwPJ1AADxSAYwRilGwEd4sQj1rHEHRohHTEbX+ACQCPUCYThGiEexRaFGCL8L8QQLCvU0djBGKUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwvxCAsK9YdWMEYpRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/EQC0byBCbA8nUGMEYpRsBHgLEI9axxBkaIRzRoCPUCYTBGRvIEJsDydQaIR7RCCL8L8SALBvVqdjBGKUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwvxQAtG8hhgwPJ1AClGwEeAsQj1rHEGRohHNGgI9QJhMEaIR0byGGDA8nUAhEIIvwvxgAtG8gQgwPJ1AAD1fHYwRilGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L9YB7RvIYYMDydQAA8WwGMEYpRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/UAe0byGGDA8nUAAPHYBCBGKUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwv1gGsK9St0IEYpRsBHYLEI9axxBkaIRzdoCPUCYTBGiEenQgi/C/UAa0byBCDA8nUAAPG0BCBGKUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwv1gFtQRilGwEcAKF/QCPWscQRGiEdP8sFDwPJDAyBGeCF4Isn4AECYR0/ymwPA8kMDIEbkIVQimEdE9tNBwPJHASAgiEcAKEHQACFC9mkGAXBBcIFwwXABcUFxgXHBcQFyQXKBcsFyAXNBc4FzwXMBdEF0gXTBdAF1QXWBdcF1AXZBdoF2wXYBd0F3gXfBd8DySAYdIQAiBUawRyhGKCEDIrBHKEYkIf8isEcoRiMhb/B/QrBHKEYMITwisEdL9hsTwPJEAyBGKUYAIphHC/G0QAGwvejwj0/wYEABsL3o8I8=";
+//   -> ffs-sdk id "PAYLOAD_WA_13_B64"
 
-const PAYLOAD_WA_14_B64 =
-  "RlhQMS3p8E+BsE/2v0GBRsDyRAEAIIhHACgA8KiBRfIAGgVGwPJ1Ckz2mXjA8kQIUEYpRsBHaLEI9axxBEaIRyZoCPUCYSBGiEdWRQLRT/ABCwHgT/AAC0byBCDA8nUAAPVzdCBGKUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwvxAgtG8hhgwPJ1AADxSAYwRilGwEd4sQj1rHEHRohHTEbX+ACQCPUCYThGiEexRaFGCL8L8QQLCvU0djBGKUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwvxCAsK9YdWMEYpRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/EQC0byBCbA8nUGMEYpRsBHgLEI9axxBkaIRzRoCPUCYTBGRvIEJsDydQaIR7RCCL8L8SALBvVqdjBGKUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwvxQAtG8hhgwPJ1AClGwEeAsQj1rHEGRohHNGgI9QJhMEaIR0byGGDA8nUAhEIIvwvxgAtG8gQgwPJ1AAD1fHYwRilGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L9YB7RvIYYMDydQAA8WwGMEYpRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/UAe0byGGDA8nUAAPHYBCBGKUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwv1gGsK9St0IEYpRsBHYLEI9axxBkaIRzdoCPUCYTBGiEenQgi/C/UAa0byBCbA8nUGBvG0BCBGKUbAR4CxCPWscQZGiEc3aAj1AmEwRkbyBCbA8nUGiEenQgi/C/WAWwbx2AQgRilGwEdgsQj1rHEGRohHN2gI9QJhMEaIR6dCCL8L9QBbUEYpRsBHAChf0Aj1rHEERohHT/LBQ8DyQwMgRngheCLJ+ABAmEdP8psDwPJDAyBG5CFUIphHRPbTQcDyRwEgIIhHAChB0AAhQvZpBgFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXfA8kgGHSEAIgVGsEcoRighAyKwRyhGJCH/IrBHKEYjIW/wf0KwRyhGDCE8IrBHS/YbE8DyRAMgRilGACKYRwvxtEABsL3o8I9P8GBAAbC96PCP";
+//   -> ffs-sdk id "PAYLOAD_WA_14_B64"
 
-const PAYLOAD_WA_15_B64 =
-  "RlhQMS3p8E+BsE/2v0GBRsDyRAEAIIhHACgA8L+BRfIAGgVGwPJ1Ckz2mXjA8kQIUEYpRsBHaLEI9axxBEaIRyZoCPUCYSBGiEdWRQLRT/ABCwHgT/AAC0byBCDA8nUAAPVzdCBGKUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwvxAgtG8hhgwPJ1AADxSAYwRilGwEd4sQj1rHEHRohHTEbX+ACQCPUCYThGiEexRaFGCL8L8QQLCvU0djBGKUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwvxCAsK9YdWMEYpRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/EQC0byBCbA8nUGMEYpRsBHgLEI9axxBkaIRzRoCPUCYTBGRvIEJsDydQaIR7RCCL8L8SALBvVqdjBGKUbAR2CxCPWscQdGiEc8aAj1AmE4RohHtEIIvwvxQAtG8hhgwPJ1AClGwEeAsQj1rHEGRohHNGgI9QJhMEaIR0byGGDA8nUAhEIIvwvxgAtG8gQgwPJ1AAD1fHYwRilGwEdgsQj1rHEHRohHPGgI9QJhOEaIR7RCCL8L9YB7RvIYYMDydQAA8WwGMEYpRsBHYLEI9axxB0aIRzxoCPUCYThGiEe0Qgi/C/UAe0byGGDA8nUAAPHYBCBGKUbAR2CxCPWscQZGiEc3aAj1AmEwRohHp0IIvwv1gGsK9St0IEYpRsBHYLEI9axxBkaIRzdoCPUCYTBGiEenQgi/C/UAa0byBCbA8nUGBvG0BCBGKUbAR4CxCPWscQZGiEc3aAj1AmEwRkbyBCbA8nUGiEenQgi/C/WAWwbx2AQgRilGwEeAsQj1rHEGRohHN2gI9QJhMEZG8gQmwPJ1BohHp0IIvwv1AFsG8fwEIEYpRsBHYLEI9axxBkaIRzdoCPUCYTBGiEenQgi/C/WAS1BGKUbARwAoX9AI9axxBEaIR0/ywUPA8kMDIEZ4IXgiyfgAQJhHT/KbA8DyQwMgRuQhVCKYR0T200HA8kcBICCIRwAoQdAAIUL2aQYBcEFwgXDBcAFxQXGBccFxAXJBcoFywXIBc0FzgXPBcwF0QXSBdMF0AXVBdYF1wXUBdkF2gXbBdgF3QXeBd8F3wPJIBh0hACIFRrBHKEYoIQMisEcoRiQh/yKwRyhGIyFv8H9CsEcoRgwhPCKwR0v2GxPA8kQDIEYpRgAimEcL8bRAAbC96PCPT/BgQAGwvejwjw==";
+//   -> ffs-sdk id "PAYLOAD_WA_15_B64"
 
-const PAYLOAD_WA_MENUND_B64 =
-  "RlhQMS3p8EFP9r9BgEbA8kQBACCIRwAoAPCGgEbyuCQFRsDydQRM9pl2wPJEBiBGKUawR1ixBvWscQdGiEc4aKBCBNFB8gAExfYAJAHgT/C0REXyABDA8nUAKUawRwAoX9AG9axxBUaIR0/ywUPA8kMDKEZ4IXgiyPgAUJhHT/KbA8DyQwMoRuQhVCKYR0T200HA8kcBICCIRwAoQdAAIUL2aQcBcEFwgXDBcAFxQXGBccFxAXJBcoFywXIBc0FzgXPBcwF0QXSBdMF0AXVBdYF1wXUBdkF2gXbBdgF3QXeBd8F3wPJIBx0hACIGRrhHMEYoIQMiuEcwRiQh/yK4RzBGIyFv8H9CuEcwRgwhPCK4R0v2GxPA8kQDKEYxRgAimEcgRr3o8IFP8GBAvejwgQ==";
+//   -> ffs-sdk id "PAYLOAD_WA_MENUND_B64"
 
 // FUT-232 upper range — M13 returned 0x5A001FFF (13 widgets incl. lv_menu) and W16
 // crashed, so the fault is in bits 13-15. -DFROM lets us probe bits 16-21 WITHOUT
 // touching the menu family, so a bad index in the middle can't mask everything above.
-const PAYLOAD_WA_U16_B64 =
-  "RlhQMS3p8E+BsE/2v0GARsDyRAEAIIhHACgA8OqARvKoZgVGwPJ1Bkz2mXrA8kQKMEYpRtBHaLEK9axxB0aIRzxoCvUCYThGiEe0QgLRT/SAOQHgT/AACbQ2MEYpRtBHYLEK9axxB0aIRzxoCvUCYThGiEe0Qgi/CfUAOUbyLBbA8nUGMEYpRtBHYLEK9axxB0aIRzxoCvUCYThGiEe0Qgi/CfWAKUXyHDvA8nULWEYpRtBHYLEK9axxB0aIRzxoCvUCYThGiEdcRQi/CfUAKQvxJAc4RilG0EdgsQr1rHEERohHJmgK9QJhIEaIR75CCL8J9YAZC/FsBzhGKUbQR2CxCvWscQRGiEcmaAr1AmEgRohHvkIIvwn1ABmr9QdwKUbQRwAoX9AK9axxBUaIR0/ywUPA8kMDKEZ4IXgiyPgAUJhHT/KbA8DyQwMoRuQhVCKYR0T200HA8kcBICCIRwAoQdAAIUL2aQYBcEFwgXDBcAFxQXGBccFxAXJBcoFywXIBc0FzgXPBcwF0QXSBdMF0AXVBdYF1wXUBdkF2gXbBdgF3QXeBd8F3wPJIBh0hACIERrBHIEYoIQMisEcgRiQh/yKwRyBGIyFv8H9CsEcgRgwhPCKwR0v2GxPA8kQDKEYhRgAimEcJ8bRAAbC96PCPT/BgQAGwvejwjw==";
+//   -> ffs-sdk id "PAYLOAD_WA_U16_B64"
 
-const PAYLOAD_WA_U16B_B64 =
-  "RlhQMS3p8E+BsE/2v0GBRsDyRAEAIIhHACgA8J2ARvKoagRGwPJ1Ckz2mXvA8kQLUEYhRthHaLEL9axxB0aIRz5oC/UCYThGiEdWRQLRT/SAOAHgT/AACArxtAYwRiFG2EdgsQv1rHEHRohHPWgL9QJhOEaIR7VCCL8I9QA4RfIAEMDydQAhRthHAChf0Av1rHEERohHT/LBQ8DyQwMgRngheCLJ+ABAmEdP8psDwPJDAyBG5CFUIphHRPbTQcDyRwEgIIhHAChB0AAhQvZpBgFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXfA8kgGHSEAIgVGsEcoRighAyKwRyhGJCH/IrBHKEYjIW/wf0KwRyhGDCE8IrBHS/YbE8DyRAMgRilGACKYRwjxtEABsL3o8I9P8GBAAbC96PCP";
+//   -> ffs-sdk id "PAYLOAD_WA_U16B_B64"
 
 // FUT-232 narrow range probes. Confirmed: bit 13 (lv_menu_page) crashes — M13 (bits
 // 0-12) passed and M14 (bits 0-13) did not. And U16 (bits 16-21, which skips the menu
 // family entirely) ALSO crashed, so there is a SECOND independent crasher up there.
 // These probes isolate each remaining suspect without any known-bad index in the way.
-const PAYLOAD_WA_P14_B64 =
-  "RlhQMS3p8E+BsE/2v0GARsDyRAEAIIhHACgA8J2ARvIAOgRGwPJ1Ckz2mXbA8kQGUEYhRrBHaLEG9axxB0aIRz1oBvUCYThGiEdVRQLRT/SASQHgT/AACUbyJDvA8nULWEYhRrBHYLEG9axxBUaIRy9oBvUCYShGiEdfRQi/CfUASar1kFAhRrBHAChf0Ab1rHEERohHT/LBQ8DyQwMgRngheCLI+ABAmEdP8psDwPJDAyBG5CFUIphHRPbTQcDyRwEgIIhHAChB0AAhQvZpBgFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXfA8kgGHSEAIgVGsEcoRighAyKwRyhGJCH/IrBHKEYjIW/wf0KwRyhGDCE8IrBHS/YbE8DyRAMgRilGACKYRwnxtEABsL3o8I9P8GBAAbC96PCP";
+//   -> ffs-sdk id "PAYLOAD_WA_P14_B64"
 
-const PAYLOAD_WA_P16_B64 =
-  "RlhQMS3p8EOBsE/2v0GARsDyRAEAIIhHACgA8IeARvKoaQVGwPJ1CUz2mXbA8kQGSEYpRrBHcLEG9axxB0aIRzxoBvUCYThGiEdMRQPRACTF9gEkAeBP8LRERfIAEMDydQApRrBHAChi0Ab1rHEFRohHT/LBQ8DyQwMoRngheCLI+ABQmEdP8psDwPJDAyhG5CFUIphHRPbTQcDyRwEgIIhHAChE0AAhQvZpBwFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXfA8kgHHSEAIgZGuEcwRighAyK4RzBGJCH/IrhHMEYjIW/wf0K4RzBGDCE8IrhHS/YbE8DyRAMoRjFGACKYRwHgT/BgRCBGAbC96PCD";
+//   -> ffs-sdk id "PAYLOAD_WA_P16_B64"
 
-const PAYLOAD_WA_P18_B64 =
-  "RlhQMS3p8EOBsE/2v0GARsDyRAEAIIhHACgA8IeARvIsGQVGwPJ1CUz2mXbA8kQGSEYpRrBHcLEG9axxB0aIRzxoBvUCYThGiEdMRQPRACTF9gQkAeBP8LRERfIAEMDydQApRrBHAChi0Ab1rHEFRohHT/LBQ8DyQwMoRngheCLI+ABQmEdP8psDwPJDAyhG5CFUIphHRPbTQcDyRwEgIIhHAChE0AAhQvZpBwFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXfA8kgHHSEAIgZGuEcwRighAyK4RzBGJCH/IrhHMEYjIW/wf0K4RzBGDCE8IrhHS/YbE8DyRAMoRjFGACKYRwHgT/BgRCBGAbC96PCD";
+//   -> ffs-sdk id "PAYLOAD_WA_P18_B64"
 
-const PAYLOAD_WA_P19_B64 =
-  "RlhQMS3p8E+BsE/2v0GARsDyRAEAIIhHACgA8K6ARfIcOgVGwPJ1Ckz2mXvA8kQLUEYpRthHaLEL9axxB0aIRzxoC/UCYThGiEdURQLRT/QAKQHgT/AACQrxJAc4RilG2EdgsQv1rHEERohHJmgL9QJhIEaIR75CCL8J9YAZCvFsBzhGKUbYR2CxC/WscQRGiEcmaAv1AmEgRohHvkIIvwn1ABmq9QdwKUbYRwAoX9AL9axxBUaIR0/ywUPA8kMDKEZ4IXgiyPgAUJhHT/KbA8DyQwMoRuQhVCKYR0T200HA8kcBICCIRwAoQdAAIUL2aQYBcEFwgXDBcAFxQXGBccFxAXJBcoFywXIBc0FzgXPBcwF0QXSBdMF0AXVBdYF1wXUBdkF2gXbBdgF3QXeBd8F3wPJIBh0hACIERrBHIEYoIQMisEcgRiQh/yKwRyBGIyFv8H9CsEcgRgwhPCKwR0v2GxPA8kQDKEYhRgAimEcJ8bRAAbC96PCPT/BgQAGwvejwjw==";
+//   -> ffs-sdk id "PAYLOAD_WA_P19_B64"
 
 // FUT-232 endgame. 17 of 22 proven: bits 0-12 (M13), 14-15 (R14 0xC000), 16 (R16),
 // 18 (R18). Remaining: 13 menu_page (confirmed crasher), 17 win (never tested alone),
 // and 19-21 calendar (R19 crashed, so >=1 of the three is bad). Single-bit probes.
-const PAYLOAD_WA_S17_B64 =
-  "RlhQMS3p8EOBsE/2v0GARsDyRAEAIIhHACgA8IeARvJceQVGwPJ1CUz2mXbA8kQGSEYpRrBHcLEG9axxB0aIRzxoBvUCYThGiEdMRQPRACTF9gIkAeBP8LRERfIAEMDydQApRrBHAChi0Ab1rHEFRohHT/LBQ8DyQwMoRngheCLI+ABQmEdP8psDwPJDAyhG5CFUIphHRPbTQcDyRwEgIIhHAChE0AAhQvZpBwFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXfA8kgHHSEAIgZGuEcwRighAyK4RzBGJCH/IrhHMEYjIW/wf0K4RzBGDCE8IrhHS/YbE8DyRAMoRjFGACKYRwHgT/BgRCBGAbC96PCD";
+//   -> ffs-sdk id "PAYLOAD_WA_S17_B64"
 
-const PAYLOAD_WA_S19_B64 =
-  "RlhQMS3p8EOBsE/2v0GARsDyRAEAIIhHACgA8IWARfIcOQVGwPJ1CUz2mXbA8kQGSEYpRrBHcLEG9axxBEaIRydoBvUCYSBGiEdPRQPRACTF9ggkAeBP8LREqfUHcClGsEcAKGLQBvWscQVGiEdP8sFDwPJDAyhGeCF4Isj4AFCYR0/ymwPA8kMDKEbkIVQimEdE9tNBwPJHASAgiEcAKETQACFC9mkHAXBBcIFwwXABcUFxgXHBcQFyQXKBcsFyAXNBc4FzwXMBdEF0gXTBdAF1QXWBdcF1AXZBdoF2wXYBd0F3gXfBd8DySAcdIQAiBka4RzBGKCEDIrhHMEYkIf8iuEcwRiMhb/B/QrhHMEYMITwiuEdL9hsTwPJEAyhGMUYAIphHAeBP8GBEIEYBsL3o8IM=";
+//   -> ffs-sdk id "PAYLOAD_WA_S19_B64"
 
-const PAYLOAD_WA_S20_B64 =
-  "RlhQMS3p8EOBsE/2v0GARsDyRAEAIIhHACgA8IWARfJAOQVGwPJ1CUz2mXbA8kQGSEYpRrBHcLEG9axxBEaIRydoBvUCYSBGiEdPRQPRACTF9hAkAeBP8LREqfUQcClGsEcAKGLQBvWscQVGiEdP8sFDwPJDAyhGeCF4Isj4AFCYR0/ymwPA8kMDKEbkIVQimEdE9tNBwPJHASAgiEcAKETQACFC9mkHAXBBcIFwwXABcUFxgXHBcQFyQXKBcsFyAXNBc4FzwXMBdEF0gXTBdAF1QXWBdcF1AXZBdoF2wXYBd0F3gXfBd8DySAcdIQAiBka4RzBGKCEDIrhHMEYkIf8iuEcwRiMhb/B/QrhHMEYMITwiuEdL9hsTwPJEAyhGMUYAIphHAeBP8GBEIEYBsL3o8IM=";
+//   -> ffs-sdk id "PAYLOAD_WA_S20_B64"
 
-const PAYLOAD_WA_S21_B64 =
-  "RlhQMS3p8EOBsE/2v0GARsDyRAEAIIhHACgA8IWARfKIOQVGwPJ1CUz2mXbA8kQGSEYpRrBHcLEG9axxBEaIRydoBvUCYSBGiEdPRQPRACTF9iAkAeBP8LREqfUicClGsEcAKGLQBvWscQVGiEdP8sFDwPJDAyhGeCF4Isj4AFCYR0/ymwPA8kMDKEbkIVQimEdE9tNBwPJHASAgiEcAKETQACFC9mkHAXBBcIFwwXABcUFxgXHBcQFyQXKBcsFyAXNBc4FzwXMBdEF0gXTBdAF1QXWBdcF1AXZBdoF2wXYBd0F3gXfBd8DySAcdIQAiBka4RzBGKCEDIrhHMEYkIf8iuEcwRiMhb/B/QrhHMEYMITwiuEdL9hsTwPJEAyhGMUYAIphHAeBP8GBEIEYBsL3o8IM=";
+//   -> ffs-sdk id "PAYLOAD_WA_S21_B64"
 
-const PAYLOAD_WA_S13_B64 =
-  "RlhQMS3p8EOBsE/2v0GARsDyRAEAIIhHACgA8IiARvLcKQVGwPJ1CUz2mXbA8kQGSEYpRrBHeLEG9axxB0aIRzxoBvUCYThGiEdMRQTRQvIABMX2ACQB4E/wtERF8gAQwPJ1AClGsEcAKGLQBvWscQVGiEdP8sFDwPJDAyhGeCF4Isj4AFCYR0/ymwPA8kMDKEbkIVQimEdE9tNBwPJHASAgiEcAKETQACFC9mkHAXBBcIFwwXABcUFxgXHBcQFyQXKBcsFyAXNBc4FzwXMBdEF0gXTBdAF1QXWBdcF1AXZBdoF2wXYBd0F3gXfBd8DySAcdIQAiBka4RzBGKCEDIrhHMEYkIf8iuEcwRiMhb/B/QrhHMEYMITwiuEdL9hsTwPJEAyhGMUYAIphHAeBP8GBEIEYBsL3o8IM=";
+//   -> ffs-sdk id "PAYLOAD_WA_S13_B64"
+
 
 const WARRANTY_PHRASE = "my warranty is void";
 
@@ -1046,342 +1033,23 @@ export default function App() {
               guardedPush("FUT238 STYLE PROBE", "push_style_props", PAYLOAD_STYLE_PROPS_B64);
             }}
           />
-          <Row
-            badge="A"
-            tint={theme.tint.amber}
-            title="Push payload A"
-            subtitle="Draws a bordered box + label on the HUD. No reflash."
-            tag="no flash"
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("payload A", "push_a", PAYLOAD_A_B64);
-            }}
-          />
-          <Row
-            badge="B"
-            tint={theme.tint.green}
-            title="Push payload B"
-            subtitle="Same, different content — pushing B after A visibly replaces it."
-            tag="no flash"
-            divider
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("payload B", "push_b", PAYLOAD_B_B64);
-            }}
-          />
-          <Row
-            badge="S17"
-            tint={theme.tint.amber}
-            title="Single probe — S17"
-            subtitle="bit 17 ONLY: win — never tested alone, it was hidden inside U16"
-            tag="no flash"
-            trace="FUT-232"
-            divider
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("S17", "push_wa_s17", PAYLOAD_WA_S17_B64);
-            }}
-          />
-          <Row
-            badge="S19"
-            tint={theme.tint.amber}
-            title="Single probe — S19"
-            subtitle="bit 19 ONLY: calendar"
-            tag="no flash"
-            trace="FUT-232"
-            divider
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("S19", "push_wa_s19", PAYLOAD_WA_S19_B64);
-            }}
-          />
-          <Row
-            badge="S20"
-            tint={theme.tint.amber}
-            title="Single probe — S20"
-            subtitle="bit 20 ONLY: calendar_hdr_arrow"
-            tag="no flash"
-            trace="FUT-232"
-            divider
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("S20", "push_wa_s20", PAYLOAD_WA_S20_B64);
-            }}
-          />
-          <Row
-            badge="S21"
-            tint={theme.tint.amber}
-            title="Single probe — S21"
-            subtitle="bit 21 ONLY: calendar_hdr_drop"
-            tag="no flash"
-            trace="FUT-232"
-            divider
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("S21", "push_wa_s21", PAYLOAD_WA_S21_B64);
-            }}
-          />
-          <Row
-            badge="S13"
-            tint={theme.tint.amber}
-            title="Single probe — S13"
-            subtitle="bit 13 ONLY: menu_page — the confirmed crasher, isolated to double-check it"
-            tag="no flash"
-            trace="FUT-232"
-            divider
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("S13", "push_wa_s13", PAYLOAD_WA_S13_B64);
-            }}
-          />
-          <Row
-            badge="R14"
-            tint={theme.tint.green}
-            title="Range probe — R14"
-            subtitle="bits 14-15 only: menu_cont + menu_section (skips the bad menu_page)"
-            tag="no flash"
-            trace="FUT-232"
-            divider
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("R14", "push_wa_p14", PAYLOAD_WA_P14_B64);
-            }}
-          />
-          <Row
-            badge="R16"
-            tint={theme.tint.green}
-            title="Range probe — R16"
-            subtitle="bit 16 only: tabview"
-            tag="no flash"
-            trace="FUT-232"
-            divider
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("R16", "push_wa_p16", PAYLOAD_WA_P16_B64);
-            }}
-          />
-          <Row
-            badge="R18"
-            tint={theme.tint.green}
-            title="Range probe — R18"
-            subtitle="bit 18 only: keyboard"
-            tag="no flash"
-            trace="FUT-232"
-            divider
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("R18", "push_wa_p18", PAYLOAD_WA_P18_B64);
-            }}
-          />
-          <Row
-            badge="R19"
-            tint={theme.tint.green}
-            title="Range probe — R19"
-            subtitle="bits 19-21: calendar x3"
-            tag="no flash"
-            trace="FUT-232"
-            divider
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("R19", "push_wa_p19", PAYLOAD_WA_P19_B64);
-            }}
-          />
-          <Row
-            badge="U16"
-            tint={theme.tint.blue}
-            title="Upper range — U16"
-            subtitle="bits 16-21 ONLY: tabview, win, keyboard, calendar x3 — skips the menu family entirely"
-            tag="no flash"
-            trace="FUT-232"
-            divider
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("U16", "push_wa_u16", PAYLOAD_WA_U16_B64);
-            }}
-          />
-          <Row
-            badge="U16b"
-            tint={theme.tint.blue}
-            title="Upper range — U16b (bits 16-17)"
-            subtitle="bits 16-17 ONLY: tabview + win (the safer half of the upper group)"
-            tag="no flash"
-            trace="FUT-232"
-            divider
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("U16b", "push_wa_u16b", PAYLOAD_WA_U16B_B64);
-            }}
-          />
-          <Row
-            badge="M13"
-            tint={theme.tint.amber}
-            title="Menu bisect — M13"
-            subtitle="+ lv_menu (bit 12) — the first child-building constructor"
-            tag="no flash"
-            trace="FUT-232"
-            divider
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("M13", "push_wa_13", PAYLOAD_WA_13_B64);
-            }}
-          />
-          <Row
-            badge="M14"
-            tint={theme.tint.amber}
-            title="Menu bisect — M14"
-            subtitle="+ lv_menu_page (bit 13)"
-            tag="no flash"
-            trace="FUT-232"
-            divider
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("M14", "push_wa_14", PAYLOAD_WA_14_B64);
-            }}
-          />
-          <Row
-            badge="M15"
-            tint={theme.tint.amber}
-            title="Menu bisect — M15"
-            subtitle="+ lv_menu_cont (bit 14)"
-            tag="no flash"
-            trace="FUT-232"
-            divider
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("M15", "push_wa_15", PAYLOAD_WA_15_B64);
-            }}
-          />
-          <Row
-            badge="MND"
-            tint={theme.tint.amber}
-            title="Menu bisect — MND"
-            subtitle="lv_menu ONLY, and NOT deleted — separates a constructor fault from a destructor fault"
-            tag="no flash"
-            trace="FUT-232"
-            divider
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("MND", "push_wa_menund", PAYLOAD_WA_MENUND_B64);
-            }}
-          />
-          <Row
-            badge="W12"
-            tint={theme.tint.amber}
-            title="Sweep bisect \u2014 first 12 widgets"
-            subtitle="bits 0-11: arc slider switch checkbox led line scale spinner spinbox table textarea chart"
-            tag="no flash"
-            trace="FUT-232"
-            divider
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("sweep L12", "push_wa12", PAYLOAD_WA12_B64);
-            }}
-          />
-          <Row
-            badge="W16"
-            tint={theme.tint.amber}
-            title="Sweep bisect \u2014 first 16 widgets"
-            subtitle="+ menu menu_page menu_cont menu_section"
-            tag="no flash"
-            trace="FUT-232"
-            divider
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("sweep L16", "push_wa16", PAYLOAD_WA16_B64);
-            }}
-          />
-          <Row
-            badge="W18"
-            tint={theme.tint.amber}
-            title="Sweep bisect \u2014 first 18 widgets"
-            subtitle="+ tabview win"
-            tag="no flash"
-            trace="FUT-232"
-            divider
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("sweep L18", "push_wa18", PAYLOAD_WA18_B64);
-            }}
-          />
-          <Row
-            badge="W20"
-            tint={theme.tint.amber}
-            title="Sweep bisect \u2014 first 20 widgets"
-            subtitle="+ keyboard calendar"
-            tag="no flash"
-            trace="FUT-232"
-            divider
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("sweep L20", "push_wa20", PAYLOAD_WA20_B64);
-            }}
-          />
-          <Row
-            badge="W22"
-            tint={theme.tint.green}
-            title="Widget sweep \u2014 all 22 orphan classes (FUT-232)"
-            subtitle="Creates + verifies + deletes every widget Even never builds. ret=0x5A?????? is a bitmask; bit0 (arc) is the control."
-            tag="no flash"
-            trace="FUT-232"
-            divider
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("widget sweep", "push_widgets_all", PAYLOAD_WIDGETS_ALL_B64);
-            }}
-          />
-          <Row
-            badge="W"
-            tint={theme.tint.green}
-            title="Widget door \u2014 build an lv_arc (FUT-232)"
-            subtitle="Constructs a widget Even never builds. ret=0xC7 means it worked; 0xE2 means our class table is wrong."
-            tag="no flash"
-            trace="FUT-232"
-            divider
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("widget arc", "push_widget", PAYLOAD_WIDGET_B64);
-            }}
-          />
-          <Row
-            badge="AN1"
-            tint={theme.tint.blue}
-            title="Bisect 1 — box only, animation NOT started"
-            subtitle="Builds the anim struct but never starts it. Should just show a static box labelled AN1."
-            tag="no flash"
-            trace="FUT-234"
-            divider
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("AN1", "push_an1", PAYLOAD_AN1_B64);
-            }}
-          />
-          <Row
-            badge="AN2"
-            tint={theme.tint.blue}
-            title="Bisect 2 — animation runs, callback does nothing"
-            subtitle="Starts the real animation with a no-op callback. Box labelled AN2 should sit still and survive."
-            tag="no flash"
-            trace="FUT-234"
-            divider
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("AN2", "push_an2", PAYLOAD_AN2_B64);
-            }}
-          />
-          <Row
-            badge="AN"
-            tint={theme.danger}
-            title="Push animation — KNOWN CRASH, don't tap"
-            subtitle="The original FUT-234 payload. Crashed both lenses. Kept only for a controlled re-test."
-            tag="CRASHES"
-            tagTint={theme.danger}
-            trace="FUT-234"
-            divider
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("animation", "push_anim", PAYLOAD_ANIM_B64);
-            }}
-          />
+          {GENERATED_PAYLOADS.map((p) => (
+            <Row
+              key={p.id}
+              badge={p.badge}
+              tint={p.tint}
+              title={p.title}
+              subtitle={p.subtitle}
+              tag={p.tag}
+              tagTint={p.tagTint}
+              trace={p.trace}
+              divider={p.divider}
+              disabled={!bt.pairReady}
+              onPress={() => {
+                guardedPush(p.pushLabel, p.pushKey, p.b64);
+              }}
+            />
+          ))}
         </Group>
 
         <SectionLabel note={session || "starting…"}>Connection log</SectionLabel>
