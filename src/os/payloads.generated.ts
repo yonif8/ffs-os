@@ -43,6 +43,24 @@ export type GeneratedPayload = {
 
 export const GENERATED_PAYLOADS: GeneratedPayload[] = [
   {
+    id: "battery_demo",
+    legacyConst: "PAYLOAD_BATTERY_DEMO_B64",
+    source: "battery_demo.c",
+    defines: [],
+    b64:
+      "RlhQMS3p8E+HsAPgZAUAAGmfdpuv8gwCFmgDRkLyAQBO8g8BkEYwGs/2/3FY+AR/iEJN9ixAxfa6YMDw64BN9gJhxfbAYY9CAPDkgAOXAZNP9qFwz/b/cEjyIDNM8hlJeETO9rhTwPJteSDwAQoBLgLxCAsClhHRACJP8P8+ApgDncAHAPC+gArrAgBARcDwhYBYRYDwgoAAIIDgJvABDAAiT/D/PjbgAHhoQIPqUAHHBwi/QQiD6lEEhwdYv0wIBgdP6kB3SPYyBgnq53fA9ttmSL93QMYGQfJkBsH2t1ZIv3dAgAZC8sgAw/ZuMEi/R0CIBkTykBCH6pQex/LcYEi/juoADqAGAvECAki/juoDDpRFs9AK6wIAQEUE01hFAtIAJQHgAL8FeIXqDgWD6lUG6QcIv24Ig+pWAawHWL9xCC8HT+pFdEj2MgcJ6uR0wPbbZ0i/fEDvBkHyZAfB9rdXSL98QK8GQvLIB8P2bjdIv3xAtwaE6pEVRPKQF8fy3GdIv31AiQYA8QEASL9dQEBFidNYRYfSACCG5wB4gOoOAIPqUAHCBwi/QQiD6lEChwdYv0oIBgdP6kB3SPYyBgnq53fA9ttmSL93QMYGQfJkBsH2t1ZIv3dAgAZC8sgAw/ZuMEi/R0CIBofqkh5E8pAQx/LcYEi/juoADpAGSL+O6gMOjuoFAAEwTfYsQMX2umAC0Aewvejwj0/2v0EBnsDyRAEAIIhHAChz0ETy3GHC8gcBCWgDJQApTfaDYcDyQwEIvwEliEcAKGnQT/LBQ8DyQwNP9MhxgiIERjBgmEdP8psDwPJDAyBGWCFPIphHAPBc+DixS/YbEwFGwPJEAyBGACKYR0MgTSGN+BgAUCCN+BQQjfgWEEIhjfgZAFUgjfgQEEEhjfgaAAAgRSKN+BEQVCGN+BsAjfgVII34FwCN+BIQjfgTAAaqIEYQIRkjAPDk+AwhACgIvwQhDUQFqiBGNiE8IwDw2fgAKASqIEZP8FwBT/BaAxi/EDUA8M74ACgYvyA1RfC+QEDwQAAHsL3o8I8AIMX24HAHsL3o8I8F8b5AB7C96PCPAL9wtUT200HA8kcBICCIRwRGACgA8KuAACAgcGBwoHDgcCBxYHGgceBxIHJgcqBy4HIgc2BzoHPgcyB0YHSgdOB0IHVgdaB14HUgdmB2oHbgdiB3YHegd+B3RPLcYMLyBwBC9mkGBWjA8kgGIEYcIQAisEcgRh0hACKwRyBGKSEAIrBHIEYwIQEisEcgRjEhb/B/QrBHIEYyIf8isEcgRjghACKwRyBGOiEAIrBHIEY8IQAisEcgRj4hACKwRyBGDCEEIrBHIEYQIQIisEcgRhEhAiKwRyBGEiECIrBHIEYTIQIisEcgRhQhAiKwRyBGFSECIrBHHbEgRlohKkawRyBGWCFv8H9CsEcgRlkh/yKwRyBGWyEAIrBHIEZcIQIisEcgRkghAiKwRyBGTCFv8H9CsEcgRk0h/yKwRyBGUCEDIrBHIEZSIW/wf0KwRyBGUyH/IrBHIEZRIQAisEcgRkQh/yKwRyBGYiH/IrBHIEZwvS3p8E+BsEnyF0rA8kkKHUYXRotGBkbQRwAoU9AERgCV//c2/zixS/YbEwFGwPJEAyBGACKYR0XyJBlM9pl1T/KbCArxGAIgRjlGwPJ1CcDyRAXA8kMIkEcgRg4hWkbAR0hGMUaoR2izBfWscQZGiEcwaEhFItH/9wv/OLFL9hsTAUbA8kQDMEYAIphHT/LBQ8DyQwMwRvohEiKYRzBGeCFaRsBHR/I3UwCZwPJVAzBGACKYRwEgAbC96PCPBfUCYTBGiEcAIAGwvejwjw==",
+    framedBytes: 1384,
+    badge: "SDK",
+    tint: theme.tint.green,
+    title: "📊 BATTERY DEMO — 3 bars, one command",
+    subtitle: "Scaffolded + shipped via 'ffs-sdk ship'. CPU 25% / MEM 60% / BAT 90%. ret= tag 0x5F.",
+    tag: "app",
+    tagTint: theme.tint.green,
+    divider: true,
+    pushKey: "push_battery_demo",
+    pushLabel: "BATTERY_DEMO",
+  },
+  {
     id: "hello_app",
     legacyConst: "PAYLOAD_HELLO_APP_B64",
     source: "payload_hello_app.c",
