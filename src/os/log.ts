@@ -26,9 +26,14 @@ type ConnectionEvent = { health: string; rawState: string; note?: string; at?: n
 type ReclaimTrigger = string;
 
 const ENDPOINT = "wss://g2app.x36.site/glog/ingest";
-// Injected at build time from a private GitHub Actions secret (EXPO_PUBLIC_GLOG_TOKEN);
-// never hardcoded in this public repo. Empty = telemetry ships without a token (the
-// collector may reject it) — the logger degrades silently, it never breaks the app.
+// Injected at build time from a GitHub Actions secret (EXPO_PUBLIC_GLOG_TOKEN). Empty =
+// telemetry ships without a token (the collector rejects it with 401) — the logger degrades
+// silently, it never breaks the app.
+//
+// NOT A SECRET, despite living in a repo secret: EXPO_PUBLIC_* is INLINED into the JS bundle
+// by Metro, and that bundle ships inside the IPA that slsrc.x36.site serves to anyone. Treat
+// this as a public spam-guard only — never reuse it for anything that grants real access, and
+// don't add another EXPO_PUBLIC_* var expecting it to stay private.
 const TOKEN = process.env.EXPO_PUBLIC_GLOG_TOKEN ?? "";
 const BUFFER_CAP = 3000; // records held while offline; oldest dropped past this
 const MAX_BACKOFF_MS = 30_000;

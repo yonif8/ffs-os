@@ -27,6 +27,13 @@ enum G2Wire {
   static let SOURCE_PHONE: UInt8 = 1
   static let DEST_GLASSES: UInt8 = 2
   static let MAX_PACKET_PAYLOAD = 236
+  /// Most packets a well-formed message can span (packetTotalNum is one byte).
+  static let MAX_PACKETS = 255
+  /// Ceiling on one in-flight reassembly (255 × 236 B). Anything past this is malformed
+  /// or hostile — see G2RxReassembler.feed.
+  static let MAX_REASSEMBLY_BYTES = MAX_PACKETS * MAX_PACKET_PAYLOAD
+  /// Ceiling on concurrent in-flight reassemblies per side (keyed serviceId-syncId).
+  static let MAX_INFLIGHT_MESSAGES = 64
 }
 
 /// BLE service IDs (byte [6] of the transport header).
@@ -150,6 +157,10 @@ enum G2Transport {
     if chunks.isEmpty { chunks.append(Data()) }
     if chunks.last!.count == maxPayload { chunks.append(Data()) }  // extra-CRC-packet edge
 
+    // packetTotalNum is a single byte, so a payload needing >255 chunks cannot be framed.
+    // Return no packets rather than trapping in UInt8(chunks.count) — callers treat an
+    // empty array as "nothing to send" (see pushToService, which rejects it up front).
+    guard chunks.count <= G2Wire.MAX_PACKETS else { return [] }
     let totalPackets = UInt8(chunks.count)
     let crc = g2CRC16(payload)
     let status: UInt8 = reserveFlag ? 0x20 : 0x00
@@ -802,15 +813,19 @@ struct G2ProtobufReader {
       result |= UInt64(b & 0x7F) << shift
       if b & 0x80 == 0 { return result }
       shift += 7
-      if shift > 63 { return nil }
+      // SECURITY: must reject BEFORE the next shift is applied. At shift == 63 the `<< 63`
+      // above sets bit 63, producing a UInt64 above Int.max — which trapped in readBytes.
+      if shift >= 63 { return nil }
     }
     return nil
   }
 
   private mutating func readBytes() -> Data? {
     guard let len = readVarint() else { return nil }
-    let n = Int(len)
-    guard offset + n <= data.count else { return nil }
+    // SECURITY: device-supplied length. `Int(len)` traps for len > Int.max; clamp instead
+    // and let the bounds check below reject it.
+    let n = Int(clamping: len)
+    guard n >= 0, offset <= data.count - n else { return nil }
     let r = data.subdata(in: (data.startIndex + offset)..<(data.startIndex + offset + n))
     offset += n
     return r
@@ -860,11 +875,32 @@ final class G2RxReassembler {
     let totalPackets = byte(4), serialNum = byte(5), serviceId = byte(6), status = byte(7)
     guard ((status >> 1) & 0x0F) == 0 else { return nil }  // resultCode != 0
     let isLast = (serialNum == totalPackets)
-    let end = 8 + payloadLen - (isLast ? 2 : 0)  // strip trailing CRC on last
+    // SECURITY: payloadLen is device-supplied (byte 3). A terminal packet MUST carry the
+    // 2-byte CRC, so payloadLen < 2 there would make `end` < 8 and trap on the slice below.
+    // Any peripheral we've connected to could send that frame and kill the app.
+    let crcLen = isLast ? 2 : 0
+    guard payloadLen >= crcLen else { return nil }
+    let end = 8 + payloadLen - crcLen  // strip trailing CRC on last
     let chunk = raw.subdata(in: (raw.startIndex + 8)..<(raw.startIndex + end))
     let key = "\(serviceId)-\(byte(2))"  // serviceId-syncId
     if totalPackets > 1 {
-      if serialNum == 1 { partials[key] = chunk } else { partials[key, default: Data()].append(chunk) }
+      if serialNum == 1 {
+        partials[key] = chunk
+      } else {
+        // SECURITY: without a cap, a peripheral streaming mid-sequence packets grows this
+        // dictionary until iOS jetsams us. Drop the message once it can't be legitimate:
+        // totalPackets ≤ 255 chunks × 236 B is the most a well-formed message can be.
+        guard var acc = partials[key], acc.count + chunk.count <= G2Wire.MAX_REASSEMBLY_BYTES
+        else {
+          partials.removeValue(forKey: key)
+          return nil
+        }
+        acc.append(chunk)
+        partials[key] = acc
+      }
+      // Bound the number of in-flight messages too (abandoned partials are never
+      // otherwise reclaimed — a peer can mint one per serviceId-syncId pair).
+      if partials.count > G2Wire.MAX_INFLIGHT_MESSAGES { partials.removeAll() }
     }
     guard isLast else { return nil }
     let full = totalPackets > 1 ? (partials.removeValue(forKey: key) ?? chunk) : chunk

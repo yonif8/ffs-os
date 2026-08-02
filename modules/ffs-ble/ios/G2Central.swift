@@ -777,6 +777,12 @@ final class G2Central: NSObject {
       guard let data = Data(base64Encoded: base64), !data.isEmpty else {
         self.log("pushToService ignored — bad/empty base64"); return
       }
+      // A service message frames into ≤255 packets of 236 B; anything larger cannot be
+      // sent and used to trap in the framer. Reject here with a readable log instead.
+      guard data.count <= G2Wire.MAX_REASSEMBLY_BYTES else {
+        self.log("pushToService ignored — payload too large (\(data.count) B > \(G2Wire.MAX_REASSEMBLY_BYTES) B)")
+        return
+      }
       self.sendToServiceLocked(serviceId: serviceId, payload: data)
       self.log("pushToService 0x\(String(serviceId, radix: 16)) → both (\(data.count) B)")
     }
@@ -1020,8 +1026,11 @@ final class G2Central: NSObject {
     var m = dashModel
     if let v = obj["time"] as? String { m.time = v }
     if let v = obj["date"] as? String { m.date = v }
-    if let v = obj["battery"] as? Int { m.battery = v }
-    else if let v = obj["battery"] as? Double { m.battery = Int(v) }
+    // Battery is a percentage and drives a bar width in FfsDashboard — clamp it like `tile`
+    // below. Unclamped, `Int(v)` also trapped outright on a Double past Int.max (e.g. 1e30).
+    if let v = obj["battery"] as? Int { m.battery = max(0, min(100, v)) }
+    // NB: clamp in Double space — `Int(1e30)` traps before any Int-side clamp could run.
+    else if let v = obj["battery"] as? Double, v.isFinite { m.battery = Int(min(100, max(0, v)).rounded()) }
     if let v = obj["tile"] as? Int { m.tile = max(0, min(FfsDashboard.TILE_COUNT - 1, v)) }
     if let v = obj["calendarTitle"] as? String { m.calendarTitle = v }
     if let v = obj["calendarSub"] as? String { m.calendarSub = v }
