@@ -35,9 +35,14 @@ import { Group, Progress, Row, SectionLabel } from "./ui";
 
 const APP_VERSION = "0.11.1";
 
-// FUT-167 Stage 2 — CFW + stock-restore images (hosted on the private slsrc server, NOT
-// bundled: this repo is public and the firmware is Even's copyrighted image). Downloaded
-// + SHA-verified natively before any write.
+// FUT-167 Stage 2 — CFW + stock-restore images (hosted on the slsrc server, NOT bundled:
+// this repo is public and the firmware is Even's copyrighted image). Downloaded + SHA-verified
+// natively before any write, against a hardcoded golden-digest allowlist in G2Central.
+//
+// NB: slsrc.x36.site is NOT private — /fw/*.bin, apps.json and the IPA are all served
+// unauthenticated (verified). Directory listing is off, but these URLs are guessable from
+// this public repo. The SHA allowlist is what makes a swapped image unflashable; it is not
+// what stops the images being downloaded. Putting /fw behind auth is tracked separately.
 const CFW_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_cfw.bin";
 const CFW_SHA = "5c1539fd39c599e6035f6a8ec0779ba687c250d342a24c21a39952fed6c56aa0";
 const STOCK_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_stock.bin";
