@@ -21,6 +21,11 @@ public class FfsBleModule: Module {
   /// we don't spin up CoreBluetooth (and trigger the permission prompt) at import.
   private var central: G2Central?
 
+  /// The R1 ring central (FUT-233) — the SDK's input device. Created lazily and
+  /// independently of `central`: the ring is usable with the glasses powered off,
+  /// which is exactly the configuration the gesture-coverage test needs.
+  private var ring: R1Central?
+
   public func definition() -> ModuleDefinition {
     Name("FfsBleModule")
 
@@ -36,8 +41,55 @@ public class FfsBleModule: Module {
       "onDeviceInfo",
       "onDisconnected",
       "onFlashProbe",
-      "onFlashProgress"
+      "onFlashProgress",
+      // R1 ring (FUT-233). Ring gestures come through the shared "onGesture" event
+      // tagged device:"ring"; these are the ring-specific lifecycle/raw channels.
+      "onRingConnected",
+      "onRingDisconnected",
+      "onRingRaw",
+      "onRingBattery"
     )
+
+    // Tiny persistent key/value store (FUT-236). Needed so the calibration run can
+    // remember it already happened across launches. Deliberately NOT a new dependency:
+    // UserDefaults is already in use by the ring driver, and adding an async-storage
+    // package for two strings would mean a native rebuild for no capability.
+    Function("getPref") { (key: String) -> String? in
+      UserDefaults.standard.string(forKey: "ffs_pref_" + key)
+    }
+
+    Function("setPref") { (key: String, value: String) in
+      UserDefaults.standard.set(value, forKey: "ffs_pref_" + key)
+    }
+
+    // ---- R1 ring (FUT-233) ----
+
+    Function("ringScan") { [weak self] in
+      self?.ensureRing().startScan()
+    }
+
+    Function("ringStopScan") { [weak self] in
+      self?.ring?.stopScan()
+    }
+
+    Function("ringDisconnect") { [weak self] in
+      self?.ring?.disconnect()
+    }
+
+    /// Forget the paired ring so the next scan pairs fresh.
+    Function("ringForget") { [weak self] in
+      self?.ring?.forget()
+    }
+
+    Function("ringReadBattery") { [weak self] in
+      self?.ring?.readBattery()
+    }
+
+    /// Command the ring to ALSO connect to the glasses at `mac`. Not required for
+    /// input (that comes over the phone link) — this drives the ring↔glasses link.
+    Function("ringConnectToGlasses") { [weak self] (mac: String) -> Bool in
+      self?.ensureRing().connectToGlasses(mac: mac) ?? false
+    }
 
     Function("startScan") { [weak self] in
       self?.ensureCentral().startScan()
@@ -184,6 +236,58 @@ public class FfsBleModule: Module {
     }
   }
 
+  /// Lazily create the RING central (FUT-233) and wire its callbacks to sendEvent.
+  /// Separate from `ensureCentral()` because the R1 is its own BLE peripheral on its
+  /// own service — see the header of R1Central.swift for why it is not folded into
+  /// G2Central. Ring gestures arrive as `onGesture` with `device: "ring"`, so JS can
+  /// treat glasses and ring input through one handler.
+  private func ensureRing() -> R1Central {
+    if let r = ring { return r }
+    let r = R1Central()
+
+    r.onLog = { [weak self] message in
+      self?.sendEvent("onLog", ["message": message])
+    }
+    r.onStateChange = { [weak self] state in
+      self?.sendEvent("onStateChange", ["state": state])
+    }
+    r.onDeviceFound = { [weak self] (name, rssi) in
+      self?.sendEvent("onDeviceFound", [
+        "name": name,
+        "side": "ring",
+        "rssi": rssi,
+        "sn": NSNull(),
+        "mac": NSNull(),
+      ])
+    }
+    r.onConnected = { [weak self] name in
+      self?.sendEvent("onRingConnected", ["name": name])
+    }
+    r.onGesture = { [weak self] (gesture, rawHex) in
+      self?.sendEvent("onGesture", [
+        "gesture": gesture,
+        "side": "ring",
+        "source": NSNull(),
+        "device": "ring",
+        "raw": rawHex,
+      ])
+    }
+    // Every inbound ring frame, decoded or not — the evidence channel for the live
+    // gesture-coverage test. Deliberately unfiltered.
+    r.onRaw = { [weak self] (characteristic, hex) in
+      self?.sendEvent("onRingRaw", ["characteristic": characteristic, "hex": hex])
+    }
+    r.onBattery = { [weak self] percent in
+      self?.sendEvent("onRingBattery", ["battery": percent])
+    }
+    r.onDisconnected = { [weak self] reason in
+      self?.sendEvent("onRingDisconnected", ["reason": reason as Any])
+    }
+
+    ring = r
+    return r
+  }
+
   /// Lazily create the central and wire its callbacks to sendEvent.
   private func ensureCentral() -> G2Central {
     if let c = central { return c }
@@ -223,8 +327,14 @@ public class FfsBleModule: Module {
         "side": side,
       ])
     }
-    c.onGesture = { [weak self] (gesture, side) in
-      self?.sendEvent("onGesture", ["gesture": gesture, "side": side])
+    c.onGesture = { [weak self] (gesture, side, source) in
+      // `source` may legitimately be nil (text/list events carry no eventSource field).
+      self?.sendEvent("onGesture", [
+        "gesture": gesture,
+        "side": side,
+        "source": source as Any,
+        "device": "glasses",
+      ])
     }
     c.onDeviceInfo = { [weak self] (leftVersion, rightVersion, battery, charging) in
       self?.sendEvent("onDeviceInfo", [
