@@ -23,8 +23,10 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef, useState } from "react";
 import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
-import FfsBle from "../../modules/ffs-ble";
+import FfsBle, { toNavGesture } from "../../modules/ffs-ble";
 import { theme } from "./theme";
+import Constants from "expo-constants";
+import CalibrationScreen from "./calibration/CalibrationScreen";
 import { initLoggerCore, glog } from "./log";
 import { useFfsBluetooth } from "./useFfsBluetooth";
 import { useConnectionSupervisor, healthLabel, type ConnectionHealth } from "./connection";
@@ -33,7 +35,12 @@ import { PhoneNav, type PhoneCtx } from "./phone/nav";
 import { homeScreen, textTestScreen, setTextTestContent } from "./phone/screens";
 import { Group, Progress, Row, SectionLabel } from "./ui";
 
-const APP_VERSION = "0.11.1";
+// Read the REAL shipped version rather than a hand-maintained copy. A hardcoded
+// "0.11.1" had drifted three releases behind app.json, so telemetry reported the
+// wrong build — which is actively dangerous: reading a log and believing it came
+// from a build it didn't come from sends every diagnosis in the wrong direction.
+// (FUT-233, 2026-07-28: a log said 0.11.1 while 0.11.4 was installed.)
+const APP_VERSION = (Constants.expoConfig?.version ?? "unknown") as string;
 
 // FUT-167 Stage 2 — CFW + stock-restore images (hosted on the slsrc server, NOT bundled:
 // this repo is public and the firmware is Even's copyrighted image). Downloaded + SHA-verified
@@ -252,11 +259,66 @@ function healthColor(h: ConnectionHealth): string {
 }
 
 export default function App() {
+  // FUT-236 — the calibration run owns the whole screen when active, and on a fresh
+  // install it comes up FIRST, before the OS shell. Yoni asked for it to start "when I
+  // open the app for the first time with both glasses and ring unpaired". Resolved
+  // synchronously from a persisted flag so there is no flash of the normal UI first.
+  const [calibrating, setCalibrating] = useState<boolean>(() => {
+    try {
+      return FfsBle.getPref("calib.v1.completed") === null;
+    } catch {
+      return false; // never block the app on the harness
+    }
+  });
+
   const bt = useFfsBluetooth({ autoScan: true });
   const sup = useConnectionSupervisor(bt);
   const [session, setSession] = useState<string>("");
   const [swirlOn, setSwirlOn] = useState(false);
   const [flashProbe, setFlashProbe] = useState<string>("");
+  // FUT-233 — R1 ring. Independent of the glasses link by design.
+  const [ringState, setRingState] = useState<string>("—");
+  const [ringFrames, setRingFrames] = useState(0);
+  const [ringLog, setRingLog] = useState<string[]>([]);
+  /** advStart needs the glasses' MAC, which only a lens scan reveals. */
+  const glassesMac = bt.devices.find((d) => d.side !== "ring" && d.mac)?.mac ?? null;
+
+  // Ring events. Mounted unconditionally — NOT gated on the glasses link, because the
+  // test that matters is performed with the glasses off (FUT-233).
+  useEffect(() => {
+    const subs = [
+      // Bluetooth being off is the single most likely reason a scan finds nothing, and
+      // the panel used to just say "scanning…" forever while the driver logged the real
+      // reason where only Rico could see it. Say it on screen. (FUT-233, 2026-07-28.)
+      FfsBle.addListener("onStateChange", (p) => {
+        if (p.state !== "poweredOn") {
+          setRingState(`Bluetooth is ${p.state} — turn Bluetooth on`);
+          setRingLog((l) => [`bluetooth ${p.state}`, ...l].slice(0, 12));
+        }
+      }),
+      FfsBle.addListener("onRingConnected", (p) => {
+        setRingState(`connected — ${p.name}`);
+        setRingLog((l) => [`READY: ${p.name}`, ...l].slice(0, 12));
+      }),
+      FfsBle.addListener("onRingDisconnected", (p) => {
+        setRingState("—");
+        setRingLog((l) => [`disconnected${p.reason ? ` (${p.reason})` : ""}`, ...l].slice(0, 12));
+      }),
+      // Every frame, decoded or not — an unmapped code is a finding, not noise.
+      FfsBle.addListener("onRingRaw", (p) => {
+        setRingFrames((n) => n + 1);
+        setRingLog((l) => [`rx ${p.hex}`, ...l].slice(0, 12));
+      }),
+      FfsBle.addListener("onRingBattery", (p) => {
+        setRingLog((l) => [`battery ${p.battery}%`, ...l].slice(0, 12));
+      }),
+      FfsBle.addListener("onGesture", (g) => {
+        if (g.device !== "ring") return;
+        setRingLog((l) => [`👆 ${g.gesture}`, ...l].slice(0, 12));
+      }),
+    ];
+    return () => subs.forEach((s) => s.remove());
+  }, []);
   const [flashMsg, setFlashMsg] = useState<string>("");
   const [flashFrac, setFlashFrac] = useState<number>(0);
   const [flashBusy, setFlashBusy] = useState<boolean>(false);
@@ -354,8 +416,17 @@ export default function App() {
     void screenOwner.setSurface(() => nav.paint());
     glog.emit("os", "phone_os_up", {});
     const sub = FfsBle.addListener("onGesture", (g) => {
-      glog.emit("os", "nav_gesture", { gesture: g.gesture, side: g.side });
-      nav.handleGesture(g.gesture);
+      // Input can now arrive from the glasses' touchpads OR the R1 ring (FUT-233).
+      // `device`/`source` are logged so telemetry can tell them apart after the fact.
+      const nav_gesture = toNavGesture(g);
+      glog.emit("os", "nav_gesture", {
+        gesture: g.gesture,
+        side: g.side,
+        device: g.device,
+        source: g.source,
+        nav: nav_gesture,
+      });
+      if (nav_gesture) nav.handleGesture(nav_gesture);
     });
     return () => {
       sub.remove();
@@ -386,6 +457,26 @@ export default function App() {
   const hc = healthColor(health);
   const canAct = bt.pairReady && !flashBusy;
   const batt = bt.deviceInfo?.battery;
+
+  // Placed AFTER every hook above, so hook order stays identical whether or not the
+  // harness is showing — an early return above any hook would break the rules of hooks.
+  if (calibrating) {
+    return (
+      <CalibrationScreen
+        appVersion={APP_VERSION}
+        onExit={(completed) => {
+          // Record completion either way: an abandoned run should not re-ambush Yoni
+          // on every launch. It stays re-runnable from the Developer section.
+          try {
+            FfsBle.setPref("calib.v1.completed", completed ? "done" : "skipped");
+          } catch {
+            /* non-fatal — worst case it offers again next launch */
+          }
+          setCalibrating(false);
+        }}
+      />
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -434,6 +525,84 @@ export default function App() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={true}
       >
+        {/* FUT-233 — the R1 ring is the SDK's input device. Deliberately FIRST and
+            deliberately NOT gated on `pairReady`: the discriminating test is run with
+            the glasses POWERED OFF, so anything requiring a lens link would make the
+            test impossible to perform. */}
+        {/* FUT-236 — re-runnable on demand, not just on a fresh install. Every run is
+            a fresh labelled dataset, so re-running after a firmware or app change is
+            the cheapest way to re-establish ground truth. */}
+        <SectionLabel note="FUT-236 · ~5 min, guided">Calibration run</SectionLabel>
+        <Group>
+          <Row
+            badge="◎"
+            tint={theme.tint.amber}
+            title="Run SDK calibration"
+            subtitle="Guided capture of everything the ring and glasses expose"
+            trace="FUT-236"
+            onPress={() => setCalibrating(true)}
+          />
+        </Group>
+
+        <SectionLabel note="FUT-233 · works with the glasses OFF">R1 ring — input test</SectionLabel>
+        <Group>
+          <Row
+            badge="💍"
+            tint={theme.tint.purple}
+            title={ringState === "—" ? "Scan for ring" : "Rescan ring"}
+            subtitle={
+              ringState === "—"
+                ? "Wear the ring, then tap — glasses can stay off"
+                : ringState
+            }
+            tag={ringFrames > 0 ? `${ringFrames} frames` : undefined}
+            tagTint={theme.accent}
+            trace="FUT-233"
+            onPress={() => {
+              setRingLog((l) => ["scanning for ring…", ...l].slice(0, 12));
+              FfsBle.ringScan();
+            }}
+          />
+          <Row
+            badge="⛓"
+            tint={theme.tint.blue}
+            title="Ring → also connect to glasses"
+            subtitle={
+              glassesMac
+                ? `advStart → ${glassesMac} (does both links coexist?)`
+                : "Scan for the glasses first — needs their MAC"
+            }
+            divider
+            disabled={!glassesMac}
+            onPress={() => {
+              const ok = FfsBle.ringConnectToGlasses(glassesMac!);
+              setRingLog((l) =>
+                [`advStart ${ok ? "sent" : "REJECTED — ring not connected?"}`, ...l].slice(0, 12)
+              );
+            }}
+          />
+          <Row
+            badge="✕"
+            tint={theme.tint.blue}
+            title="Forget ring"
+            subtitle="Unpair, so the next scan starts fresh"
+            divider
+            onPress={() => {
+              FfsBle.ringForget();
+              setRingState("—");
+              setRingFrames(0);
+              setRingLog([]);
+            }}
+          />
+        </Group>
+        <Text style={styles.help}>
+          Glasses OFF → Scan → do all five: single tap · double tap · swipe up · swipe down ·
+          hold. Every frame below is also sent to telemetry, so Rico reads the result.
+        </Text>
+        {ringLog.length > 0 ? (
+          <Text style={styles.mono}>{ringLog.join("\n")}</Text>
+        ) : null}
+
         <SectionLabel note="swipe up/down · tap · double-tap">Drive on-glass</SectionLabel>
         <Group>
           <Row

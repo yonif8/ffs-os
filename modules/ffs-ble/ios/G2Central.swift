@@ -151,8 +151,10 @@ final class G2Central: NSObject {
   var onNotify: ((String, String, String) -> Void)?
   /// (name, side, reason?) — a lens disconnected.
   var onDisconnected: ((String, String, String?) -> Void)?
-  /// (gesture, side) — a decoded touch gesture ("tap"/"double_tap"/"swipe_up"/"swipe_down").
-  var onGesture: ((String, String) -> Void)?
+  /// (gesture, side, source?) — a decoded touch gesture ("tap"/"double_tap"/"swipe_up"/"swipe_down").
+  /// `source` is the firmware's `eventSource` where it exists (1/3 = temple pads, 2 = believed
+  /// ring, never yet observed), and nil for text/list events which carry no such field — FUT-233.
+  var onGesture: ((String, String, Int?) -> Void)?
   /// (leftVersion?, rightVersion?, battery?, charging?) — a device-info response
   /// (FUT-169 real battery + FUT-167 canary firmware-version read-back). Any field may
   /// be nil if the glasses omitted it.
@@ -1543,13 +1545,15 @@ final class G2Central: NSObject {
 
   /// A decoded gesture arrived. Dedup L/R duplicates of the SAME gesture within
   /// 100ms (both lenses can deliver the same event — FUT-159), then emit.
-  private func handleGestureLocked(_ gesture: String, side: G2Side) {
+  private func handleGestureLocked(_ gesture: String, side: G2Side, source: Int32? = nil) {
     let now = Date().timeIntervalSince1970
     if gesture == lastGestureName, now - lastGestureAt < 0.1 { return }
     lastGestureName = gesture
     lastGestureAt = now
-    log("GESTURE: \(gesture) (side=\(side.rawValue))")
-    onGesture?(gesture, side.rawValue)
+    // `source` is logged verbatim (including "none") because its ABSENCE is the
+    // finding: FUT-233 wants to know whether a ring event ever reaches this path.
+    log("GESTURE: \(gesture) (side=\(side.rawValue), source=\(source.map(String.init) ?? "none"))")
+    onGesture?(gesture, side.rawValue, source.map(Int.init))
   }
 
   // MARK: - Device info (inbound) — FUT-169 battery + FUT-167 version read-back
@@ -1806,7 +1810,7 @@ extension G2Central: CBPeripheralDelegate {
       let (svc, payload) = lens.rx.feed(data) {
       if svc == G2ServiceID.evenHub.rawValue {
         if let gesture = G2EvenHub.parseGesture(payload) {
-          handleGestureLocked(gesture, side: s)
+          handleGestureLocked(gesture.name, side: s, source: gesture.source)
         } else if let ack = G2EvenHub.parseImageAck(payload) {
           log("img: ack session=\(ack.session) fragment=\(ack.fragment) success=\(ack.success)")
           handleImageAckLocked(session: ack.session, fragment: ack.fragment, success: ack.success)
