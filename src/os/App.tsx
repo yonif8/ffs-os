@@ -99,6 +99,17 @@ const RAMEXEC_SHA = "913a7f28cc79957ed8a5991c7434d993583070fc3d369b6c6a9e1683fd6
 const LOADER_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_loader.bin";
 // FUT-217: no gesture hooks (left touchpad); FUT-216: dispatch probe (logs service keys → svc[]).
 const LOADER_SHA = "373bfe9aa3645f1cda5b0204df1db3516e16347f31dcc9a39846442022c43103";
+// FUT-246 — the SAME loader rebased onto stock 2.2.7.14, which is what Yoni's glasses now run.
+// Every payload in payloads.generated.ts is built against THIS base; pushing them at the
+// 2.2.6.10 loader above would branch into unrelated code. Also carries the FUT-244 pair:
+// loader body-CRC (a corrupt frame is refused as LD04 instead of being executed) and the
+// ffs_ui_patch prop-id migration. ⚠️ The payload frame gained an 8-byte CRC header, so app
+// and firmware MUST ship together — an old app against this loader is refused rej_code=4.
+const LOADER_2_2_7_14_URL = "https://slsrc.x36.site/fw/g2_2.2.7.14_loader.bin";
+const LOADER_2_2_7_14_SHA = "7ecf5f4948e510469cc85cd77c1a291e67bf78800f93a40cb918cf5f326eb9a6";
+// Stock 2.2.7.14, kept as the restore-to-stock escape hatch for the current base.
+const STOCK_2_2_7_14_URL = "https://slsrc.x36.site/fw/g2_2.2.7.14_stock.bin";
+const STOCK_2_2_7_14_SHA = "0fced0aebcc6c88db6f76dba34f91b805d842a5fc297bfd7fa6d6a34ec83cecb";
 const CFW_SERVICE = 0x90; // custom CFW loader BLE service id
 // FUT-238 — STYLE PROPS ORACLE (one tap, one answer). Runs the firmware's OWN
 // lv_style_set_* thunks, then asks lv_style_set_prop whether the prop it wrote is the
@@ -262,6 +273,26 @@ type FwImage = {
 
 const FW_IMAGES: FwImage[] = [
   {
+    key: "loader27",
+    badge: "LD7",
+    tint: theme.tint.green,
+    name: "OTA loader 2.2.7.14 — FLASH THIS ONE",
+    desc: "Rebased onto the stock firmware you're actually running. Flash once, then push payloads forever. After it reboots, read device info — an ⟨LD04⟩ record means the rebase is correct.",
+    trace: "FUT-246",
+    url: LOADER_2_2_7_14_URL,
+    sha: LOADER_2_2_7_14_SHA,
+  },
+  {
+    key: "stock27",
+    badge: "S7",
+    tint: theme.tint.blue,
+    name: "Restore stock 2.2.7.14",
+    desc: "Unmodified Even firmware for the current base — the escape hatch. Verified md5 against Even's own CDN.",
+    trace: "FUT-246",
+    url: STOCK_2_2_7_14_URL,
+    sha: STOCK_2_2_7_14_SHA,
+  },
+  {
     key: "canary",
     badge: "CN",
     tint: theme.tint.blue,
@@ -335,8 +366,8 @@ const FW_IMAGES: FwImage[] = [
     key: "loader",
     badge: "LD",
     tint: theme.tint.green,
-    name: "OTA loader — flash once",
-    desc: "Inert until used. Then push payloads over the air with no reflash.",
+    name: "OTA loader — 2.2.6.10 base (LEGACY)",
+    desc: "⚠️ WRONG BASE for your glasses — this targets stock 2.2.6.10 and you are on 2.2.7.14. Use the LD7 image above. Kept only for a deliberate downgrade.",
     trace: "FUT-216",
     url: LOADER_URL,
     sha: LOADER_SHA,
