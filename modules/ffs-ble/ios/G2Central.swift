@@ -1924,17 +1924,14 @@ extension G2Central {
       guard g.pass else {
         self.flashProgress("BRICK-GUARD BLOCKED: \(g.reason)", 0, done: true, ok: false); return
       }
-      let gv: G2Flash.GoldenVector? =
-        sha.lowercased() == G2Flash.goldenCFW.sha256 ? G2Flash.goldenCFW :
-        (sha.lowercased() == G2Flash.goldenStock.sha256 ? G2Flash.goldenStock :
-        (sha.lowercased() == G2Flash.goldenCanary.sha256 ? G2Flash.goldenCanary :
-        (sha.lowercased() == G2Flash.goldenFontpeek.sha256 ? G2Flash.goldenFontpeek :
-        (sha.lowercased() == G2Flash.goldenBidiOnly.sha256 ? G2Flash.goldenBidiOnly :
-        (sha.lowercased() == G2Flash.goldenHebrewFull.sha256 ? G2Flash.goldenHebrewFull :
-        (sha.lowercased() == G2Flash.goldenHebrewProbe.sha256 ? G2Flash.goldenHebrewProbe :
-        (sha.lowercased() == G2Flash.goldenFfsui.sha256 ? G2Flash.goldenFfsui :
-        (sha.lowercased() == G2Flash.goldenRamexec.sha256 ? G2Flash.goldenRamexec :
-        (sha.lowercased() == G2Flash.goldenLoader.sha256 ? G2Flash.goldenLoader : nil)))))))))
+      // sha256 → its captured golden vector. A build not in this table cannot be flashed.
+      let goldens: [G2Flash.GoldenVector] = [
+        G2Flash.goldenCFW, G2Flash.goldenStock, G2Flash.goldenStock27, G2Flash.goldenCanary,
+        G2Flash.goldenFontpeek, G2Flash.goldenBidiOnly, G2Flash.goldenHebrewFull,
+        G2Flash.goldenHebrewProbe, G2Flash.goldenFfsui, G2Flash.goldenRamexec,
+        G2Flash.goldenLoader, G2Flash.goldenLoader27,
+      ]
+      let gv = goldens.first { $0.sha256 == sha.lowercased() }
       guard let gvec = gv else {
         self.flashProgress("not a known golden build — refusing", 0, done: true, ok: false); return
       }
