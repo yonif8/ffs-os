@@ -57,6 +57,9 @@
         {
           "ios": {
             "ccacheEnabled": true
+          },
+          "android": {
+            "buildArchs": ["armeabi-v7a"]
           }
         }
       ]

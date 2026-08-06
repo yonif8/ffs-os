@@ -1,0 +1,33 @@
+// ffs-ble — Android side of the local Expo native module.
+//
+// Mirrors the SDK 57 module template (see node_modules/expo-status-bar/android/build.gradle):
+// the `expo-module-gradle-plugin` supplies the Kotlin/AGP wiring, expo-modules-core
+// dependency and publishing config, so this file only declares what is ours.
+//
+// No third-party BLE library: the driver is written directly against android.bluetooth,
+// for the same reason the iOS side is written directly against CoreBluetooth — this
+// project needs fine control over MTU, write-without-response back-pressure and two
+// simultaneous GATT links, which is exactly what the wrapper libraries abstract away.
+
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.futurefounders.ffsble'
+version = '0.1.0'
+
+android {
+  namespace "expo.modules.ffsble"
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+  }
+}
+
+dependencies {
+  // Plain JVM unit tests for the wire protocol (src/test). No device, no emulator --
+  // G2Protocol.kt is pure byte manipulation, so its golden vectors run in seconds via
+  // `./gradlew :ffs-ble:test`. See G2ProtocolTest.kt for why those vectors matter.
+  testImplementation 'junit:junit:4.13.2'
+}

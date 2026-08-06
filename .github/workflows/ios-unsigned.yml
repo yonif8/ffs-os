@@ -61,6 +61,13 @@ jobs:
       - name: Check every screen is reachable from the entry point
         run: python3 scripts/check-reachable.py
 
+      # Android is now the primary development platform and iOS follows, so the
+      # structurally-likely mistake is a binding added on one side and forgotten on the
+      # other: it type-checks, builds clean, and throws at runtime on one platform only.
+      # Same failure shape as the check above - every signal green, feature missing.
+      - name: Check iOS/Android native module API parity
+        run: python3 scripts/check-native-parity.py
+
       - name: Typecheck
         run: npx tsc --noEmit
 
