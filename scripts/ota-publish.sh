@@ -22,7 +22,7 @@ set -euo pipefail
 MSG="${1:-manual OTA update}"
 cd "$(dirname "$0")/.."
 
-export EXPO_TOKEN="${EXPO_TOKEN:-$(cat /home/claude-bot/.claude/secrets/expo_token)}"
+export EXPO_TOKEN="${EXPO_TOKEN:?EXPO_TOKEN not set — provide the Expo access token via env (GitHub Actions secret, or a local export). Origin-box secret path removed 2026-08-06.}"
 
 # Telemetry auth token (FUT-144/FUT-252). EXPO_PUBLIC_* is inlined into the JS bundle at
 # export time; if unset here, a locally-published OTA ships an EMPTY token and the glasses-
@@ -30,12 +30,8 @@ export EXPO_TOKEN="${EXPO_TOKEN:-$(cat /home/claude-bot/.claude/secrets/expo_tok
 # on-glass wizard's capture pipe). This bit us once: the token only lived in the GitHub
 # Actions env, never in local publishes. Source it from the collector's local .token
 # secret (NOT committed to this public repo) and FAIL LOUD rather than ship empty.
-if [[ -z "${EXPO_PUBLIC_GLOG_TOKEN:-}" ]]; then
-  _glog_token_file=/home/claude-bot/ClaudeProjects/rico/tools/glasses-log-collector/.token
-  if [[ -r "$_glog_token_file" ]]; then
-    export EXPO_PUBLIC_GLOG_TOKEN="$(tr -d '[:space:]' < "$_glog_token_file")"
-  fi
-fi
+# glog token comes from the environment (GitHub Actions secret EXPO_PUBLIC_GLOG_TOKEN, or a local
+# export). The origin-box local .token path was removed 2026-08-06. The guard below fails loud if empty.
 if [[ -z "${EXPO_PUBLIC_GLOG_TOKEN:-}" ]]; then
   echo "✖ REFUSING TO PUBLISH — EXPO_PUBLIC_GLOG_TOKEN is empty." >&2
   echo "  A local OTA with no glog token ships telemetry that the collector rejects (401)," >&2
