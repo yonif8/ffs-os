@@ -1687,6 +1687,14 @@ class G2Central(
         // message as either a touch gesture OR an image-fragment ACK.
         if (uuid != CHAR_NOTIFY || lens == null) return
         val (svc, payload) = lens.rx.feed(data) ?: return
+        dispatchInboundLocked(svc, payload, s)
+    }
+
+    /**
+     * Interpret one fully-reassembled inbound service message. Split out from the notification
+     * handler so [simulateGesture] can drive the identical decode path with a synthetic frame.
+     */
+    private fun dispatchInboundLocked(svc: Int, payload: ByteArray, s: G2Side) {
         when (svc) {
             G2ServiceID.EVEN_HUB -> {
                 val gesture = G2EvenHub.parseGesture(payload)
@@ -1705,6 +1713,58 @@ class G2Central(
                 // by service id, so it can never swallow an EvenHub gesture/image-ack frame.
                 G2Setting.parseDeviceInfo(payload)?.let { handleDeviceInfoLocked(it, s) }
             }
+        }
+    }
+
+    // MARK: - Gesture simulation (test affordance)
+
+    /**
+     * Inject a synthetic touch gesture as if the glasses had sent it.
+     *
+     * WHAT THIS PROVES, AND WHAT IT DOES NOT. The frame is built to the real firmware shape
+     * (`evenhub_main_msg_ctx{cmd=2, f13=SendDeviceEvent{f3=SysEvent{...}}}`) and pushed through
+     * the REAL 0xAA transport framer, the REAL reassembler, the REAL `parseGesture`, the REAL
+     * 100 ms L/R dedup and the REAL `onGesture` emit -- so everything from the wire format up
+     * through the TypeScript OS's navigation and rendering is genuinely exercised.
+     *
+     * What it CANNOT prove is the half below it: that a finger on the temple pad actually
+     * produces this frame and that it reaches us over BLE. That is the open FUT-249 / FUT-233
+     * question and only a real touch answers it. Per cardinal rule 1, a green run here is NOT
+     * on-glass proof of input -- which is exactly why every injection logs "SIMULATED".
+     *
+     * Deliberately routed through the framer rather than calling `onGesture` directly: a
+     * shortcut that skipped the decode would keep passing after a protocol change broke it.
+     */
+    fun simulateGesture(gesture: String) = post {
+        val eventType = when (gesture) {
+            "tap" -> 0
+            "swipe_up" -> 1
+            "swipe_down" -> 2
+            "double_tap" -> 3
+            else -> {
+                log("simulateGesture: unknown glasses gesture '$gesture' " +
+                    "(tap | double_tap | swipe_up | swipe_down)")
+                return@post
+            }
+        }
+        // Sys_ItemEvent{ f1=eventType, f2=eventSource }. Source 1 is a temple pad -- the only
+        // value real telemetry has ever carried.
+        val sys = G2ProtobufWriter()
+        sys.writeInt32Field(1, eventType)
+        sys.writeInt32Field(2, 1)
+        val devEvent = G2ProtobufWriter()
+        devEvent.writeMessageField(3, sys.data) // SendDeviceEvent.f3 = SysEvent
+        val msg = G2ProtobufWriter()
+        msg.writeInt32Field(1, 2) // rspOsNotifyEvent
+        msg.writeInt32Field(2, counters.nextMagic())
+        msg.writeMessageField(13, devEvent.data)
+
+        log("SIMULATED GESTURE '$gesture' -- synthetic frame, NOT from the hardware")
+        // A fresh reassembler, so an injection can never splice itself into a real message the
+        // right lens happens to be part-way through.
+        val rx = G2RxReassembler()
+        for (pkt in G2Transport.buildPackets(0, G2ServiceID.EVEN_HUB, msg.data, reserveFlag = true)) {
+            rx.feed(pkt)?.let { (svc, payload) -> dispatchInboundLocked(svc, payload, G2Side.RIGHT) }
         }
     }
 

@@ -404,6 +404,47 @@ class G2ProtocolTest {
         assertEquals(null, G2EvenHub.parseGesture(notAnEvent.data))
     }
 
+    /**
+     * The exact chain `G2Central.simulateGesture` drives: build the firmware-shaped event ->
+     * frame it through the real transport -> reassemble -> decode. Worth pinning as one test,
+     * because a simulator that only satisfies its own decoder is worse than no simulator: it
+     * would keep reporting green after a protocol change broke the real path.
+     */
+    @Test
+    fun `a simulated gesture survives framing and reassembly end to end`() {
+        for ((name, eventType) in listOf(
+            "tap" to 0, "swipe_up" to 1, "swipe_down" to 2, "double_tap" to 3
+        )) {
+            val sys = G2ProtobufWriter()
+            sys.writeInt32Field(1, eventType)
+            sys.writeInt32Field(2, 1) // eventSource = temple pad
+            val msg = G2ProtobufWriter()
+            msg.writeInt32Field(1, 2) // rspOsNotifyEvent
+            msg.writeInt32Field(2, 0)
+            msg.writeMessageField(13, deviceEventBody(3, sys.data))
+
+            val rx = G2RxReassembler()
+            var decoded: G2GestureDecode? = null
+            for (pkt in G2Transport.buildPackets(
+                syncId = 0, serviceId = G2ServiceID.EVEN_HUB, payload = msg.data, reserveFlag = true
+            )) {
+                rx.feed(pkt)?.let { (svc, payload) ->
+                    assertEquals(G2ServiceID.EVEN_HUB, svc)
+                    decoded = G2EvenHub.parseGesture(payload)
+                }
+            }
+            assertEquals("simulated '$name' must decode back to itself", name, decoded?.name)
+            assertEquals(1, decoded?.source)
+        }
+    }
+
+    /** SendDeviceEvent{ f<subField> = sub }. */
+    private fun deviceEventBody(subField: Int, sub: ByteArray): ByteArray {
+        val ev = G2ProtobufWriter()
+        ev.writeMessageField(subField, sub)
+        return ev.data
+    }
+
     // ---- inbound: image ACK ----
 
     @Test

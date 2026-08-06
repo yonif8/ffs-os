@@ -415,6 +415,22 @@ interface FfsBleNativeModule {
   setDashboardData(json: string): void;
   /** P3: tear down the EvenHub session (stops the keep-alive heartbeat). */
   stopSession(): void;
+  /**
+   * TEST AFFORDANCE — inject a synthetic gesture as if the hardware had sent it, so the
+   * input→render path can be driven without a finger on the temple pad or the ring.
+   *
+   * The native side builds the REAL wire frame and pushes it through the REAL decode, so
+   * everything from the protocol up through nav and rendering is genuinely exercised — and it
+   * arrives as an ordinary `onGesture` event, indistinguishable to this layer on purpose.
+   *
+   * ⚠️ It proves NOTHING about whether a real touch reaches the phone. That is the open
+   * FUT-249 / FUT-233 question and only real hardware answers it; every injection logs
+   * "SIMULATED" so a green run here can never be mistaken for on-glass proof (cardinal rule 1).
+   *
+   * `device: "glasses"` accepts tap | double_tap | swipe_up | swipe_down.
+   * `device: "ring"` accepts hold | single_tap | double_tap | swipe_up | swipe_down.
+   */
+  simulateGesture(device: "glasses" | "ring", gesture: string): void;
 
   /**
    * Tiny persistent key/value store (FUT-236) — used so the calibration run knows
