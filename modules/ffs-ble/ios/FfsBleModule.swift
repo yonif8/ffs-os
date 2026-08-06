@@ -42,6 +42,15 @@ public class FfsBleModule: Module {
       "onDisconnected",
       "onFlashProbe",
       "onFlashProgress",
+      // FUT-253 native BLE observability (Step 3): link-level telemetry.
+      "onRssi",
+      "onMtu",
+      "onConnectFailed",
+      "onTxMeter",
+      "onTxStall",
+      "onTxResume",
+      "onSubscribe",
+      "onImgAck",
       // R1 ring (FUT-233). Ring gestures come through the shared "onGesture" event
       // tagged device:"ring"; these are the ring-specific lifecycle/raw channels.
       "onRingConnected",
@@ -359,11 +368,58 @@ public class FfsBleModule: Module {
         "ok": ok,
       ])
     }
-    c.onDisconnected = { [weak self] (name, side, reason) in
+    c.onDisconnected = { [weak self] (name, side, reason, code, domain) in
       self?.sendEvent("onDisconnected", [
         "name": name,
         "side": side,
         "reason": reason as Any,
+        "code": code,
+        "domain": domain,
+      ])
+    }
+
+    // ---- FUT-253 native BLE observability (Step 3) ----
+    c.onRssi = { [weak self] (side, rssi) in
+      self?.sendEvent("onRssi", ["side": side, "rssi": rssi])
+    }
+    c.onMtu = { [weak self] (side, mtu) in
+      self?.sendEvent("onMtu", ["side": side, "mtu": mtu])
+    }
+    c.onConnectFailed = { [weak self] (side, code, domain, desc) in
+      self?.sendEvent("onConnectFailed", [
+        "side": side,
+        "code": code,
+        "domain": domain,
+        "desc": desc,
+      ])
+    }
+    c.onTxMeter = { [weak self] (side, bytes, pkts, queueDepth) in
+      self?.sendEvent("onTxMeter", [
+        "side": side,
+        "bytes": bytes,
+        "pkts": pkts,
+        "queueDepth": queueDepth,
+      ])
+    }
+    c.onTxStall = { [weak self] (side, queueDepth) in
+      self?.sendEvent("onTxStall", ["side": side, "queueDepth": queueDepth])
+    }
+    c.onTxResume = { [weak self] (side, queueDepth) in
+      self?.sendEvent("onTxResume", ["side": side, "queueDepth": queueDepth])
+    }
+    c.onSubscribe = { [weak self] (side, characteristic, on) in
+      self?.sendEvent("onSubscribe", [
+        "side": side,
+        "characteristic": characteristic,
+        "on": on,
+      ])
+    }
+    c.onImgAck = { [weak self] (session, fragment, ok, timedOut) in
+      self?.sendEvent("onImgAck", [
+        "session": session,
+        "fragment": fragment,
+        "ok": ok,
+        "timedOut": timedOut,
       ])
     }
 
