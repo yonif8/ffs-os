@@ -43,6 +43,19 @@ Write-Host "ANDROID_HOME = $env:ANDROID_HOME"
 Write-Host ("java         = " + ((& java -version 2>&1)[0]))
 if (Get-Command adb -ErrorAction SilentlyContinue) {
   Write-Host ("adb          = " + ((& adb version 2>&1)[0]))
+
+  # Metro (debug JS bundle) and the on-device Android Remote Control MCP server.
+  #
+  # Both are localhost-only on their respective sides, tunnelled over the adb transport:
+  #   reverse 8081 -> the PHONE reaches Metro on this PC
+  #   forward 18080 -> this PC reaches the MCP server bound to 127.0.0.1:8080 ON THE PHONE
+  #
+  # Neither survives an adb server restart or a device reconnect, which is why they are
+  # re-established here rather than set up once. The MCP server is registered user-scoped
+  # in ~/.claude.json as "android-device"; it goes unreachable without this forward.
+  & adb reverse tcp:8081 tcp:8081 2>&1 | Out-Null
+  & adb forward tcp:18080 tcp:8080 2>&1 | Out-Null
+  Write-Host "tunnels      = metro reverse 8081, device-mcp forward 18080"
 } else {
   Write-Host "adb          = NOT FOUND (install platform-tools)"
 }
