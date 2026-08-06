@@ -5,37 +5,47 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
 /**
- * FfsBleModule — Android side of the FFS G2 BLE driver.
+ * FfsBleModule -- Android side of the FFS G2 BLE driver.
  *
  * This is the Android twin of `ios/FfsBleModule.swift` and MUST expose exactly the same
- * function and event names, because `src/FfsBleModule.ts` is the single typed contract
- * both platforms satisfy and the whole `src/os` TypeScript OS is written against it.
- * If you add a capability on one platform, add its binding on the other in the same
- * change — a missing name here is a runtime crash in shared JS, not a compile error.
+ * function and event names, because `src/FfsBleModule.ts` is the single typed contract both
+ * platforms satisfy and the whole `src/os` TypeScript OS is written against it. If you add a
+ * capability on one platform, add its binding on the other in the same change -- a missing name
+ * here is a runtime crash in shared JS, not a compile error. `scripts/check-native-parity.py`
+ * enforces this.
  *
- * PHASE 0 (this file, current state): every binding exists and is safe to call, but the
- * radio is not implemented. Calls emit an `onLog` line saying so instead of throwing, so
- * the shared UI boots and is fully navigable on Android with a dead BLE layer. That is
- * deliberate: it proves the toolchain, the module registration and the JS contract before
- * any of the hard work, and it keeps `scripts/check-reachable.py`-style "the screen exists
- * but does nothing" failures visible rather than silent.
+ * PHASE 1 (this file, current state): the radio is REAL. [G2Central] and [R1Central] are
+ * written directly against `android.bluetooth`, and everything from `startScan` through
+ * `showText`, gesture decode, the EvenHub session and the FUT-216 payload push is implemented.
  *
- * `getPref`/`setPref` are real from day one — they are just SharedPreferences (the iOS side
- * uses UserDefaults), the calibration flow depends on them across launches, and there is no
- * reason to stub something this cheap.
+ * Still stubbed, and each for a specific reason rather than for lack of time:
+ *   - `playAnimation` / `showDashboard` / `hideDashboard` / `dashboardInput` / `setDashboardData`
+ *     need a PIXEL RASTERIZER (`G2Anim` / `FfsDashboard` are CoreGraphics on iOS and become
+ *     `android.graphics.Canvas` here). That is Phase 3 -- the transport those renderers feed is
+ *     already live below, so it is genuinely just the frame generator that is missing.
+ *   - `startCfwFlash` is Phase 4 and LAST by design: a botched DFU over an unproven BLE stack
+ *     bricks the glasses. Flash from the iOS app until the Android link is boringly stable.
+ *     `flashDryRun` is real, because it is a zero-write probe of already-discovered GATT.
  *
- * PHASE 1 (next): a real `G2Central` written directly against android.bluetooth, replacing
- * these stubs from `startScan` down through `showText`. Notes for whoever writes it — the
- * places where Android genuinely differs from the proven CoreBluetooth driver:
- *   - MTU is explicit here (`BluetoothGatt.requestMtu`); iOS negotiates it for you.
- *   - There is no `canSendWriteWithoutResponse` back-pressure signal. On API 33+ the new
- *     `writeCharacteristic(char, value, writeType)` overload returns a status int instead.
- *     G2Central.swift's 6 ms paced FIFO drain was tuned against the iOS signal and will
- *     need re-tuning against whatever Android actually gives us.
- *   - Two simultaneous GATT links (L + R lenses) are scheduled differently here.
- * Per cardinal rule #1, none of that counts until it is seen working on the glasses.
+ * `getPref`/`setPref` are SharedPreferences (UserDefaults on iOS) -- the calibration flow
+ * depends on them across launches.
+ *
+ * Per cardinal rule 1, none of this counts as shipped until it is seen working on the glasses.
  */
 class FfsBleModule : Module() {
+
+  /**
+   * The single BLE central for the whole app. Created lazily on first use so we do not spin up
+   * the Bluetooth stack (or trip a permission prompt) at import time.
+   */
+  private var central: G2Central? = null
+
+  /**
+   * The R1 ring central (FUT-233) -- the SDK's input device. Created lazily and independently
+   * of [central]: the ring is usable with the glasses powered off, which is exactly the
+   * configuration the gesture-coverage test needs.
+   */
+  private var ring: R1Central? = null
 
   private val prefs by lazy {
     appContext.reactContext?.getSharedPreferences("ffs_prefs", Context.MODE_PRIVATE)
@@ -68,14 +78,15 @@ class FfsBleModule : Module() {
       "onTxResume",
       "onSubscribe",
       "onImgAck",
-      // R1 ring (FUT-233).
+      // R1 ring (FUT-233). Ring gestures come through the shared "onGesture" event tagged
+      // device:"ring"; these are the ring-specific lifecycle/raw channels.
       "onRingConnected",
       "onRingDisconnected",
       "onRingRaw",
       "onRingBattery"
     )
 
-    // ---- persistent key/value (real) ----
+    // ---- persistent key/value (FUT-236) ----
 
     Function("getPref") { key: String ->
       prefs?.getString("ffs_pref_$key", null)
@@ -85,75 +96,288 @@ class FfsBleModule : Module() {
       prefs?.edit()?.putString("ffs_pref_$key", value)?.apply()
     }
 
-    // ---- R1 ring (FUT-233) — Phase 3 ----
+    // ---- R1 ring (FUT-233) ----
 
-    Function("ringScan") { notYet("ringScan") }
-    Function("ringStopScan") { notYet("ringStopScan") }
-    Function("ringDisconnect") { notYet("ringDisconnect") }
-    Function("ringForget") { notYet("ringForget") }
-    Function("ringReadBattery") { notYet("ringReadBattery") }
-    Function("ringConnectToGlasses") { _: String ->
-      notYet("ringConnectToGlasses")
-      false
+    Function("ringScan") { ensureRing()?.startScan() }
+    Function("ringStopScan") { ring?.stopScan() }
+    Function("ringDisconnect") { ring?.disconnect() }
+    Function("ringForget") { ring?.forget() }
+    Function("ringReadBattery") { ring?.readBattery() }
+
+    /**
+     * Command the ring to ALSO connect to the glasses at `mac`. Not required for input (that
+     * comes over the phone link) -- this drives the ring<->glasses link.
+     */
+    Function("ringConnectToGlasses") { mac: String ->
+      ensureRing()?.connectToGlasses(mac) ?: false
     }
 
-    // ---- glasses link (Phase 1) ----
+    // ---- glasses link ----
 
-    Function("startScan") { notYet("startScan") }
-    Function("stopScan") { notYet("stopScan") }
-    Function("connect") { notYet("connect") }
-    Function("connectSide") { _: String -> notYet("connectSide") }
-    Function("disconnect") { notYet("disconnect") }
+    Function("startScan") { ensureCentral()?.startScan() }
+    Function("stopScan") { central?.stopScan() }
 
-    Function("isPairReady") {
-      // No log line: the JS polls this, and logging every poll would flood the sink.
-      false
+    // Connect the PAIR (both lenses). This is the primary entry point.
+    Function("connect") { ensureCentral()?.connectPair() }
+
+    // Connect a SINGLE side only (testing convenience). `side` is "L" or "R".
+    Function("connectSide") { side: String -> ensureCentral()?.connectSide(G2Side.parse(side)) }
+
+    Function("disconnect") { central?.disconnect() }
+
+    // True once BOTH lenses are connected + required characteristics discovered.
+    // No log line and no cross-thread hop: JS polls this, so it reads a volatile snapshot.
+    Function("isPairReady") { central?.isPairReady() ?: false }
+
+    Function("isSideReady") { side: String ->
+      central?.isSideReady(G2Side.parse(side)) ?: false
     }
-    Function("isSideReady") { _: String -> false }
 
-    // ---- render (Phase 1 for text, Phase 2/3 for pixels) ----
+    // ---- render ----
 
-    Function("showText") { _: String -> notYet("showText") }
-    Function("showImage") { notYet("showImage") }
-    Function("showAiSwirl") { _: Boolean -> notYet("showAiSwirl") }
-    Function("playAnimation") { _: String -> notYet("playAnimation") }
-    Function("stopAnimation") { notYet("stopAnimation") }
+    // Run the auth handshake if needed, then render `text` on the HUD. Connect the pair first.
+    Function("showText") { text: String -> ensureCentral()?.showText(text) }
 
-    // ---- dashboards (Phase 3) ----
+    // Render a test image through our own raw-image path (FUT-153).
+    Function("showImage") { ensureCentral()?.showImage() }
 
-    Function("pushDashboardDemo") { _: String -> notYet("pushDashboardDemo") }
-    Function("showStockDashboard") { notYet("showStockDashboard") }
-    Function("showNativeDashboard") { _: String -> notYet("showNativeDashboard") }
-    Function("showDashboard") { notYet("showDashboard") }
-    Function("hideDashboard") { notYet("hideDashboard") }
-    Function("dashboardInput") { _: String -> notYet("dashboardInput") }
-    Function("setDashboardData") { _: String -> notYet("setDashboardData") }
+    // FUT-165: toggle the firmware's NATIVE Even-AI "thinking" swirl (GPU-smooth, dual-lens)
+    // via the even_ai session lifecycle.
+    Function("showAiSwirl") { on: Boolean -> ensureCentral()?.aiSwirl(on) }
+
+    // Phase 3: needs the G2Anim pixel rasterizer (android.graphics.Canvas). The mode-2
+    // transport it streams into is already live -- see sendAnimFrame in G2Central.kt.
+    Function("playAnimation") { _: String -> notYet("playAnimation", "Phase 3 (rasterizer)") }
+
+    Function("stopAnimation") { central?.stopAnimation() }
+
+    // ---- dashboards ----
+
+    // FUT-170 PoC: push custom text into the firmware's native head-up dashboard over BLE.
+    Function("pushDashboardDemo") { text: String -> ensureCentral()?.pushDashboardDemo(text) }
+
+    // FUT-170: reveal Even's OWN native head-up dashboard by releasing our EvenHub page.
+    Function("showStockDashboard") { ensureCentral()?.showStockDashboard() }
+
+    // FUT-194: drive the firmware's own dashboard entirely from our OS over BLE. No pixels.
+    Function("showNativeDashboard") { config: String ->
+      ensureCentral()?.showNativeDashboard(config)
+    }
+
+    // FUT-176: our OWN dashboard, rendered as our pixels. Phase 3 -- needs FfsDashboard.render.
+    Function("showDashboard") { notYet("showDashboard", "Phase 3 (rasterizer)") }
+    Function("hideDashboard") { notYet("hideDashboard", "Phase 3 (rasterizer)") }
+    Function("dashboardInput") { _: String -> notYet("dashboardInput", "Phase 3 (rasterizer)") }
+    Function("setDashboardData") { _: String -> notYet("setDashboardData", "Phase 3 (rasterizer)") }
 
     // ---- session / info ----
 
-    Function("requestDeviceInfo") { notYet("requestDeviceInfo") }
-    Function("stopSession") { notYet("stopSession") }
+    // FUT-169 / FUT-167: real battery %, charging, per-lens firmware version. Async via
+    // `onDeviceInfo`. Connect the pair first.
+    Function("requestDeviceInfo") { ensureCentral()?.requestDeviceInfo() }
 
-    // ---- payload delivery (FUT-216) — Phase 2 ----
+    // Tear down the EvenHub session (stops the keep-alive heartbeat).
+    Function("stopSession") { central?.stopSession() }
 
-    Function("pushToService") { _: Int, _: String -> notYet("pushToService") }
-    Function("pushPayloadViaImage") { _: String -> notYet("pushPayloadViaImage") }
+    // ---- payload delivery (FUT-216) ----
 
-    // ---- flashing (FUT-167) — Phase 4, deliberately LAST ----
-    //
-    // A botched DFU over an unproven BLE stack bricks the glasses. These stay stubbed
-    // until the Phase 1-3 link is boringly stable; flash from the iOS app until then.
+    Function("pushToService") { serviceId: Int, base64: String ->
+      ensureCentral()?.pushToService(serviceId and 0xFF, base64)
+    }
 
-    Function("flashDryRun") { notYet("flashDryRun") }
-    Function("startCfwFlash") { _: String, _: String, _: Boolean -> notYet("startCfwFlash") }
+    Function("pushPayloadViaImage") { base64: String ->
+      ensureCentral()?.pushPayloadViaImage(base64)
+    }
+
+    // ---- flashing (FUT-167) ----
+
+    // Stage 1 is a ZERO-WRITE probe of already-discovered GATT: no brick risk, so it ships now.
+    Function("flashDryRun") { ensureCentral()?.flashDryRun() }
+
+    // Stage 2 writes firmware. Phase 4, deliberately last -- see the class header.
+    Function("startCfwFlash") { _: String, _: String, _: Boolean ->
+      notYet("startCfwFlash", "Phase 4 (brick risk -- flash from the iOS app for now)")
+    }
+
+    OnDestroy {
+      central?.shutdown()
+      central = null
+      ring?.shutdown()
+      ring = null
+    }
   }
 
   /**
-   * Report an unimplemented binding to the JS log sink instead of throwing. The shared UI
-   * calls these from button handlers; a throw would surface as a redbox and stop the
-   * Phase 0 goal (a fully navigable app on Android) dead.
+   * Report an unimplemented binding to the JS log sink instead of throwing. The shared UI calls
+   * these from button handlers; a throw would surface as a redbox and stop the app dead.
    */
-  private fun notYet(name: String) {
-    sendEvent("onLog", mapOf("message" to "[android] $name: not implemented yet (Phase 0 stub)"))
+  private fun notYet(name: String, phase: String) {
+    sendEvent("onLog", mapOf("message" to "[android] $name: not implemented yet -- $phase"))
+  }
+
+  /** Lazily create the RING central (FUT-233) and wire its callbacks to sendEvent. */
+  private fun ensureRing(): R1Central? {
+    ring?.let { return it }
+    val context = appContext.reactContext ?: run {
+      sendEvent("onLog", mapOf("message" to "[android] ring: no React context yet"))
+      return null
+    }
+    val r = R1Central(context) { appContext.activityProvider?.currentActivity }
+
+    r.onLog = { message -> sendEvent("onLog", mapOf("message" to message)) }
+    r.onStateChange = { state -> sendEvent("onStateChange", mapOf("state" to state)) }
+    r.onDeviceFound = { name, rssi ->
+      sendEvent(
+        "onDeviceFound",
+        mapOf("name" to name, "side" to "ring", "rssi" to rssi, "sn" to null, "mac" to null)
+      )
+    }
+    r.onConnected = { name -> sendEvent("onRingConnected", mapOf("name" to name)) }
+    // Ring gestures ride the SHARED onGesture event tagged device:"ring", so JS treats glasses
+    // and ring input through one handler (see toNavGesture in FfsBleModule.ts).
+    r.onGesture = { gesture, rawHex ->
+      sendEvent(
+        "onGesture",
+        mapOf(
+          "gesture" to gesture,
+          "side" to "ring",
+          "source" to null,
+          "device" to "ring",
+          "raw" to rawHex
+        )
+      )
+    }
+    // Every inbound ring frame, decoded or not -- the evidence channel for the live
+    // gesture-coverage test. Deliberately unfiltered.
+    r.onRaw = { characteristic, hex ->
+      sendEvent("onRingRaw", mapOf("characteristic" to characteristic, "hex" to hex))
+    }
+    r.onBattery = { percent -> sendEvent("onRingBattery", mapOf("battery" to percent)) }
+    r.onDisconnected = { reason -> sendEvent("onRingDisconnected", mapOf("reason" to reason)) }
+
+    ring = r
+    // AFTER the callbacks are wired, never from the constructor -- the driver's queue thread is
+    // already running, so anything it emitted during construction would race these assignments
+    // and be dropped on the floor.
+    r.start()
+    return r
+  }
+
+  /** Lazily create the glasses central and wire its callbacks to sendEvent. */
+  private fun ensureCentral(): G2Central? {
+    central?.let { return it }
+    val context = appContext.reactContext ?: run {
+      sendEvent("onLog", mapOf("message" to "[android] ble: no React context yet"))
+      return null
+    }
+    val c = G2Central(context) { appContext.activityProvider?.currentActivity }
+
+    c.onLog = { message -> sendEvent("onLog", mapOf("message" to message)) }
+    c.onStateChange = { state -> sendEvent("onStateChange", mapOf("state" to state)) }
+    c.onDeviceFound = { name, side, rssi, sn, mac ->
+      sendEvent(
+        "onDeviceFound",
+        mapOf("name" to name, "side" to side, "rssi" to rssi, "sn" to sn, "mac" to mac)
+      )
+    }
+    c.onConnected = { name, side ->
+      sendEvent("onConnected", mapOf("name" to name, "side" to side))
+    }
+    c.onServicesDiscovered = { side, charUUIDs ->
+      sendEvent("onServicesDiscovered", mapOf("side" to side, "characteristics" to charUUIDs))
+    }
+    c.onPairReady = { sendEvent("onPairReady", emptyMap<String, Any>()) }
+    c.onNotify = { base64, characteristic, side ->
+      sendEvent(
+        "onNotify",
+        mapOf("base64" to base64, "characteristic" to characteristic, "side" to side)
+      )
+    }
+    c.onGesture = { gesture, side, source ->
+      // `source` may legitimately be null (text/list events carry no eventSource field).
+      sendEvent(
+        "onGesture",
+        mapOf(
+          "gesture" to gesture,
+          "side" to side,
+          "source" to source,
+          "device" to "glasses"
+        )
+      )
+    }
+    c.onDeviceInfo = { leftVersion, rightVersion, battery, charging ->
+      sendEvent(
+        "onDeviceInfo",
+        mapOf(
+          "leftVersion" to leftVersion,
+          "rightVersion" to rightVersion,
+          "battery" to battery,
+          "charging" to charging
+        )
+      )
+    }
+    c.onFlashProbe = { leftReady, rightReady, detail ->
+      sendEvent(
+        "onFlashProbe",
+        mapOf("leftReady" to leftReady, "rightReady" to rightReady, "detail" to detail)
+      )
+    }
+    c.onFlashProgress = { message, progress, done, ok ->
+      sendEvent(
+        "onFlashProgress",
+        mapOf("message" to message, "progress" to progress, "done" to done, "ok" to ok)
+      )
+    }
+    c.onDisconnected = { name, side, reason, code, domain ->
+      sendEvent(
+        "onDisconnected",
+        mapOf(
+          "name" to name,
+          "side" to side,
+          "reason" to reason,
+          "code" to code,
+          "domain" to domain
+        )
+      )
+    }
+
+    // ---- FUT-253 native BLE observability (Step 3) ----
+    c.onRssi = { side, rssi -> sendEvent("onRssi", mapOf("side" to side, "rssi" to rssi)) }
+    c.onMtu = { side, mtu -> sendEvent("onMtu", mapOf("side" to side, "mtu" to mtu)) }
+    c.onConnectFailed = { side, code, domain, desc ->
+      sendEvent(
+        "onConnectFailed",
+        mapOf("side" to side, "code" to code, "domain" to domain, "desc" to desc)
+      )
+    }
+    c.onTxMeter = { side, bytes, pkts, queueDepth ->
+      sendEvent(
+        "onTxMeter",
+        mapOf("side" to side, "bytes" to bytes, "pkts" to pkts, "queueDepth" to queueDepth)
+      )
+    }
+    c.onTxStall = { side, queueDepth ->
+      sendEvent("onTxStall", mapOf("side" to side, "queueDepth" to queueDepth))
+    }
+    c.onTxResume = { side, queueDepth ->
+      sendEvent("onTxResume", mapOf("side" to side, "queueDepth" to queueDepth))
+    }
+    c.onSubscribe = { side, characteristic, on ->
+      sendEvent(
+        "onSubscribe",
+        mapOf("side" to side, "characteristic" to characteristic, "on" to on)
+      )
+    }
+    c.onImgAck = { session, fragment, ok, timedOut ->
+      sendEvent(
+        "onImgAck",
+        mapOf("session" to session, "fragment" to fragment, "ok" to ok, "timedOut" to timedOut)
+      )
+    }
+
+    central = c
+    // AFTER the callbacks are wired -- see the note in ensureRing().
+    c.start()
+    return c
   }
 }
