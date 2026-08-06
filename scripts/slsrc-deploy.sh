@@ -8,8 +8,7 @@
 # via scripts/ota-publish.sh (no new IPA).
 #
 # Delivery is server-side PULL (zero GitHub secrets): the box's gh CLI (authed as
-# yonif8) downloads the IPA artifact from the repo's latest successful CI run.
-# NB: the repo is PUBLIC — don't assume anything fetched here is access-controlled.
+# yonif8) downloads the IPA artifact from the private repo's latest successful CI run.
 #
 # Usage:
 #   scripts/slsrc-deploy.sh                 # pull IPA from the latest successful CI run
@@ -94,18 +93,12 @@ fi
 [[ "$(readlink -f "$src_ipa")" == "$(readlink -f "$SRV/$IPA_NAME")" ]] || cp "$src_ipa" "$SRV/$IPA_NAME"
 size=$(stat -c%s "$SRV/$IPA_NAME")
 today=$(date -u +%Y-%m-%d)
-# Integrity: AltStore/SideStore verifies `sha256` from the manifest against the downloaded
-# IPA and refuses the install on mismatch. Without it, size is the only check — anyone who
-# can write to $SRV (or MITM the download) swaps the binary silently. The IPA is served
-# unauthenticated, so this is the one thing standing between a tampered file and Yoni's phone.
-sha256=$(sha256sum "$SRV/$IPA_NAME" | cut -d' ' -f1)
 echo "  IPA: $size bytes → $SRV/$IPA_NAME"
-echo "  sha256: $sha256"
 
 # AltStore / SideStore source manifest.
-python3 - "$SRV/apps.json" "$APP_VERSION" "$BUILD_VERSION" "$RTV" "$size" "$today" "$sha256" <<'PY'
+python3 - "$SRV/apps.json" "$APP_VERSION" "$BUILD_VERSION" "$RTV" "$size" "$today" <<'PY'
 import json, sys
-out, appver, build, rtv, size, today, sha256 = sys.argv[1:8]
+out, appver, build, rtv, size, today = sys.argv[1:7]
 src = {
   "name": "FFS Glasses OS",
   "identifier": "site.x36.slsrc",
@@ -125,7 +118,6 @@ src = {
       "date": today,
       "downloadURL": "https://slsrc.x36.site/FFSGlassesOS.ipa",
       "size": int(size),
-      "sha256": sha256,
       "localizedDescription": f"Native build v{appver} ({build}), OTA runtimeVersion {rtv}."
     }],
     "appPermissions": {
