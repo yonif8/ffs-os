@@ -144,6 +144,16 @@ final class G2Central: NSObject {
   /// Inter-packet pacing for the per-side write queues (P0 spec: 6ms).
   private static let WRITE_PACING_MS = 6
 
+  /// FUT-253: master switch for the write-backpressure GATE (the one behavioral change
+  /// in the Step-3 observability work). OFF = the proven prior behavior — the drain writes
+  /// unconditionally, paced only by WRITE_PACING_MS; the read-only tx-meter / RSSI / MTU /
+  /// CBError telemetry all still ship. ON = pause the drain when the write-without-response
+  /// buffer is saturated and resume from `peripheralIsReadyToSendWriteWithoutResponse`
+  /// (the intended fix for the saturation→supervision-timeout drop). Because ON alters
+  /// write hot-path timing near the 6ms pacer / heartbeat / anim frame-gating, it stays OFF
+  /// until proven on-glass (cardinal rule 1). Flip to true for a dedicated on-glass test.
+  static let ENABLE_BACKPRESSURE_GATE = false
+
   // MARK: - Callback closures (wired by the Expo module)
 
   /// (message) — every log line, already timestamped by `log(_:)`.
@@ -464,12 +474,12 @@ final class G2Central: NSObject {
       lens.draining = false
       return
     }
-    // FUT-253 backpressure: don't write into a saturated write-without-response
-    // buffer (the drop / supervision-timeout the drain path has always feared).
-    // Pause here — keeping draining=true so we still hold this side's write-lock —
-    // and resume from `peripheralIsReadyToSendWriteWithoutResponse`. Emit tx_stall
-    // once on entering the stall (queue depth tells us how bad the backlog is).
-    if !lens.peripheral.canSendWriteWithoutResponse {
+    // FUT-253 backpressure GATE (default OFF — see ENABLE_BACKPRESSURE_GATE): don't write
+    // into a saturated write-without-response buffer (the drop / supervision-timeout the
+    // drain path has always feared). Pause here — keeping draining=true so we still hold
+    // this side's write-lock — and resume from `peripheralIsReadyToSendWriteWithoutResponse`.
+    // Emit tx_stall once on entering the stall (queue depth tells us how bad the backlog is).
+    if G2Central.ENABLE_BACKPRESSURE_GATE, !lens.peripheral.canSendWriteWithoutResponse {
       if !lens.txStalled {
         lens.txStalled = true
         log("tx STALL side=\(lens.side.rawValue) depth=\(lens.writeQueue.count)")
@@ -1825,7 +1835,11 @@ extension G2Central: CBPeripheralDelegate {
       onTxResume?(lens.side.rawValue, lens.writeQueue.count)
     }
     // Resume only if we still hold this side's write-lock and have work queued.
-    if lens.draining {
+    // GATED: only the backpressure gate ever pauses the drain, so only it should resume it.
+    // With the gate OFF the paced drain drives itself (WRITE_PACING_MS) and must NOT be
+    // re-entered here, or two drain loops would race on one side. (The stall/resume emit
+    // above is naturally inert when off — txStalled is only set inside the gate.)
+    if G2Central.ENABLE_BACKPRESSURE_GATE, lens.draining {
       drainStepLocked(lens)
     }
   }
