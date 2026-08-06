@@ -20,7 +20,7 @@
 // Patterns lifted from real shipped apps via the Mobbin MCP — see FUT-220 for the refs.
 
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useRef, useState } from "react";
+import { Component, useEffect, useRef, useState, type ReactNode } from "react";
 import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import FfsBle, { toNavGesture } from "../../modules/ffs-ble";
@@ -407,7 +407,44 @@ function healthColor(h: ConnectionHealth): string {
   }
 }
 
+// FUT-253: catch any render/lifecycle crash in the OS tree and ship it off-device
+// (glog.error was defined but never wired — an uncaught throw used to vanish into a
+// blank screen with no trace). Keeps the app alive with a minimal fallback.
+class GlogErrorBoundary extends Component<{ children: ReactNode }, { crashed: boolean }> {
+  state = { crashed: false };
+  static getDerivedStateFromError(): { crashed: boolean } {
+    return { crashed: true };
+  }
+  componentDidCatch(err: unknown, info: { componentStack?: string }): void {
+    try {
+      glog.error("react_boundary", err);
+      glog.emit("error", "boundary", { stack: String(info?.componentStack ?? "").slice(0, 800) });
+    } catch {
+      /* logging must never re-throw out of the boundary */
+    }
+  }
+  render(): ReactNode {
+    if (this.state.crashed) {
+      return (
+        <SafeAreaView style={styles.safe}>
+          <StatusBar style="light" />
+          <Text style={styles.help}>FFS OS hit a render error — it was logged to the collector. Reopen the app.</Text>
+        </SafeAreaView>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
+  return (
+    <GlogErrorBoundary>
+      <AppInner />
+    </GlogErrorBoundary>
+  );
+}
+
+function AppInner() {
   // FUT-236 — the calibration run owns the whole screen when active, and on a fresh
   // install it comes up FIRST, before the OS shell. Yoni asked for it to start "when I
   // open the app for the first time with both glasses and ring unpaired". Resolved
@@ -421,7 +458,10 @@ export default function App() {
   });
 
   const bt = useFfsBluetooth({ autoScan: true });
-  const sup = useConnectionSupervisor(bt);
+  // FUT-253: feed every connection-health transition to the collector (the FUT-136
+  // "drop → reconnect → home" sequence — the single highest-value miss). glog.conn was
+  // defined but never wired; the supervisor already calls onEvent on each transition.
+  const sup = useConnectionSupervisor(bt, { onEvent: glog.conn });
   const [session, setSession] = useState<string>("");
   const [swirlOn, setSwirlOn] = useState(false);
   const [flashProbe, setFlashProbe] = useState<string>("");
@@ -448,22 +488,27 @@ export default function App() {
       FfsBle.addListener("onRingConnected", (p) => {
         setRingState(`connected — ${p.name}`);
         setRingLog((l) => [`READY: ${p.name}`, ...l].slice(0, 12));
+        glog.emit("ring", "connected", { name: p.name }); // FUT-253: ring normal-path telemetry
       }),
       FfsBle.addListener("onRingDisconnected", (p) => {
         setRingState("—");
         setRingLog((l) => [`disconnected${p.reason ? ` (${p.reason})` : ""}`, ...l].slice(0, 12));
+        glog.emit("ring", "disconnected", { reason: p.reason ?? null });
       }),
       // Every frame, decoded or not — an unmapped code is a finding, not noise.
       FfsBle.addListener("onRingRaw", (p) => {
         setRingFrames((n) => n + 1);
         setRingLog((l) => [`rx ${p.hex}`, ...l].slice(0, 12));
+        glog.emit("ring", "raw", { hex: p.hex }); // sampled 1-in-N at the source (HOT_KEYS "ring:raw")
       }),
       FfsBle.addListener("onRingBattery", (p) => {
         setRingLog((l) => [`battery ${p.battery}%`, ...l].slice(0, 12));
+        glog.emit("ring", "battery", { battery: p.battery });
       }),
       FfsBle.addListener("onGesture", (g) => {
         if (g.device !== "ring") return;
         setRingLog((l) => [`👆 ${g.gesture}`, ...l].slice(0, 12));
+        glog.emit("ring", "gesture", { gesture: g.gesture });
       }),
     ];
     return () => subs.forEach((s) => s.remove());
@@ -523,15 +568,32 @@ export default function App() {
       version: () => APP_VERSION,
       gestures: () => navRef.current?.gestureCount ?? 0,
     };
-    navRef.current = new PhoneNav(homeScreen, ctx, () => screenOwner.reclaimNow());
+    navRef.current = new PhoneNav(homeScreen, ctx, () => {
+      screenOwner.reclaimNow();
+      // FUT-253: on-glass screen transitions (nav.ts had no telemetry hook).
+      try { glog.emit("os", "nav", navRef.current?.describe() ?? {}); } catch { /* never break nav */ }
+    });
   }
 
   // Off-device telemetry (FUT-144 collector).
   useEffect(() => {
     initLoggerCore({ app: "ffs-os-phone", harness: "App" });
     setSession(glog.session());
+    // FUT-253: log every HUD surface repaint (glog.reclaim was a dead sink).
+    screenOwner.setOnReclaim(glog.reclaim);
     glog.emit("os", "launcher_start", { session: glog.session(), version: APP_VERSION });
   }, []);
+
+  // FUT-253: raw connection snapshot — emit whenever any observable link field changes
+  // (glog.connState was defined but never called). Cheap: fires only on state transitions.
+  useEffect(() => {
+    glog.connState({
+      connected: bt.sides.L || bt.sides.R,
+      ready: bt.pairReady,
+      rawState: bt.state,
+      battery: bt.deviceInfo?.battery ?? null,
+    });
+  }, [bt.sides.L, bt.sides.R, bt.pairReady, bt.state, bt.deviceInfo?.battery]);
 
   // FUT-167 Stage 1: receive the zero-write flash-channel probe result.
   useEffect(() => {
@@ -560,6 +622,13 @@ export default function App() {
   useEffect(() => {
     const subs = [
       FfsBle.addListener("onLog", (e) => glog.emit("drv", "log", { m: e.message })),
+      // FUT-253: the connect lifecycle — previously only the hook consumed these, so the
+      // collector never saw a link come up. Handlers here are telemetry-only (no behaviour).
+      FfsBle.addListener("onDeviceFound", (d) =>
+        glog.emit("drv", "device_found", { side: d.side, name: d.name ?? null, mac: d.mac ?? null, rssi: d.rssi ?? null })),
+      FfsBle.addListener("onConnected", (e) => glog.emit("drv", "connected", { side: e.side })),
+      FfsBle.addListener("onPairReady", () => glog.emit("drv", "pair_ready", {})),
+      FfsBle.addListener("onStateChange", (p) => glog.emit("drv", "adapter_state", { state: p.state })),
       FfsBle.addListener("onDisconnected", (e) =>
         glog.emit("drv", "disconnected", { side: e.side, reason: e.reason ?? null })),
       FfsBle.addListener("onDeviceInfo", (e) => {
