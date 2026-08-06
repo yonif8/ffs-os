@@ -1,0 +1,11 @@
+# Gradle build output for the ffs-ble Android library.
+#
+# The root .gitignore's `/android` entry is anchored to the repo root (the generated
+# app project), so it does NOT cover this module's own build dir.
+#
+# Worth ignoring for a second reason on this box: Gradle emits Kotlin lambda artifacts
+# with very long names (e.g. `FfsBleModule$definition$lambda$34$$inlined$Function$1.dex`)
+# nested deep under .transforms/, which blow past Windows MAX_PATH. `git add` fails hard
+# with "Filename too long" and aborts the whole staging operation, not just that file.
+build/
+.cxx/
