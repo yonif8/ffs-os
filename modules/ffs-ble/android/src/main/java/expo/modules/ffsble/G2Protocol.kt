@@ -295,6 +295,293 @@ object G2EvenHub {
             message(G2EvenHubCmd.CREATE_STARTUP_PAGE, 3, page, magicRandom)
         }
     }
+
+    /**
+     * Full text page (create or rebuild). The visible text container does NOT capture
+     * events -- the evt-0 container does.
+     */
+    fun textPageMessage(text: String, rebuild: Boolean, magicRandom: Int): ByteArray {
+        val tc = textContainer(
+            x = 0, y = 0, width = 576, height = 288, containerID = 1,
+            content = if (text.isEmpty()) " " else text, containerName = "ffs-txt"
+        )
+        return pageMessage(
+            textContainers = listOf(tc), imageContainers = emptyList(),
+            rebuild = rebuild, magicRandom = magicRandom
+        )
+    }
+
+    /** TextContainerUpgrade (updateTextData, sub-field 9): update a live container. */
+    fun updateText(containerID: Int, content: String, magicRandom: Int): ByteArray {
+        val u = G2ProtobufWriter()
+        u.writeInt32Field(1, containerID)
+        u.writeInt32Field(3, 0) // contentOffset
+        u.writeInt32Field(4, content.toByteArray(Charsets.UTF_8).size) // contentLength
+        u.writeStringField(5, content)
+        return message(G2EvenHubCmd.UPDATE_TEXT_DATA, 9, u.data, magicRandom)
+    }
+
+    /** EvenHub heartbeat (keep-alive; FUT-159 wants ~5s cadence). */
+    fun heartbeat(magicRandom: Int): ByteArray =
+        message(G2EvenHubCmd.HEARTBEAT, 14, G2ProtobufWriter().data, magicRandom)
+
+    /**
+     * Shut down our EvenHub page so the firmware releases the HUD -- this is how the stock
+     * DASHBOARD (or any firmware idle screen) gets to show; while we hold a page it never can.
+     * Pairs with pageCreated=false so our next page re-creates fresh. (FUT-170)
+     */
+    fun shutdownPage(magicRandom: Int, exitMode: Int = 0): ByteArray {
+        val c = G2ProtobufWriter()
+        c.writeInt32Field(1, exitMode)
+        return message(G2EvenHubCmd.SHUTDOWN_PAGE, 11, c.data, magicRandom)
+    }
+
+    // ---- Image containers (P4, FUT-153) ----
+
+    /**
+     * ImageContainerProperty: f1=x, f2=y, f3=width, f4=height, f5=containerID, f6=name.
+     * Firmware max per container/tile = 200x100; larger images must be tiled. Max 4 image
+     * containers per page.
+     */
+    fun imageContainer(
+        x: Int,
+        y: Int,
+        width: Int,
+        height: Int,
+        containerID: Int,
+        containerName: String? = null
+    ): ByteArray {
+        val w = G2ProtobufWriter()
+        w.writeInt32Field(1, x)
+        w.writeInt32Field(2, y)
+        w.writeInt32Field(3, width)
+        w.writeInt32Field(4, height)
+        w.writeInt32Field(5, containerID)
+        if (containerName != null) w.writeStringField(6, containerName)
+        return w.data
+    }
+
+    /**
+     * A page (create OR rebuild) containing one image container. Routes through
+     * `pageMessage`, so it also carries the evt-0 capture container -- gestures keep working
+     * while an image is shown (the image container itself cannot capture). FUT-153.
+     */
+    fun imagePageMessage(imageContainer: ByteArray, rebuild: Boolean, magicRandom: Int): ByteArray =
+        pageMessage(
+            textContainers = emptyList(), imageContainers = listOf(imageContainer),
+            rebuild = rebuild, magicRandom = magicRandom
+        )
+
+    /**
+     * ImageRawDataUpdate: f1=containerID, f2=name, f3=mapSessionId, f4=mapTotalSize,
+     * f5=compressMode, f6=mapFragmentIndex, f7=mapFragmentPacketSize, f8=mapRawData.
+     */
+    fun imageRawDataUpdate(
+        containerID: Int,
+        containerName: String?,
+        mapSessionId: Int,
+        mapTotalSize: Int,
+        compressMode: Int = 0,
+        mapFragmentIndex: Int,
+        mapFragmentPacketSize: Int,
+        mapRawData: ByteArray
+    ): ByteArray {
+        val w = G2ProtobufWriter()
+        w.writeInt32Field(1, containerID)
+        if (containerName != null) w.writeStringField(2, containerName)
+        w.writeInt32Field(3, mapSessionId)
+        w.writeInt32Field(4, mapTotalSize)
+        w.writeInt32Field(5, compressMode)
+        w.writeInt32Field(6, mapFragmentIndex)
+        w.writeInt32Field(7, mapFragmentPacketSize)
+        w.writeBytesField(8, mapRawData)
+        return w.data
+    }
+
+    /** Wrap an ImageRawDataUpdate as an evenhub message (cmd updateImageRawData=3, sub-field 5). */
+    fun updateImageMessage(update: ByteArray, magicRandom: Int): ByteArray =
+        message(G2EvenHubCmd.UPDATE_IMAGE_RAW_DATA, 5, update, magicRandom)
+
+    /**
+     * Parse an inbound image-fragment ACK (ImgResCmd = response field 6):
+     * inner f8=errorCode (success == 4), f3=session, f6=fragmentIndex. Null if the payload
+     * is not an image ACK.
+     */
+    fun parseImageAck(payload: ByteArray): G2ImageAck? {
+        val f = G2ProtobufReader(payload).parseFields()
+        val resData = f[6] as? ByteArray ?: return null
+        val rf = G2ProtobufReader(resData).parseFields()
+        val errorCode = rf[8] as? Int ?: return null
+        val session = rf[3] as? Int ?: return null
+        val fragment = (rf[6] as? Int) ?: 0
+        return G2ImageAck(session = session, fragment = fragment, success = errorCode == 4)
+    }
+
+    // ---- 4-bit BMP encoding (the raw-image format updateImageRawData expects) ----
+
+    /**
+     * Encode 8-bit grayscale pixels (row-major, top-down) as a 4-bit-indexed BMP (16-level
+     * grayscale palette). Null if the buffer is too small for the stated dimensions.
+     *
+     * SIGNEDNESS: `grayscalePixels` is a Kotlin ByteArray, so every pixel read masks with
+     * `and 0xFF` before the `shr 4` that picks the palette index. Without the mask a pixel
+     * >= 0x80 sign-extends and `shr` drags in ones -- every bright pixel would come out
+     * black. This is the exact class of bug the golden tests exist to catch.
+     */
+    fun build4BitBmp(grayscalePixels: ByteArray, width: Int, height: Int): ByteArray? {
+        if (width <= 0 || height <= 0 || grayscalePixels.size < width * height) return null
+        val bytesPerRow4bit = (width + 1) / 2
+        val paddedRowSize = (bytesPerRow4bit + 3) and 3.inv()
+        val pixelDataSize = paddedRowSize * height
+        val headerSize = 14 + 40 + 64
+        val fileSize = headerSize + pixelDataSize
+
+        val bmp = ByteArrayOutputStream(fileSize)
+        // BMP file header (14)
+        bmp.write(0x42); bmp.write(0x4D) // "BM"
+        bmp.le32(fileSize)
+        bmp.le16(0); bmp.le16(0)
+        bmp.le32(headerSize)
+        // DIB header BITMAPINFOHEADER (40)
+        bmp.le32(40)
+        bmp.le32(width)
+        bmp.le32(height) // positive -> bottom-up
+        bmp.le16(1)      // planes
+        bmp.le16(4)      // bpp
+        bmp.le32(0)      // compression
+        bmp.le32(pixelDataSize)
+        bmp.le32(2835); bmp.le32(2835) // ~72 DPI
+        bmp.le32(16)     // colors used
+        bmp.le32(0)      // important colors
+        // Color table: 16 grayscale entries (B,G,R,0)
+        for (i in 0 until 16) {
+            val v = i * 17
+            bmp.write(v); bmp.write(v); bmp.write(v); bmp.write(0)
+        }
+        // Pixel data (bottom-up, 4-bit packed, rows padded to 4 bytes)
+        val rowBuf = ByteArray(paddedRowSize)
+        for (row in 0 until height) {
+            val srcRow = height - 1 - row
+            java.util.Arrays.fill(rowBuf, 0)
+            for (col in 0 until width) {
+                val gray8 = grayscalePixels[srcRow * width + col].toInt() and 0xFF
+                val index4 = gray8 shr 4
+                val bytePos = col / 2
+                if (col % 2 == 0) rowBuf[bytePos] = (index4 shl 4).toByte()
+                else rowBuf[bytePos] = (rowBuf[bytePos].toInt() or index4).toByte()
+            }
+            bmp.write(rowBuf)
+        }
+        return bmp.toByteArray()
+    }
+
+    /**
+     * A recognizable 200x100 test bitmap through the raw-image path: white background,
+     * 4px black border, black filled circle centered. Proves encode -> container -> send.
+     */
+    fun testImageBmp(width: Int = 200, height: Int = 100): ByteArray? {
+        val px = ByteArray(width * height) { 0xFF.toByte() }
+        val cx = width / 2
+        val cy = height / 2
+        val r = minOf(width, height) / 2 - 12
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                val border = x < 4 || y < 4 || x >= width - 4 || y >= height - 4
+                val dx = x - cx
+                val dy = y - cy
+                if (border || (dx * dx + dy * dy <= r * r)) px[y * width + x] = 0
+            }
+        }
+        return build4BitBmp(px, width, height)
+    }
+
+    // ---- Inbound gesture decode ----
+
+    /** EvenHub response cmd for a touch/gesture event (glasses -> phone). */
+    private const val RSP_OS_NOTIFY_EVENT: Int = 2
+
+    /**
+     * Decode an inbound EvenHub (0xE0) payload into a gesture name, or null if it is not a
+     * nav gesture (heartbeat ack, foreground/exit, IMU, ...).
+     *
+     * Chain: evenhub_main_msg_ctx{cmd=2, f13=SendDeviceEvent} -> one of three sub-events,
+     * each nesting an OsEventType at a DIFFERENT field number:
+     *   f3 = SysEvent  -> inner f1  (system gestures: double-tap, swipe, foreground/exit)
+     *   f2 = TextEvent -> inner f3  (tap/swipe on a text container -- what a tap on our HUD emits)
+     *   f1 = ListEvent -> inner f5  (interaction on a list container)
+     * OsEventType: 0=click(tap), 1=scrollTop(swipe up), 2=scrollBottom(swipe down), 3=doubleClick.
+     * (FUT-160: a SysEvent-only decode missed single-tap on text pages -- it arrives as TextEvent.)
+     *
+     * `source` is `Sys_ItemEvent.eventSource` (inner field 2): 1 and 3 are the temple
+     * touchpads; 2 is believed to be the R1 ring and has NEVER been observed. It exists ONLY
+     * on Sys events, so a tap on a text/list container is permanently source-blind and
+     * reports null. That blindness is why the ring's input route was locked to the phone link.
+     */
+    fun parseGesture(payload: ByteArray): G2GestureDecode? {
+        val f = G2ProtobufReader(payload).parseFields()
+        if ((f[1] as? Int) != RSP_OS_NOTIFY_EVENT) return null
+        val devEvent = f[13] as? ByteArray ?: return null
+        val df = G2ProtobufReader(devEvent).parseFields()
+        // SysEvent: absent eventType => CLICK(0) => tap. Protobuf omits zero-value fields, so a
+        // single-press arrives as SysEvent{eventSource} with NO eventType field at all --
+        // treating "absent" as "not a gesture" was the single-tap miss.
+        val sysData = df[3] as? ByteArray
+        if (sysData != null) {
+            val g = gestureName(sysData, 1, absentIsClick = true)
+            if (g != null) return G2GestureDecode(g, eventSource(sysData))
+        }
+        val textData = df[2] as? ByteArray
+        if (textData != null) {
+            val g = gestureName(textData, 3)
+            if (g != null) return G2GestureDecode(g, null)
+        }
+        val listData = df[1] as? ByteArray
+        if (listData != null) {
+            val g = gestureName(listData, 5)
+            if (g != null) return G2GestureDecode(g, null)
+        }
+        return null
+    }
+
+    /**
+     * `Sys_ItemEvent.eventSource` -- inner field 2. Null when the firmware omitted it
+     * (protobuf zero-omission means source 0, if it exists, is indistinguishable from absent).
+     */
+    private fun eventSource(sysData: ByteArray): Int? =
+        G2ProtobufReader(sysData).parseFields()[2] as? Int
+
+    /**
+     * Read the OsEventType at [field] inside a sub-event and map it to a nav-gesture name, or
+     * null if it is not a nav gesture. For the SysEvent path, [absentIsClick] makes a MISSING
+     * eventType decode as CLICK(0)/tap -- the firmware omits the field when its value is 0.
+     */
+    private fun gestureName(data: ByteArray, field: Int, absentIsClick: Boolean = false): String? {
+        val f = G2ProtobufReader(data).parseFields()
+        val eventType = (f[field] as? Int) ?: (if (absentIsClick) 0 else -1)
+        return when (eventType) {
+            0 -> "tap"
+            1 -> "swipe_up"
+            2 -> "swipe_down"
+            3 -> "double_tap"
+            else -> null
+        }
+    }
+}
+
+/** An inbound image-fragment ACK. */
+data class G2ImageAck(val session: Int, val fragment: Int, val success: Boolean)
+
+/** A decoded inbound gesture plus, where the firmware provides it, its input source. */
+data class G2GestureDecode(val name: String, val source: Int?)
+
+// MARK: - Little-endian byte helpers (BMP construction)
+
+private fun ByteArrayOutputStream.le16(v: Int) {
+    write(v and 0xFF); write((v ushr 8) and 0xFF)
+}
+
+private fun ByteArrayOutputStream.le32(v: Int) {
+    for (i in 0 until 4) write((v ushr (8 * i)) and 0xFF)
 }
 
 // MARK: - Rolling counters
@@ -327,4 +614,494 @@ class G2SendCounters {
             payload = payload,
             reserveFlag = reserveFlag
         )
+}
+
+// MARK: - Minimal protobuf reader (field# -> value)
+
+/**
+ * Parses the subset of protobuf we need to walk EvenHub response messages: varint fields
+ * become `Int`, length-delimited fields become `ByteArray`, everything else is skipped.
+ *
+ * Unlike the Swift original this is defensive about malformed input at every bounds check.
+ * It has to be: on iOS a bad frame would trap in `subdata`, which at least crashes loudly in
+ * a debuggable place. Here `copyOfRange` would throw on a BLE callback thread, inside the
+ * notification handler, and take the link down for a frame the glasses may simply have
+ * truncated. Returning null and dropping the frame is the right failure mode for a radio.
+ */
+class G2ProtobufReader(private val data: ByteArray) {
+    private var offset = 0
+
+    private fun hasMore(): Boolean = offset < data.size
+
+    private fun readVarint(): Long? {
+        var result = 0L
+        var shift = 0
+        while (offset < data.size) {
+            val b = data[offset].toInt() and 0xFF
+            offset += 1
+            result = result or ((b and 0x7F).toLong() shl shift)
+            if (b and 0x80 == 0) return result
+            shift += 7
+            if (shift > 63) return null
+        }
+        return null
+    }
+
+    private fun readBytes(): ByteArray? {
+        val len = readVarint() ?: return null
+        if (len < 0 || len > Int.MAX_VALUE) return null
+        val n = len.toInt()
+        if (offset + n > data.size || offset + n < 0) return null
+        val r = data.copyOfRange(offset, offset + n)
+        offset += n
+        return r
+    }
+
+    private fun skip(wire: Int) {
+        when (wire) {
+            0 -> readVarint()
+            1 -> offset += 8
+            2 -> readBytes()
+            5 -> offset += 4
+            else -> offset = data.size
+        }
+    }
+
+    /** Parse into field# -> Int (varint) or ByteArray (length-delimited). */
+    fun parseFields(): Map<Int, Any> {
+        val out = HashMap<Int, Any>()
+        while (hasMore()) {
+            val tag = readVarint() ?: break
+            val field = (tag ushr 3).toInt()
+            when (val wire = (tag and 0x07L).toInt()) {
+                // Swift stored these as Int32(truncatingIfNeeded:); Long.toInt() truncates
+                // to the same low 32 bits, so a >32-bit varint decodes identically.
+                0 -> readVarint()?.let { out[field] = it.toInt() }
+                2 -> readBytes()?.let { out[field] = it }
+                else -> skip(wire)
+            }
+        }
+        return out
+    }
+}
+
+// MARK: - Inbound transport reassembly
+
+/**
+ * Reassembles inbound 0xAA transport packets. ONE INSTANCE PER SIDE -- the left and right
+ * lenses run independent syncId streams, so a shared reassembler would splice two messages
+ * together whenever both arms happened to be mid-message on the same service id.
+ * Mirrors the TX framing in reverse.
+ */
+class G2RxReassembler {
+    private val partials = HashMap<String, ByteArray>()
+
+    /**
+     * Feed one raw notification packet. Returns (serviceId, fullPayload) when a message
+     * completes, else null (needs more packets, or not a 0xAA frame).
+     */
+    fun feed(raw: ByteArray): Pair<Int, ByteArray>? {
+        if (raw.size < 8) return null
+        fun b(i: Int) = raw[i].toInt() and 0xFF
+        if (b(0) != G2Wire.HEADER_BYTE) return null
+        val payloadLen = b(3)
+        if (raw.size < payloadLen + 8) return null
+        val totalPackets = b(4)
+        val serialNum = b(5)
+        val serviceId = b(6)
+        val status = b(7)
+        if (((status shr 1) and 0x0F) != 0) return null // resultCode != 0
+        val isLast = serialNum == totalPackets
+        val end = 8 + payloadLen - (if (isLast) 2 else 0) // strip trailing CRC on last
+        // Guard the Swift original could not: a last packet claiming payloadLen < 2 would
+        // produce end < 8 and throw out of copyOfRange on the BLE callback thread.
+        if (end < 8 || end > raw.size) return null
+        val chunk = raw.copyOfRange(8, end)
+        val key = "$serviceId-${b(2)}" // serviceId-syncId
+        if (totalPackets > 1) {
+            partials[key] = if (serialNum == 1) chunk else (partials[key] ?: ByteArray(0)) + chunk
+        }
+        if (!isLast) return null
+        val full = if (totalPackets > 1) (partials.remove(key) ?: chunk) else chunk
+        return Pair(serviceId, full)
+    }
+
+    /** Drop any half-assembled message (called when the side drops -- the stream is broken). */
+    fun reset() = partials.clear()
+}
+
+// MARK: - DevSettings (auth handshake, service 0x80)
+
+object G2DevSettings {
+    /**
+     * AUTHENTICATION -- AuthMgr{secAuth=true, phoneType=3}.
+     *
+     * phoneType 3 is PHONE_IOS, and it stays 3 on Android DELIBERATELY. It is the value the
+     * handshake has been proven on-glass with; the Android-specific value is unknown and
+     * unproven, and this byte gates the whole session (a rejected auth means no page, no
+     * gestures, nothing). Cardinal rule 1 cuts both ways -- do not "fix" this to a guessed
+     * constant without an on-glass A/B. If the glasses ever behave differently for an Android
+     * host, this line is the first suspect.
+     */
+    fun authCmd(magicRandom: Int): ByteArray {
+        val w = G2ProtobufWriter()
+        w.writeInt32Field(1, G2DevCfgCmd.AUTHENTICATION)
+        w.writeInt32Field(2, magicRandom)
+        val auth = G2ProtobufWriter()
+        auth.writeBoolField(1, true)
+        auth.writeInt32Field(2, 3) // PHONE_IOS -- see the note above before changing
+        w.writeMessageField(3, auth.data)
+        return w.data
+    }
+
+    /** PIPE_ROLE_CHANGE -- asCmdRole = RIGHT(1). */
+    fun pipeRoleChange(magicRandom: Int): ByteArray {
+        val w = G2ProtobufWriter()
+        w.writeInt32Field(1, G2DevCfgCmd.PIPE_ROLE_CHANGE)
+        w.writeInt32Field(2, magicRandom)
+        val role = G2ProtobufWriter()
+        role.writeInt32Field(1, 1) // RIGHT
+        w.writeMessageField(4, role.data)
+        return w.data
+    }
+
+    /** TIME_SYNC -- f1 = (unix seconds + tz offset), pre-shifted so UTC reads local. */
+    fun timeSync(magicRandom: Int, nowMillis: Long = System.currentTimeMillis()): ByteArray {
+        val w = G2ProtobufWriter()
+        w.writeInt32Field(1, G2DevCfgCmd.TIME_SYNC)
+        w.writeInt32Field(2, magicRandom)
+        val ts = G2ProtobufWriter()
+        val nowSec = nowMillis / 1000L
+        val tzSec = (java.util.TimeZone.getDefault().getOffset(nowMillis) / 1000L)
+        ts.writeInt32Field(1, (nowSec + tzSec).toInt()) // truncate to 32 bits, like Swift
+        w.writeMessageField(128, ts.data)
+        return w.data
+    }
+}
+
+// MARK: - Onboarding (service 0x10)
+
+object G2Onboarding {
+    /**
+     * Tell the glasses onboarding is FINISHED. Until the firmware considers onboarding
+     * complete, the touchpad drives its own on-glass onboarding UI and only the reserved
+     * double-tap reaches the host -- single-tap + swipe are consumed locally.
+     * OnboardingDataPackage{cmd=CONFIG(1), magic, config{processId=FINISH(4)}}.
+     */
+    fun skip(magicRandom: Int): ByteArray {
+        val config = G2ProtobufWriter()
+        config.writeInt32Field(1, 4) // processId = FINISH
+        val w = G2ProtobufWriter()
+        w.writeInt32Field(1, 1) // commandId = CONFIG
+        w.writeInt32Field(2, magicRandom)
+        w.writeMessageField(3, config.data)
+        return w.data
+    }
+}
+
+// MARK: - Gesture control (service 0x0D)
+
+object G2GestureCtrl {
+    /**
+     * Register the app with the on-glass gesture controller. This is what makes the firmware
+     * FORWARD single-tap + swipe to the host -- without it the firmware consumes those for
+     * its own UI and only the reserved double-tap reaches us. (FUT-160)
+     */
+    fun initCmd(magicRandom: Int): ByteArray {
+        val w = G2ProtobufWriter()
+        w.writeInt32Field(1, 0) // init/register opcode
+        w.writeInt32Field(2, magicRandom)
+        return w.data
+    }
+}
+
+// MARK: - Even AI (service 7) -- native "thinking" swirl via the AI session lifecycle
+
+/**
+ * The G2 firmware renders a GPU-smooth, dual-lens animation (the "Even AI thinking" swirl)
+ * while an even_ai session is active. We drive that session over BLE to light the NATIVE
+ * animation with zero pixel streaming:
+ *   CTRL{status=ENTER} opens the AI card, ASK{text} holds the awaiting-reply state,
+ *   CTRL{status=EXIT}  closes it.
+ * EvenAIDataPackage { f1=commandId, f2=magicRandom, f3=ctrl, f5=askInfo }. (FUT-165, Path A.)
+ */
+object G2EvenAI {
+    const val STATUS_WAKE_UP: Int = 1
+    const val STATUS_ENTER: Int = 2
+    const val STATUS_EXIT: Int = 3
+
+    /** EvenAIDataPackage{ f1=commandId=CTRL(1), f2=magic, f3=EvenAIControl{ f1=status } }. */
+    fun ctrl(status: Int, magicRandom: Int): ByteArray {
+        val ctrlW = G2ProtobufWriter()
+        ctrlW.writeInt32Field(1, status)
+        val w = G2ProtobufWriter()
+        w.writeInt32Field(1, 1) // commandId = CTRL
+        w.writeInt32Field(2, magicRandom)
+        w.writeMessageField(3, ctrlW.data)
+        return w.data
+    }
+
+    /** EvenAIDataPackage{ f1=ASK(3), f2=magic, f5=EvenAIAskInfo{ f2=streamEnable, f4=text } }. */
+    fun ask(text: String, streamEnable: Int = 0, magicRandom: Int): ByteArray {
+        val askW = G2ProtobufWriter()
+        askW.writeInt32Field(2, streamEnable)
+        askW.writeBytesField(4, text.toByteArray(Charsets.UTF_8))
+        val w = G2ProtobufWriter()
+        w.writeInt32Field(1, 3) // commandId = ASK
+        w.writeInt32Field(2, magicRandom)
+        w.writeMessageField(5, askW.data)
+        return w.data
+    }
+}
+
+// MARK: - Device settings/info (service 0x09) -- battery + firmware version (FUT-169)
+
+/**
+ * The glasses answer a "basic settings" request with their real battery %, charging state and
+ * per-lens firmware version STRING, replying on CHAR_NOTIFY. This is the ONLY real battery
+ * source and the read-back the canary flash uses to prove a flash took (FUT-167).
+ * G2SettingPackage{ f1=commandId, f2=magic, f4=DeviceReceiveRequestFromApp }.
+ */
+object G2Setting {
+    /** G2SettingCommandId.deviceReceiveRequest -- "request info FROM glasses". */
+    const val CMD_DEVICE_RECEIVE_REQUEST: Int = 2
+    /** G2SettingCommandId.deviceReceiveInfo -- "send settings TO glasses". */
+    const val CMD_DEVICE_RECEIVE_INFO: Int = 1
+
+    /**
+     * Toggle the firmware's native head-up DASHBOARD -- the stock panel that pops on the
+     * look-up gesture and fights our OS for the HUD. `enabled=false` makes our OS own the
+     * display; fully reversible.
+     */
+    fun setHeadUpSwitch(magicRandom: Int, enabled: Boolean): ByteArray {
+        val headUp = G2ProtobufWriter()
+        headUp.writeInt32Field(1, if (enabled) 1 else 0)
+        val info = G2ProtobufWriter()
+        info.writeMessageField(4, headUp.data)
+        val w = G2ProtobufWriter()
+        w.writeInt32Field(1, CMD_DEVICE_RECEIVE_INFO)
+        w.writeInt32Field(2, magicRandom)
+        w.writeMessageField(3, info.data)
+        return w.data
+    }
+
+    /**
+     * Basic-info request: G2SettingPackage{ f1=cmd(2), f2=magic,
+     * f4=DeviceReceiveRequestFromApp{ f1=settingInfoType=APP_REQUIRE_BASIC_SETTING(1) } }.
+     */
+    fun requestDeviceInfo(magicRandom: Int): ByteArray {
+        val req = G2ProtobufWriter()
+        req.writeInt32Field(1, 1)
+        val w = G2ProtobufWriter()
+        w.writeInt32Field(1, CMD_DEVICE_RECEIVE_REQUEST)
+        w.writeInt32Field(2, magicRandom)
+        w.writeMessageField(4, req.data)
+        return w.data
+    }
+
+    data class DeviceInfo(
+        var leftVersion: String? = null,
+        var rightVersion: String? = null,
+        var battery: Int? = null,
+        var charging: Boolean? = null
+    )
+
+    /** Read a little-endian u32 as a Long, so the value stays unsigned when formatted. */
+    private fun u32(b: ByteArray, o: Int): Long =
+        (b[o].toLong() and 0xFF) or
+            ((b[o + 1].toLong() and 0xFF) shl 8) or
+            ((b[o + 2].toLong() and 0xFF) shl 16) or
+            ((b[o + 3].toLong() and 0xFF) shl 24)
+
+    /**
+     * Parse a service-0x09 response payload into DeviceInfo, or null if it is not a
+     * device-info response. The inner DeviceReceiveRequestFromApp (field 4, or field 5 =
+     * DeviceSendInfoToApp on some firmwares) carries f5=leftVersion, f6=rightVersion,
+     * f12=battery, f13=charging.
+     *
+     * We do NOT hard-gate on the command id -- instead we require the inner message to
+     * actually contain a known field, which safely rejects other service-0x09 traffic.
+     *
+     * Fields 101-104 at the OUTER level are OUR CFW's diagnostic channels (fontpeek, FreeType
+     * font log, RAM-exec probe, resident-loader counters). They ride the version string
+     * because that string is already displayed and already shipped to glog -- no new UI, no
+     * new event. FUT-188 / FUT-191 / FUT-214 / FUT-216.
+     */
+    fun parseDeviceInfo(payload: ByteArray): DeviceInfo? {
+        val f = G2ProtobufReader(payload).parseFields()
+        val inner = (f[4] as? ByteArray) ?: (f[5] as? ByteArray) ?: return null
+        val inf = G2ProtobufReader(inner).parseFields()
+        val out = DeviceInfo()
+        (inf[5] as? ByteArray)?.let { out.leftVersion = String(it, Charsets.UTF_8) }
+        (inf[6] as? ByteArray)?.let { out.rightVersion = String(it, Charsets.UTF_8) }
+        (inf[12] as? Int)?.let { if (it in 0..100) out.battery = it }
+        (inf[13] as? Int)?.let { out.charging = it != 0 }
+
+        // FUT-188 "fontpeek": field 101 = the first 127 bytes of the XIP font slot 0.
+        (f[101] as? ByteArray)?.let { fp ->
+            val hex = fp.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+            out.leftVersion = (out.leftVersion ?: "") + "  ⟨FONTS=" + hex + "⟩"
+        }
+        // FUT-191: field 102 = the runtime FreeType font-name log (newline separated).
+        (f[102] as? ByteArray)?.let { fl ->
+            val names = String(fl, Charsets.UTF_8).split("\n").filter { it.isNotEmpty() }
+                .joinToString(", ")
+            out.leftVersion = (out.leftVersion ?: "") +
+                "  ⟨FTFONTS=" + (if (names.isEmpty()) "(none)" else names) + "⟩"
+        }
+        // FUT-214 RAM-exec probe: field 103 = "RX01" + 5 LE u32s. ret == 0x2A means executing
+        // RAM-pushed code WORKS (the green light for the resident loader).
+        (f[103] as? ByteArray)?.let { pr ->
+            if (pr.size >= 24) {
+                val marker = String(pr.copyOfRange(0, 4), Charsets.US_ASCII)
+                val ret = u32(pr, 4)
+                val verdict = when (ret) {
+                    0x2AL -> "EXEC_OK"
+                    0xDEAD0000L -> "OOM"
+                    else -> "UNEXPECTED"
+                }
+                out.leftVersion = (out.leftVersion ?: "") + String.format(
+                    "  ⟨RAMEXEC %s %s ret=0x%X mpu_ctrl=0x%X mpu_type=0x%X ccr=0x%X buf=0x%08X⟩",
+                    marker, verdict, ret, u32(pr, 8), u32(pr, 12), u32(pr, 16), u32(pr, 20)
+                )
+            }
+        }
+        // FUT-216 resident OTA loader: field 104 = "LD01" + gen + ran_gen + last_ret + len.
+        // gen = payloads received, ran = payloads executed. ran==gen + ret==0x0A/0x0B confirms
+        // the payload ran on-glass.
+        (f[104] as? ByteArray)?.let { ld ->
+            if (ld.size >= 20) {
+                val sb = StringBuilder(
+                    String.format(
+                        "  ⟨LOADER gen=%d ran=%d ret=0x%X len=%d",
+                        u32(ld, 4), u32(ld, 8), u32(ld, 12), u32(ld, 16)
+                    )
+                )
+                if (ld.size >= 32) {
+                    sb.append(
+                        String.format(
+                            " calls=%d rxlen=%d first4=0x%08X", u32(ld, 20), u32(ld, 24), u32(ld, 28)
+                        )
+                    )
+                }
+                if (ld.size >= 52) {
+                    sb.append(
+                        String.format(
+                            " disp=%d svc=[0x%X,0x%X,0x%X,0x%X]",
+                            u32(ld, 32), u32(ld, 36), u32(ld, 40), u32(ld, 44), u32(ld, 48)
+                        )
+                    )
+                }
+                out.leftVersion = (out.leftVersion ?: "") + sb.toString() + "⟩"
+            }
+        }
+
+        if (out.leftVersion == null && out.rightVersion == null &&
+            out.battery == null && out.charging == null
+        ) {
+            return null
+        }
+        return out
+    }
+}
+
+// MARK: - Stock dashboard content (service 0x01) -- FUT-170
+
+/**
+ * The firmware's native head-up dashboard renders widgets via LVGL; its CONTENT and widget
+ * order are driven over BLE with a hand-rolled DashboardDataPackage on service 0x01. We can
+ * (a) reorder/select which widgets appear and (b) push custom content into the SCHEDULE
+ * widget. News/Stock/Weather content is Even-cloud-owned; layout/fonts need a CFW patch.
+ * WidgetType: 1=News 2=Stock 3=Schedule 4=Quicklist 5=Health.
+ */
+object G2Dashboard {
+    const val CMD_RECEIVE: Int = 2 // Dashboard_Receive (phone -> glasses push)
+
+    /**
+     * DashboardDisplayConfig: pick + order the visible widgets (+ status order, 12/24h, C/F).
+     * [widgetOrder] is a packed list of WidgetType IDs; list order = on-screen order.
+     */
+    fun displayConfig(
+        magicRandom: Int,
+        widgetOrder: List<Int>,
+        halfDay: Boolean = true,
+        celsius: Boolean = true
+    ): ByteArray {
+        val orderBytes = ByteArray(widgetOrder.size) { (widgetOrder[it] and 0xFF).toByte() }
+        val cfg = G2ProtobufWriter()
+        cfg.writeInt32Field(1, 4)                              // displayMode
+        cfg.writeInt32Field(2, 3)                              // statusDisplayCount
+        cfg.writeBytesField(3, byteArrayOf(1, 2, 3))           // statusDisplayOrder
+        cfg.writeInt32Field(4, widgetOrder.size)               // widgetDisplayCount
+        cfg.writeBytesField(5, orderBytes)                     // widgetDisplayOrder
+        cfg.writeInt32Field(6, if (halfDay) 1 else 0)          // halfDayFormat
+        cfg.writeInt32Field(7, if (celsius) 1 else 2)          // temperatureUnit
+        val recv = G2ProtobufWriter()
+        recv.writeMessageField(2, cfg.data)                    // DashboardReceiveFromApp.f2
+        val pkg = G2ProtobufWriter()
+        pkg.writeInt32Field(1, CMD_RECEIVE)
+        pkg.writeInt32Field(2, magicRandom)
+        pkg.writeMessageField(4, recv.data)                    // DashboardDataPackage.f4
+        return pkg.data
+    }
+
+    /**
+     * Push ONE Schedule entry into the native dashboard's Schedule widget. For MULTI-event,
+     * call once per event with [scheduleTotal] = the total count and [scheduleNum] = the
+     * 0-based index (the firmware assembles the list).
+     */
+    fun pushSchedule(
+        magicRandom: Int,
+        scheduleId: Int,
+        title: String,
+        location: String,
+        time: String,
+        endTimestamp: Int,
+        scheduleTotal: Int = 1,
+        scheduleNum: Int = 0
+    ): ByteArray {
+        val sched = G2ProtobufWriter()
+        sched.writeInt32Field(1, scheduleId)
+        sched.writeStringField(2, title)          // <- custom display text
+        sched.writeStringField(3, location)
+        sched.writeStringField(4, time)
+        sched.writeInt32Field(5, endTimestamp)
+        val rSched = G2ProtobufWriter()
+        rSched.writeInt32Field(1, scheduleTotal)  // scheduleTotal (0 = clear)
+        rSched.writeInt32Field(2, scheduleNum)    // scheduleNum (0-based)
+        rSched.writeMessageField(3, sched.data)   // Schedule
+        rSched.writeInt32Field(4, 1)              // scheduleAuthority
+        val comp = G2ProtobufWriter()
+        comp.writeMessageField(3, rSched.data)    // rWidgetComponent.f3 = Schedule
+        val content = G2ProtobufWriter()
+        content.writeMessageField(2, comp.data)   // DashboardContent.f2
+        val recv = G2ProtobufWriter()
+        recv.writeInt32Field(1, 1)                // packageId
+        recv.writeMessageField(3, content.data)   // DashboardReceiveFromApp.f3
+        val pkg = G2ProtobufWriter()
+        pkg.writeInt32Field(1, CMD_RECEIVE)
+        pkg.writeInt32Field(2, magicRandom)
+        pkg.writeMessageField(4, recv.data)
+        return pkg.data
+    }
+
+    /** Clear the Schedule widget (scheduleTotal=0, no stale entry). */
+    fun calendarClear(magicRandom: Int): ByteArray {
+        val rSched = G2ProtobufWriter()
+        rSched.writeInt32Field(1, 0) // scheduleTotal = 0
+        rSched.writeInt32Field(2, 0) // scheduleNum
+        rSched.writeInt32Field(4, 1) // scheduleAuthority
+        val comp = G2ProtobufWriter()
+        comp.writeMessageField(3, rSched.data)
+        val content = G2ProtobufWriter()
+        content.writeMessageField(2, comp.data)
+        val recv = G2ProtobufWriter()
+        recv.writeInt32Field(1, 1)
+        recv.writeMessageField(3, content.data)
+        val pkg = G2ProtobufWriter()
+        pkg.writeInt32Field(1, CMD_RECEIVE)
+        pkg.writeInt32Field(2, magicRandom)
+        pkg.writeMessageField(4, recv.data)
+        return pkg.data
+    }
 }
