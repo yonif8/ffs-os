@@ -779,12 +779,6 @@ final class G2Central: NSObject {
       guard let data = Data(base64Encoded: base64), !data.isEmpty else {
         self.log("pushToService ignored — bad/empty base64"); return
       }
-      // A service message frames into ≤255 packets of 236 B; anything larger cannot be
-      // sent and used to trap in the framer. Reject here with a readable log instead.
-      guard data.count <= G2Wire.MAX_REASSEMBLY_BYTES else {
-        self.log("pushToService ignored — payload too large (\(data.count) B > \(G2Wire.MAX_REASSEMBLY_BYTES) B)")
-        return
-      }
       self.sendToServiceLocked(serviceId: serviceId, payload: data)
       self.log("pushToService 0x\(String(serviceId, radix: 16)) → both (\(data.count) B)")
     }
@@ -1028,11 +1022,8 @@ final class G2Central: NSObject {
     var m = dashModel
     if let v = obj["time"] as? String { m.time = v }
     if let v = obj["date"] as? String { m.date = v }
-    // Battery is a percentage and drives a bar width in FfsDashboard — clamp it like `tile`
-    // below. Unclamped, `Int(v)` also trapped outright on a Double past Int.max (e.g. 1e30).
-    if let v = obj["battery"] as? Int { m.battery = max(0, min(100, v)) }
-    // NB: clamp in Double space — `Int(1e30)` traps before any Int-side clamp could run.
-    else if let v = obj["battery"] as? Double, v.isFinite { m.battery = Int(min(100, max(0, v)).rounded()) }
+    if let v = obj["battery"] as? Int { m.battery = v }
+    else if let v = obj["battery"] as? Double { m.battery = Int(v) }
     if let v = obj["tile"] as? Int { m.tile = max(0, min(FfsDashboard.TILE_COUNT - 1, v)) }
     if let v = obj["calendarTitle"] as? String { m.calendarTitle = v }
     if let v = obj["calendarSub"] as? String { m.calendarSub = v }
@@ -1933,17 +1924,14 @@ extension G2Central {
       guard g.pass else {
         self.flashProgress("BRICK-GUARD BLOCKED: \(g.reason)", 0, done: true, ok: false); return
       }
-      let gv: G2Flash.GoldenVector? =
-        sha.lowercased() == G2Flash.goldenCFW.sha256 ? G2Flash.goldenCFW :
-        (sha.lowercased() == G2Flash.goldenStock.sha256 ? G2Flash.goldenStock :
-        (sha.lowercased() == G2Flash.goldenCanary.sha256 ? G2Flash.goldenCanary :
-        (sha.lowercased() == G2Flash.goldenFontpeek.sha256 ? G2Flash.goldenFontpeek :
-        (sha.lowercased() == G2Flash.goldenBidiOnly.sha256 ? G2Flash.goldenBidiOnly :
-        (sha.lowercased() == G2Flash.goldenHebrewFull.sha256 ? G2Flash.goldenHebrewFull :
-        (sha.lowercased() == G2Flash.goldenHebrewProbe.sha256 ? G2Flash.goldenHebrewProbe :
-        (sha.lowercased() == G2Flash.goldenFfsui.sha256 ? G2Flash.goldenFfsui :
-        (sha.lowercased() == G2Flash.goldenRamexec.sha256 ? G2Flash.goldenRamexec :
-        (sha.lowercased() == G2Flash.goldenLoader.sha256 ? G2Flash.goldenLoader : nil)))))))))
+      // sha256 → its captured golden vector. A build not in this table cannot be flashed.
+      let goldens: [G2Flash.GoldenVector] = [
+        G2Flash.goldenCFW, G2Flash.goldenStock, G2Flash.goldenStock27, G2Flash.goldenCanary,
+        G2Flash.goldenFontpeek, G2Flash.goldenBidiOnly, G2Flash.goldenHebrewFull,
+        G2Flash.goldenHebrewProbe, G2Flash.goldenFfsui, G2Flash.goldenRamexec,
+        G2Flash.goldenLoader, G2Flash.goldenLoader27,
+      ]
+      let gv = goldens.first { $0.sha256 == sha.lowercased() }
       guard let gvec = gv else {
         self.flashProgress("not a known golden build — refusing", 0, done: true, ok: false); return
       }
