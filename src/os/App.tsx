@@ -20,7 +20,7 @@
 // Patterns lifted from real shipped apps via the Mobbin MCP — see FUT-220 for the refs.
 
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useRef, useState } from "react";
+import { Component, useEffect, useRef, useState, type ReactNode } from "react";
 import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import FfsBle, { toNavGesture } from "../../modules/ffs-ble";
@@ -34,6 +34,7 @@ import { screenOwner } from "./reclaim";
 import { PhoneNav, type PhoneCtx } from "./phone/nav";
 import { homeScreen, textTestScreen, setTextTestContent } from "./phone/screens";
 import { Group, Progress, Row, SectionLabel } from "./ui";
+import { GENERATED_PAYLOADS } from "./payloads.generated";
 
 // Read the REAL shipped version rather than a hand-maintained copy. A hardcoded
 // "0.11.1" had drifted three releases behind app.json, so telemetry reported the
@@ -42,14 +43,9 @@ import { Group, Progress, Row, SectionLabel } from "./ui";
 // (FUT-233, 2026-07-28: a log said 0.11.1 while 0.11.4 was installed.)
 const APP_VERSION = (Constants.expoConfig?.version ?? "unknown") as string;
 
-// FUT-167 Stage 2 — CFW + stock-restore images (hosted on the slsrc server, NOT bundled:
-// this repo is public and the firmware is Even's copyrighted image). Downloaded + SHA-verified
-// natively before any write, against a hardcoded golden-digest allowlist in G2Central.
-//
-// NB: slsrc.x36.site is NOT private — /fw/*.bin, apps.json and the IPA are all served
-// unauthenticated (verified). Directory listing is off, but these URLs are guessable from
-// this public repo. The SHA allowlist is what makes a swapped image unflashable; it is not
-// what stops the images being downloaded. Putting /fw behind auth is tracked separately.
+// FUT-167 Stage 2 — CFW + stock-restore images (hosted on the private slsrc server, NOT
+// bundled: this repo is public and the firmware is Even's copyrighted image). Downloaded
+// + SHA-verified natively before any write.
 const CFW_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_cfw.bin";
 const CFW_SHA = "5c1539fd39c599e6035f6a8ec0779ba687c250d342a24c21a39952fed6c56aa0";
 const STOCK_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_stock.bin";
@@ -103,13 +99,146 @@ const RAMEXEC_SHA = "913a7f28cc79957ed8a5991c7434d993583070fc3d369b6c6a9e1683fd6
 const LOADER_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_loader.bin";
 // FUT-217: no gesture hooks (left touchpad); FUT-216: dispatch probe (logs service keys → svc[]).
 const LOADER_SHA = "373bfe9aa3645f1cda5b0204df1db3516e16347f31dcc9a39846442022c43103";
+// FUT-246 — the SAME loader rebased onto stock 2.2.7.14, which is what Yoni's glasses now run.
+// Every payload in payloads.generated.ts is built against THIS base; pushing them at the
+// 2.2.6.10 loader above would branch into unrelated code. Also carries the FUT-244 pair:
+// loader body-CRC (a corrupt frame is refused as LD04 instead of being executed) and the
+// ffs_ui_patch prop-id migration. ⚠️ The payload frame gained an 8-byte CRC header, so app
+// and firmware MUST ship together — an old app against this loader is refused rej_code=4.
+const LOADER_2_2_7_14_URL = "https://slsrc.x36.site/fw/g2_2.2.7.14_loader.bin";
+const LOADER_2_2_7_14_SHA = "7ecf5f4948e510469cc85cd77c1a291e67bf78800f93a40cb918cf5f326eb9a6";
+// Stock 2.2.7.14, kept as the restore-to-stock escape hatch for the current base.
+const STOCK_2_2_7_14_URL = "https://slsrc.x36.site/fw/g2_2.2.7.14_stock.bin";
+const STOCK_2_2_7_14_SHA = "0fced0aebcc6c88db6f76dba34f91b805d842a5fc297bfd7fa6d6a34ec83cecb";
 const CFW_SERVICE = 0x90; // custom CFW loader BLE service id
+// FUT-238 — STYLE PROPS ORACLE (one tap, one answer). Runs the firmware's OWN
+// lv_style_set_* thunks, then asks lv_style_set_prop whether the prop it wrote is the
+// id we claim: an id already held is OVERWRITTEN (prop_cnt unchanged), an id not held is
+// APPENDED (prop_cnt+1). prop_cnt's struct offset is DISCOVERED at runtime, not assumed.
+// Returns a bitmask on the firmware-L line as ret=0x……  Decode (full table on FUT-238):
+//   0x5B18FFFD / 0x5B18FFFE = ✅ full PASS (layout A / layout B) — the recovered v9.3.0 map is right
+//   0x5B1F000D = 🔴 the OLD numbering was right; 0x5B00000D = thunk addresses wrong
+//   0x5BE10000 / 0x5BE00000 = oracle couldn't run (bad struct layout / no layer_top)
+// It should ALSO draw a rounded outlined box with legible "FUT238 OK" mid-HUD — the
+// semantic proof, because the same intent under the OLD ids rendered an invisible label
+// (FUT-197). Built from payloads/payload_style_props.c, blob 2420 B,
+// sha256 8b035cdb…49143a, + the 4-byte FXP1 magic = 2424 B on the wire.
+const PAYLOAD_STYLE_PROPS_B64 =
+  "RlhQMS3p8E+DsE/2v0GCRgAmwPJEAQAgxfbhNohH4LNE9tNJBEbA8kcJICDIRwAoAPCehAdGQvZpCAAgwPJICDhweHC4cPhwOHF4cbhx+HE4cnhyuHL4cjhzeHO4c/hzOHR4dLh0+HQ4dXh1uHX4dTh2eHa4dvh2OHd4d7h3+Hc4RgwhESLARzh5CCgJ0Th6ASgG0QEnCCUN4Kb1gDYA8Ge8OHoIKEDwY4Q4ewEoQPBfhAInDCUgIMhHYLMAIQFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXcMIQEiBkbARzBGDCECIsBHcF0BKAi/BDcgIMhHYLMAIQFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXcMIQEiBkbARzBGHSECIsBHcF0CKAi/CDdE9iEbICDA8k0LyEeIswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/WUcjBGACGQR3BdASgH0TBGWiEiIsBHcF0BKAi/EDcgIMhHeLMGRgAgMHBwcLBw8HAwcXBxsHHwcTBycHKwcvByMHNwc7Bz8HMwdHB0sHTwdDB1cHWwdfB1MHZwdrB28HYwd3B3sHfwdzBGACHYR3BdASgH0TBGMCEiIsBHcF0BKAi/IDcgIMhHiLMGRgAgMHBwcLBw8HAwcXBxsHHwcTBycHKwcvByMHNwc7Bz8HMwdHB0sHTwdDB1cHWwdfB1MHZwdrB28HYwd3B3sHfwd6vxDgIwRgAhkEdwXQEoB9EwRjIhIiLAR3BdASgIv0A3ICDIR4izBkYAIDBwcHCwcPBwMHFwcbBx8HEwcnBysHLwcjBzcHOwc/BzMHRwdLB08HQwdXB1sHXwdTB2cHawdvB2MHdwd7B38Her8VwCMEYAIZBHcF0BKAfRMEYdISIiwEdwXQEoCL+ANyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/WncjBGACGQR3BdASgI0TBGDCEiIsBHcF0BKAi/B/WAdyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3q/G+AjBGACGQR3BdASgI0TBGECEiIsBHcF0BKAi/B/UAdyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/HaAjBGACGQR3BdASgI0TBGUCEiIsBHcF0BKAi/B/WAZyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/G0AjBGACGQR3BdASgI0TBGSCEiIsBHcF0BKAi/B/UAZyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/WacjBGACGQR3BdASgI0TBGXCEiIsBHcF0BKAi/B/WAVyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3q/E0AjBGACGQR3BdASgI0TBGKCEiIsBHcF0BKAi/B/UAVyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/WHcjBGACGQR3BdASgI0TBGWCEiIsBHcF0BKAi/B/WARyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3q/EoAjBGACGQR3BdASgI0TBGMSEiIsBHcF0BKAi/B/UARyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/WUcjBGACGQR3BdASgI0TBGMiEiIsBHcF0BKAi/B/WANyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/WHcjBGACGQR3BdASgI0TBGMCEiIsBHcF0BKAi/B/UANyAgyEeAswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3MEYAIdhHcF0BKAjRMEYoISIiwEdwXQEoCL8H9YAnRPLcYMLyBwAGaE32g2HA8kMBIEYALhi/B/WAF4hHACgA8MOAT/LBQ0v2GxtP8psEwPJDA0/0lnFaIgVGwPJEC8DyQwTK+AAAmEcoRoohYyKgRyAgyEfIswAhAXBBcIFwwXABcUFxgXHBcQFyQXKBcsFyAXNBc4FzwXMBdEF0gXTBdAF1QXWBdcF1AXZBdoF2wXYBd0F3gXfBdx0hACIERsBHIEYwIQMiwEcgRjIh/yLARyBGMSFv8H9CwEcgRgwhDCLARyhGIUYAIthH2kZJ8hdLwPJJCyhG2EcAKGXQBEYgIMhHmLMFRgAgKHBocKhw6HAocWhxqHHocShyaHKocuhyKHNoc6hz6HModGh0qHTodCh1aHWodeh1KHZodqh26HYod2h3qHfodx6xKEZaITJGwEcoRlghb/B/QsBHKEZZIf8iwEcgRilGACLQR0YgjfgCAFUgjfgDAFQgjfgEADIgjfgFADMgjfgGADggjfgHACAgjfgIAE8gjfgJAEsgjfgKAAAgjfgLAAvxGAIN8QIBIEaQR0/ymwMgRhQhHiLA8kMDmEdH9AAnB/G2RjBGA7C96PCP";
+// ── The 26 pushable payloads now come from GENERATED DATA ──────────────────────
+// FUT-228: these used to be 26 hand-pasted base64 literals with no record of what
+// produced them. They now live in ./payloads.generated.ts, emitted by
+//   cd ~/Downloads/g2cfw/g2flash && ./tools/ffs-sdk gen
+// from g2flash/payloads/manifest.json (source .c + exact -D flags per variant).
+// The generator reproduces the previously-shipped strings BYTE-EXACT — that 26-way
+// comparison is the migration's regression test (tools/ffs_sdk/tests/test_parity.py).
+// The notes below are kept because they explain what each payload DOES; only the
+// base64 moved. The FUT238 STYLE PROBE above is deliberately still a literal: it is
+// published and load-bearing, so it is not regenerated.
+
 // Demo payloads = "FXP1" magic + a compiled PIC blob (payload_main draws a bordered box +
 // label on lv_layer_top). Pushing B after A visibly replaces A. (patches/payloads/payload_*.c)
-const PAYLOAD_A_B64 =
-  "RlhQMS3p8E+DsE/2v0EERsDyRAEAIIhHACgA8MqATfaDYcDyQwGIRwAoAPDGgE/ywUNC9mkKRPbTR0v2GxlP8psIwPJDA0/0lnFYIgVGwPJICsDyRwfA8kQJwPJDCJhHKEaKIWQiwEcgILhHyLMAIQFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXcdIQAiBkbQRzBGKCEDItBHMEYkIf8i0EcwRiMhb/B/QtBHMEYMIQoi0EcoRjFGACLIR0nyF0vA8kkLKEbYRwAoWtAGRiAgT/AgCbhH2LMHRgAgOHB4cLhw+HA4cXhxuHH4cThyeHK4cvhyOHN4c7hz+HM4dHh0uHT4dDh1eHW4dfh1OHZ4drh2+HY4d3h3uHf4d0Ty3GDC8gcAAmgSsThGMiHQRzhGMCFv8H9C0Ec4RjEh/yLQR0v2GxMwRjlGACLA8kQDmEdPII34BABUII34BQBBII34BgCN+AeQjfgIAAAgjfgJAAvxGAIBqTBGkEcwRnYhHiLARyVgCiADsL3o8I8BIAOwvejwjwIgA7C96PCP";
-const PAYLOAD_B_B64 =
-  "RlhQMS3p8E+DsE/2v0EERsDyRAEAIIhHACgA8MuATfaDYcDyQwGIRwAoAPDHgE/ywUNC9mkKRPbTR0v2GxlP8psIwPJDA0/0yHGCIgVGwPJICsDyRwfA8kQJwPJDCJhHKEZYIU8iwEcgILhHyLMAIQFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXcdIQAiBkbQRzBGKCEGItBHMEYkIf8i0EcwRiMhb/B/QtBHMEYMIRoi0EcoRjFGACLIR0nyF0vA8kkLKEbYRwAoW9AGRiAgT/AgCbhH2LMHRgAgOHB4cLhw+HA4cXhxuHH4cThyeHK4cvhyOHN4c7hz+HM4dHh0uHT4dDh1eHW4dfh1OHZ4drh2+HY4d3h3uHf4d0Ty3GDC8gcAAmgSsThGMiHQRzhGMCFv8H9C0Ec4RjEh/yLQR0v2GxMwRjlGACLA8kQDmEdPII34BABUII34BQBBII34BgBCII34B5CN+AgAACCN+AkAC/EYAgGpMEaQRzBGniEyIsBHJWALIAOwvejwjwEgA7C96PCPAiADsL3o8I8=";
+//   -> ffs-sdk id "PAYLOAD_A_B64"
+//   -> ffs-sdk id "PAYLOAD_B_B64"
+// FUT-234 — THE FIRST ANIMATION. A box slides left→right across the HUD, 3× over 4.5 s,
+// driven by the firmware's own lv_anim engine (lv_anim_init → set_values → lv_anim_start)
+// with a custom exec_cb living inside the payload itself. Even's SDK has no animation
+// primitive at all, so this is capability we have and they structurally cannot offer.
+// Source: g2flash/payloads/payload_anim.c. Verified by disassembly before first push —
+// notably +0x20 (path_cb, a CODE POINTER whose corruption reboots the glasses) is never
+// written; lv_anim_init installs lv_anim_path_linear there.
+//   -> ffs-sdk id "PAYLOAD_ANIM_B64"
+
+// FUT-234 crash bisect. payload_anim (above) crashed the glasses: right lens blank ~15-20 s,
+// then a watchdog reboot of both. The three lv_anim addresses have since been VERIFIED GENUINE
+// by disassembly against a known-good control, so a bad address is NOT the cause. These two
+// stages split what's left. Source: g2flash/payloads/payload_anim_bisect.c
+//   AN1 — box + lv_anim_init + set_values + all field writes, but NO lv_anim_start. Nothing is
+//         ever ticked. Answers: does our payload render AT ALL?  (returns 0xB1)
+//   AN2 — AN1 + lv_anim_start with a NO-OP exec_cb. The engine ticks and calls into our RAM
+//         blob 60x/s, touching nothing. Answers: do the engine + a callback into our resident
+//         payload survive?  (returns 0xB2)
+// AN1 crashes → not the animation at all. AN1 ok, AN2 crashes → calling our RAM blob from the
+// tick. Both ok → the per-frame lv_obj_set_pos redraw is the culprit.
+//   -> ffs-sdk id "PAYLOAD_AN1_B64"
+//   -> ffs-sdk id "PAYLOAD_AN2_B64"
+
+// FUT-232 — THE GENERIC WIDGET DOOR. Constructs lv_arc, a widget Even's own firmware
+// NEVER creates ("orphan" in g2fw.h), via lv_obj_class_create_obj + lv_obj_class_init_obj.
+// LVGL v9's create is TWO calls — allocate, then run the constructor chain; we only had
+// the first until class_init_obj was resolved 2026-07-28. If this works, ~25 widgets open.
+// Proof is STRUCTURAL, not visual (lv_layer_top has no theme, so appearance is unreliable):
+// the payload reads back obj->class_p (+0x00) and reports via the loader's ret=
+//   0xC7 = arc constructed AND class verified   0xE1 = create returned NULL
+//   0xE2 = created but class_p mismatch (our class table is wrong)   0xE0 = no layer_top
+// Source: g2flash/payloads/payload_widget.c
+//   -> ffs-sdk id "PAYLOAD_WIDGET_B64"
+
+// FUT-232 sweep — ALL 22 ORPHAN widget classes in one push. Each is created via the
+// generic door, its obj->class_p verified, then immediately DELETED (so nothing is ever
+// drawn and nothing accumulates). Result is a 32-bit BITMASK in the loader's ret=:
+//   ret = 0x5A?????? where the low 22 bits are the widgets that constructed + verified.
+//   bit0=arc(CONTROL, must be set) 1=slider 2=switch 3=checkbox 4=led 5=line 6=scale
+//   7=spinner 8=spinbox 9=table 10=textarea 11=chart 12=menu 13=menu_page 14=menu_cont
+//   15=menu_section 16=tabview 17=win 18=keyboard 19=calendar 20=cal_hdr_arrow 21=cal_hdr_drop
+// A visible arc is left behind. Source: g2flash/payloads/payload_widgets_all.c
+//   -> ffs-sdk id "PAYLOAD_WIDGETS_ALL_B64"
+
+// FUT-232 bisect ladder — the full 22-widget sweep HARDFAULTED (no ret at all), so a
+// prefix ladder finds the culprit. Each returns the 0x5A|mask for the first N widgets,
+// so a passing rung is not just a bisect step, it PROVES those N widgets.
+//   -> ffs-sdk id "PAYLOAD_WA12_B64"
+
+//   -> ffs-sdk id "PAYLOAD_WA16_B64"
+
+//   -> ffs-sdk id "PAYLOAD_WA18_B64"
+
+//   -> ffs-sdk id "PAYLOAD_WA20_B64"
+
+// FUT-232 menu bisect — W12 returned 0x5A000FFF (bits 0-11 ALL set: 12 widgets proven,
+// control included) and W16 crashed, so the fault is in bits 12-15, the menu family.
+// These rungs isolate which one, and MND separates constructor vs destructor.
+//   -> ffs-sdk id "PAYLOAD_WA_13_B64"
+
+//   -> ffs-sdk id "PAYLOAD_WA_14_B64"
+
+//   -> ffs-sdk id "PAYLOAD_WA_15_B64"
+
+//   -> ffs-sdk id "PAYLOAD_WA_MENUND_B64"
+
+// FUT-232 upper range — M13 returned 0x5A001FFF (13 widgets incl. lv_menu) and W16
+// crashed, so the fault is in bits 13-15. -DFROM lets us probe bits 16-21 WITHOUT
+// touching the menu family, so a bad index in the middle can't mask everything above.
+//   -> ffs-sdk id "PAYLOAD_WA_U16_B64"
+
+//   -> ffs-sdk id "PAYLOAD_WA_U16B_B64"
+
+// FUT-232 narrow range probes. Confirmed: bit 13 (lv_menu_page) crashes — M13 (bits
+// 0-12) passed and M14 (bits 0-13) did not. And U16 (bits 16-21, which skips the menu
+// family entirely) ALSO crashed, so there is a SECOND independent crasher up there.
+// These probes isolate each remaining suspect without any known-bad index in the way.
+//   -> ffs-sdk id "PAYLOAD_WA_P14_B64"
+
+//   -> ffs-sdk id "PAYLOAD_WA_P16_B64"
+
+//   -> ffs-sdk id "PAYLOAD_WA_P18_B64"
+
+//   -> ffs-sdk id "PAYLOAD_WA_P19_B64"
+
+// FUT-232 endgame. 17 of 22 proven: bits 0-12 (M13), 14-15 (R14 0xC000), 16 (R16),
+// 18 (R18). Remaining: 13 menu_page (confirmed crasher), 17 win (never tested alone),
+// and 19-21 calendar (R19 crashed, so >=1 of the three is bad). Single-bit probes.
+//   -> ffs-sdk id "PAYLOAD_WA_S17_B64"
+
+//   -> ffs-sdk id "PAYLOAD_WA_S19_B64"
+
+//   -> ffs-sdk id "PAYLOAD_WA_S20_B64"
+
+//   -> ffs-sdk id "PAYLOAD_WA_S21_B64"
+
+//   -> ffs-sdk id "PAYLOAD_WA_S13_B64"
+
+
 const WARRANTY_PHRASE = "my warranty is void";
 
 // FUT-167 soft precheck — a self-attested readiness checklist that must be
@@ -143,6 +272,26 @@ type FwImage = {
 };
 
 const FW_IMAGES: FwImage[] = [
+  {
+    key: "loader27",
+    badge: "LD7",
+    tint: theme.tint.green,
+    name: "OTA loader 2.2.7.14 — FLASH THIS ONE",
+    desc: "Rebased onto the stock firmware you're actually running. Flash once, then push payloads forever. After it reboots, read device info — an ⟨LD04⟩ record means the rebase is correct.",
+    trace: "FUT-246",
+    url: LOADER_2_2_7_14_URL,
+    sha: LOADER_2_2_7_14_SHA,
+  },
+  {
+    key: "stock27",
+    badge: "S7",
+    tint: theme.tint.blue,
+    name: "Restore stock 2.2.7.14",
+    desc: "Unmodified Even firmware for the current base — the escape hatch. Verified md5 against Even's own CDN.",
+    trace: "FUT-246",
+    url: STOCK_2_2_7_14_URL,
+    sha: STOCK_2_2_7_14_SHA,
+  },
   {
     key: "canary",
     badge: "CN",
@@ -217,8 +366,8 @@ const FW_IMAGES: FwImage[] = [
     key: "loader",
     badge: "LD",
     tint: theme.tint.green,
-    name: "OTA loader — flash once",
-    desc: "Inert until used. Then push payloads over the air with no reflash.",
+    name: "OTA loader — 2.2.6.10 base (LEGACY)",
+    desc: "⚠️ WRONG BASE for your glasses — this targets stock 2.2.6.10 and you are on 2.2.7.14. Use the LD7 image above. Kept only for a deliberate downgrade.",
     trace: "FUT-216",
     url: LOADER_URL,
     sha: LOADER_SHA,
@@ -258,7 +407,44 @@ function healthColor(h: ConnectionHealth): string {
   }
 }
 
+// FUT-253: catch any render/lifecycle crash in the OS tree and ship it off-device
+// (glog.error was defined but never wired — an uncaught throw used to vanish into a
+// blank screen with no trace). Keeps the app alive with a minimal fallback.
+class GlogErrorBoundary extends Component<{ children: ReactNode }, { crashed: boolean }> {
+  state = { crashed: false };
+  static getDerivedStateFromError(): { crashed: boolean } {
+    return { crashed: true };
+  }
+  componentDidCatch(err: unknown, info: { componentStack?: string }): void {
+    try {
+      glog.error("react_boundary", err);
+      glog.emit("error", "boundary", { stack: String(info?.componentStack ?? "").slice(0, 800) });
+    } catch {
+      /* logging must never re-throw out of the boundary */
+    }
+  }
+  render(): ReactNode {
+    if (this.state.crashed) {
+      return (
+        <SafeAreaView style={styles.safe}>
+          <StatusBar style="light" />
+          <Text style={styles.help}>FFS OS hit a render error — it was logged to the collector. Reopen the app.</Text>
+        </SafeAreaView>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
+  return (
+    <GlogErrorBoundary>
+      <AppInner />
+    </GlogErrorBoundary>
+  );
+}
+
+function AppInner() {
   // FUT-236 — the calibration run owns the whole screen when active, and on a fresh
   // install it comes up FIRST, before the OS shell. Yoni asked for it to start "when I
   // open the app for the first time with both glasses and ring unpaired". Resolved
@@ -272,7 +458,10 @@ export default function App() {
   });
 
   const bt = useFfsBluetooth({ autoScan: true });
-  const sup = useConnectionSupervisor(bt);
+  // FUT-253: feed every connection-health transition to the collector (the FUT-136
+  // "drop → reconnect → home" sequence — the single highest-value miss). glog.conn was
+  // defined but never wired; the supervisor already calls onEvent on each transition.
+  const sup = useConnectionSupervisor(bt, { onEvent: glog.conn });
   const [session, setSession] = useState<string>("");
   const [swirlOn, setSwirlOn] = useState(false);
   const [flashProbe, setFlashProbe] = useState<string>("");
@@ -299,22 +488,27 @@ export default function App() {
       FfsBle.addListener("onRingConnected", (p) => {
         setRingState(`connected — ${p.name}`);
         setRingLog((l) => [`READY: ${p.name}`, ...l].slice(0, 12));
+        glog.emit("ring", "connected", { name: p.name }); // FUT-253: ring normal-path telemetry
       }),
       FfsBle.addListener("onRingDisconnected", (p) => {
         setRingState("—");
         setRingLog((l) => [`disconnected${p.reason ? ` (${p.reason})` : ""}`, ...l].slice(0, 12));
+        glog.emit("ring", "disconnected", { reason: p.reason ?? null });
       }),
       // Every frame, decoded or not — an unmapped code is a finding, not noise.
       FfsBle.addListener("onRingRaw", (p) => {
         setRingFrames((n) => n + 1);
         setRingLog((l) => [`rx ${p.hex}`, ...l].slice(0, 12));
+        glog.emit("ring", "raw", { hex: p.hex }); // sampled 1-in-N at the source (HOT_KEYS "ring:raw")
       }),
       FfsBle.addListener("onRingBattery", (p) => {
         setRingLog((l) => [`battery ${p.battery}%`, ...l].slice(0, 12));
+        glog.emit("ring", "battery", { battery: p.battery });
       }),
       FfsBle.addListener("onGesture", (g) => {
         if (g.device !== "ring") return;
         setRingLog((l) => [`👆 ${g.gesture}`, ...l].slice(0, 12));
+        glog.emit("ring", "gesture", { gesture: g.gesture });
       }),
     ];
     return () => subs.forEach((s) => s.remove());
@@ -325,6 +519,38 @@ export default function App() {
   const [warranty, setWarranty] = useState<string>("");
   const [textTest, setTextTest] = useState<string>("");
   const [precheck, setPrecheck] = useState<boolean[]>(() => PRECHECK_ITEMS.map(() => false));
+  // FUT-237 — the loader guard. Pushing a payload with no resident OTA loader is
+  // DESTRUCTIVE, not inert: the stock image decoder parses our Thumb-2 code as a bitmap
+  // → blank lens → watchdog reboot, identically for every payload. Cost on 2026-07-28:
+  // a whole session and three lens crashes. `pushMsg` is the refusal/confirmation line.
+  const [pushMsg, setPushMsg] = useState<string>("");
+  // FUT-237 fix: the guard demanded positive proof of the loader, but deviceInfo starts
+  // empty — so the first tap only fired the read and the user had to tap AGAIN (Yoni hit
+  // three taps). A guard that makes you repeat yourself is a bad guard. We now park the
+  // push here and fire it automatically the moment the readback lands.
+  const pendingPushRef = useRef<{ label: string; event: string; b64: string } | null>(null);
+  // FUT-237 fix #2. My first fix assumed the problem was "never read the firmware yet".
+  // WRONG — device-info arrives as SEVERAL events and only some carry the ⟨LOADER⟩ markers
+  // (they ride the L-lens version string), so a marker-less event pushed us down the
+  // blocked path and Yoni still had to tap repeatedly. Loader presence cannot vanish
+  // without a reflash, so LATCH it: once seen in any readback, it stays seen.
+  const loaderSeenRef = useRef<boolean>(false);
+  const [loaderSeen, setLoaderSeen] = useState(false);
+  const readTriesRef = useRef<number>(0);
+
+  // FUT-252 TEST WIZARD — one-tap guided on-glass capture. The wizard payload runs a
+  // timer state machine on-glass and writes a rolling 32-bit record into the loader's
+  // ret= field every tick; here we poll device-info at ~2 Hz for the run's duration,
+  // decode each ⟨WIZARD⟩ record out of ret=, and stream it to the glasses log so Rico
+  // reads the full multi-step capture from the server file. The tag nibble is 0x7,
+  // unique among live payloads. See payloads/wizard.c for the encoding.
+  const [wizardMsg, setWizardMsg] = useState<string>("");
+  const wizardRunRef = useRef<boolean>(false);
+  const wizardTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const wizardStopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wizardLastRawRef = useRef<number>(-1);
+  const stopWizardRef = useRef<((done: boolean) => void) | null>(null);
+  const WIZ_STEP_NAMES = ["intro", "TEMPLE TAP", "RING TAP", "RING UP", "RING DOWN", "DONE"];
 
   // Live refs so the nav's context getters always read current session state.
   const btRef = useRef(bt);
@@ -342,15 +568,32 @@ export default function App() {
       version: () => APP_VERSION,
       gestures: () => navRef.current?.gestureCount ?? 0,
     };
-    navRef.current = new PhoneNav(homeScreen, ctx, () => screenOwner.reclaimNow());
+    navRef.current = new PhoneNav(homeScreen, ctx, () => {
+      screenOwner.reclaimNow();
+      // FUT-253: on-glass screen transitions (nav.ts had no telemetry hook).
+      try { glog.emit("os", "nav", navRef.current?.describe() ?? {}); } catch { /* never break nav */ }
+    });
   }
 
   // Off-device telemetry (FUT-144 collector).
   useEffect(() => {
     initLoggerCore({ app: "ffs-os-phone", harness: "App" });
     setSession(glog.session());
+    // FUT-253: log every HUD surface repaint (glog.reclaim was a dead sink).
+    screenOwner.setOnReclaim(glog.reclaim);
     glog.emit("os", "launcher_start", { session: glog.session(), version: APP_VERSION });
   }, []);
+
+  // FUT-253: raw connection snapshot — emit whenever any observable link field changes
+  // (glog.connState was defined but never called). Cheap: fires only on state transitions.
+  useEffect(() => {
+    glog.connState({
+      connected: bt.sides.L || bt.sides.R,
+      ready: bt.pairReady,
+      rawState: bt.state,
+      battery: bt.deviceInfo?.battery ?? null,
+    });
+  }, [bt.sides.L, bt.sides.R, bt.pairReady, bt.state, bt.deviceInfo?.battery]);
 
   // FUT-167 Stage 1: receive the zero-write flash-channel probe result.
   useEffect(() => {
@@ -379,10 +622,96 @@ export default function App() {
   useEffect(() => {
     const subs = [
       FfsBle.addListener("onLog", (e) => glog.emit("drv", "log", { m: e.message })),
+      // FUT-253: the connect lifecycle — previously only the hook consumed these, so the
+      // collector never saw a link come up. Handlers here are telemetry-only (no behaviour).
+      FfsBle.addListener("onDeviceFound", (d) =>
+        glog.emit("drv", "device_found", { side: d.side, name: d.name ?? null, mac: d.mac ?? null, rssi: d.rssi ?? null })),
+      FfsBle.addListener("onConnected", (e) => glog.emit("drv", "connected", { side: e.side })),
+      FfsBle.addListener("onPairReady", () => glog.emit("drv", "pair_ready", {})),
+      FfsBle.addListener("onStateChange", (p) => glog.emit("drv", "adapter_state", { state: p.state })),
       FfsBle.addListener("onDisconnected", (e) =>
-        glog.emit("drv", "disconnected", { side: e.side, reason: e.reason ?? null })),
-      FfsBle.addListener("onDeviceInfo", (e) =>
-        glog.emit("drv", "device_info", { batt: e.battery, chg: e.charging, l: e.leftVersion, r: e.rightVersion })),
+        glog.emit("drv", "disconnected", { side: e.side, reason: e.reason ?? null, code: e.code, domain: e.domain })),
+      FfsBle.addListener("onDeviceInfo", (e) => {
+        glog.emit("drv", "device_info", { batt: e.battery, chg: e.charging, l: e.leftVersion, r: e.rightVersion });
+        if (`${e.leftVersion ?? ""} ${e.rightVersion ?? ""}`.includes("LOADER")) {
+          loaderSeenRef.current = true;
+          setLoaderSeen(true);
+        }
+        // FUT-252 wizard capture: decode the ⟨WIZARD⟩ record out of the loader's ret=.
+        if (wizardRunRef.current) {
+          const ver = `${e.leftVersion ?? ""} ${e.rightVersion ?? ""}`;
+          const m = ver.match(/ret=0x([0-9A-Fa-f]+)/);
+          if (m) {
+            const v = parseInt(m[1], 16) >>> 0;
+            if ((v >>> 28) === 0x7 && v !== wizardLastRawRef.current) {
+              wizardLastRawRef.current = v;
+              const kind = (v >>> 27) & 1;
+              const step = (v >>> 24) & 7;
+              const name = WIZ_STEP_NAMES[step] ?? `step${step}`;
+              if (kind === 0) {
+                const S = (v >>> 16) & 0xff;
+                const U = (v >>> 8) & 0xff;
+                const fl = v & 0xff;
+                glog.emit("wizard", "rec", {
+                  raw: "0x" + v.toString(16).padStart(8, "0"),
+                  kind: "header", step, input: name,
+                  S: "0x" + S.toString(16).padStart(2, "0"),
+                  U: "0x" + U.toString(16).padStart(2, "0"),
+                  control_ok: (fl >>> 7) & 1, font_ok: (fl >>> 6) & 1,
+                  changed: (fl >>> 5) & 1, captured: (fl >>> 4) & 1,
+                  in_capture: (fl >>> 3) & 1, ctr: fl & 7,
+                });
+              } else {
+                glog.emit("wizard", "rec", {
+                  raw: "0x" + v.toString(16).padStart(8, "0"),
+                  kind: "id", step, input: name,
+                  id24: "0x" + (v & 0xffffff).toString(16).padStart(6, "0"),
+                });
+              }
+              setWizardMsg(
+                step >= 5
+                  ? "✅ glasses say DONE — capture streamed to the log. You can stop."
+                  : `🧙 Wizard running… step ${step}/4 (${name}) — follow the glasses; say 'done' when they say DONE.`,
+              );
+              if (step >= 5) stopWizardRef.current?.(true);
+            }
+          }
+        }
+        const p = pendingPushRef.current;
+        if (!p) return;
+        if (loaderSeenRef.current) {
+          pendingPushRef.current = null;
+          setPushMsg(`✅ loader confirmed — pushed ${p.label}`);
+          glog.emit("os", p.event, {});
+          FfsBle.pushPayloadViaImage(p.b64);
+          return;
+        }
+        // Marker-less readback. Some events legitimately lack it, so try a few times
+        // before concluding the loader really is absent.
+        readTriesRef.current += 1;
+        if (readTriesRef.current >= 3) {
+          pendingPushRef.current = null;
+          setPushMsg("⛔ BLOCKED — no OTA loader on the glasses (stock firmware). Pushing would crash a lens. Flash g2_2.2.6.10_loader.bin first.");
+          glog.emit("os", "push_blocked", { label: p.label, reason: "no_loader" });
+        } else {
+          FfsBle.requestDeviceInfo();
+        }
+      }),
+      // FUT-253 Step 3: native BLE link-level observability. cat:"ble" for link signals
+      // (rssi/mtu/throughput/backpressure), cat:"drv" for the render-pipeline ack. All are
+      // telemetry-only — non-throwing, and glog.emit itself never throws into the app.
+      FfsBle.addListener("onRssi", (e) => glog.emit("ble", "rssi", { side: e.side, rssi: e.rssi })),
+      FfsBle.addListener("onMtu", (e) => glog.emit("ble", "mtu", { side: e.side, mtu: e.mtu })),
+      FfsBle.addListener("onConnectFailed", (e) =>
+        glog.emit("ble", "connect_failed", { side: e.side, code: e.code, domain: e.domain, desc: e.desc })),
+      FfsBle.addListener("onTxMeter", (e) =>
+        glog.emit("ble", "tx_meter", { side: e.side, bytes: e.bytes, pkts: e.pkts, depth: e.queueDepth })),
+      FfsBle.addListener("onTxStall", (e) => glog.emit("ble", "tx_stall", { side: e.side, depth: e.queueDepth })),
+      FfsBle.addListener("onTxResume", (e) => glog.emit("ble", "tx_resume", { side: e.side, depth: e.queueDepth })),
+      FfsBle.addListener("onSubscribe", (e) =>
+        glog.emit("ble", "subscribe", { side: e.side, characteristic: e.characteristic, on: e.on })),
+      FfsBle.addListener("onImgAck", (e) =>
+        glog.emit("drv", "img_ack", { session: e.session, fragment: e.fragment, ok: e.ok, timedOut: e.timedOut })),
     ];
     return () => subs.forEach((s) => s.remove());
   }, []);
@@ -392,6 +721,64 @@ export default function App() {
   // CFW and Restore Stock buttons gate on `armed`; there is no other arming path.
   const precheckDone = precheck.every(Boolean);
   const armed = warranty.trim() === WARRANTY_PHRASE && precheckDone;
+  // FUT-237 — GUARD: never push a payload unless the resident OTA loader has actually
+  // been SEEN in a device-info readback. The CFW appends ⟨LOADER gen=… ran=… ret=0x…⟩ to
+  // the firmware version string (G2Protocol.swift field 104); on stock that field is
+  // absent entirely, so the version line is a bare "2.2.6.10".
+  //
+  // We deliberately require POSITIVE evidence rather than trying to detect stock: an
+  // unread deviceInfo is treated as "not proven", which fails safe. First tap with no
+  // reading triggers the read; tap again once it lands.
+  const loaderPresent = (): boolean => {
+    if (loaderSeenRef.current) return true;
+    const di = bt.deviceInfo;
+    return `${di?.leftVersion ?? ""} ${di?.rightVersion ?? ""}`.includes("LOADER");
+  };
+  const guardedPush = (label: string, event: string, b64: string) => {
+    if (!bt.pairReady) return;
+    if (loaderPresent()) {
+      loaderSeenRef.current = true;
+      setPushMsg(`✅ loader confirmed — pushed ${label}`);
+      glog.emit("os", event, {});
+      FfsBle.pushPayloadViaImage(b64);
+      return;
+    }
+    // Not proven yet — park the push and let the readback fire it. ONE tap.
+    pendingPushRef.current = { label, event, b64 };
+    readTriesRef.current = 0;
+    setPushMsg("⏳ checking the glasses for the OTA loader… this push will go automatically.");
+    FfsBle.requestDeviceInfo();
+  };
+
+  // FUT-252 — run the on-glass TEST WIZARD end to end: push it ONCE, then poll
+  // device-info at ~2 Hz for the run's duration so every ⟨WIZARD⟩ record the payload
+  // writes into ret= is decoded (in the onDeviceInfo listener above) and streamed to the
+  // glasses log. ~45 s covers the full run (intro + 4 steps + DONE) with margin; the
+  // wizard's own timer self-cleans on-glass (finite repeat_count).
+  const stopWizard = (done: boolean) => {
+    if (wizardTimerRef.current) { clearInterval(wizardTimerRef.current); wizardTimerRef.current = null; }
+    if (wizardStopRef.current) { clearTimeout(wizardStopRef.current); wizardStopRef.current = null; }
+    if (!wizardRunRef.current) return;
+    wizardRunRef.current = false;
+    glog.emit("wizard", "stop", { done });
+    if (!done) setWizardMsg("🧙 Wizard poll window closed — capture is in the log.");
+  };
+  stopWizardRef.current = stopWizard;
+  const runWizard = () => {
+    if (!bt.pairReady || wizardRunRef.current) return;
+    const wiz = GENERATED_PAYLOADS.find((p) => p.id === "wizard");
+    if (!wiz) { setWizardMsg("⛔ wizard payload missing from the build — run `ffs-sdk gen`."); return; }
+    wizardRunRef.current = true;
+    wizardLastRawRef.current = -1;
+    setWizardMsg("🧙 Starting the wizard… put the glasses on and follow the prompts.");
+    glog.emit("wizard", "start", { payload: wiz.id });
+    guardedPush(wiz.pushLabel, wiz.pushKey, wiz.b64);
+    // Poll device-info at ~2 Hz (the native side dedups reads under 300 ms).
+    wizardTimerRef.current = setInterval(() => FfsBle.requestDeviceInfo(), 500);
+    // Hard stop after the full run + margin, even if we never see the DONE record.
+    wizardStopRef.current = setTimeout(() => stopWizard(false), 45000);
+  };
+
   const startFlash = (url: string, sha: string, dryRun: boolean) => {
     if (!bt.pairReady || flashBusy) return;
     setFlashBusy(true);
@@ -411,6 +798,13 @@ export default function App() {
   // phone-OS screen, and route touchpad gestures into navigation. Tear down on disconnect.
   useEffect(() => {
     if (!bt.pairReady) return;
+    // FUT-236: while a calibration run is active the OS must NOT act on gestures.
+    // Measured 2026-07-28: during the temple-touchpad steps, taps were routed into
+    // navigation, which activated a menu item and started streaming an 11.6 KB image
+    // animation to the glasses — and BOTH lenses then dropped with "connection has
+    // timed out unexpectedly", corrupting that step and the two after it.
+    // An instrument that changes the thing it is measuring is not an instrument.
+    if (calibrating) return;
     const nav = navRef.current!;
     screenOwner.start();
     void screenOwner.setSurface(() => nav.paint());
@@ -432,7 +826,7 @@ export default function App() {
       sub.remove();
       screenOwner.stop();
     };
-  }, [bt.pairReady]);
+  }, [bt.pairReady, calibrating]);
 
   // Keep the HUD status-bar clock live: re-paint the current screen at each minute
   // boundary while the pair is ready — but skip while the image screen is up (a re-paint
@@ -811,33 +1205,72 @@ export default function App() {
           ))}
         </Group>
 
-        <SectionLabel note="FUT-216 · needs the OTA loader flashed">Push over the air</SectionLabel>
+        <SectionLabel note="FUT-252 · one tap · fully on-glass · auto-saved to the log">
+          Test wizard
+        </SectionLabel>
+        {wizardMsg ? <Text style={styles.dim}>{wizardMsg}</Text> : null}
         <Group>
           <Row
-            badge="A"
-            tint={theme.tint.amber}
-            title="Push payload A"
-            subtitle="Draws a bordered box + label on the HUD. No reflash."
-            tag="no flash"
-            disabled={!bt.pairReady}
-            onPress={() => {
-              glog.emit("os", "push_a", {});
-              FfsBle.pushPayloadViaImage(PAYLOAD_A_B64);
-            }}
-          />
-          <Row
-            badge="B"
+            badge="🧙"
             tint={theme.tint.green}
-            title="Push payload B"
-            subtitle="Same, different content — pushing B after A visibly replaces it."
+            title="🧙 RUN TEST WIZARD — TAP THIS ONE"
+            subtitle="Put the glasses on and follow the prompts (TEMPLE TAP · RING TAP · RING UP · RING DOWN). Everything is captured on-glass and streamed to the log automatically — say 'done' when the glasses say DONE. No typing, no hex."
             tag="no flash"
+            tagTint={theme.tint.green}
+            trace="FUT-252"
+            divider={false}
+            disabled={!bt.pairReady || wizardRunRef.current}
+            onPress={runWizard}
+          />
+        </Group>
+
+        <SectionLabel
+          note={
+            loaderSeen || loaderPresent()
+              ? "FUT-216 · ✅ OTA loader detected — pushes are safe"
+              : bt.deviceInfo
+                ? "FUT-216 · ⛔ NO loader (stock firmware) — pushes are BLOCKED"
+                : "FUT-216 · loader unverified — read the firmware version first"
+          }
+        >
+          Push over the air
+        </SectionLabel>
+        {pushMsg ? <Text style={styles.dim}>{pushMsg}</Text> : null}
+        <Group>
+          <Row
+            badge="★"
+            tint={theme.tint.red}
+            title="⭐ FUT238 STYLE PROBE — TAP THIS ONE"
+            subtitle="THE NEW ROW. One tap → read back ret=0x… from the firmware-L line, and look for a rounded outlined box with legible “FUT238 OK” mid-HUD."
+            tag="no flash"
+            trace="FUT-238"
             divider
             disabled={!bt.pairReady}
             onPress={() => {
-              glog.emit("os", "push_b", {});
-              FfsBle.pushPayloadViaImage(PAYLOAD_B_B64);
+              guardedPush("FUT238 STYLE PROBE", "push_style_props", PAYLOAD_STYLE_PROPS_B64);
             }}
           />
+          {GENERATED_PAYLOADS.map((p) =>
+            // The wizard has its own one-tap section above (push + poll + log); skip its
+            // bare-push row here so it isn't offered twice.
+            p.id === "wizard" ? null : (
+              <Row
+                key={p.id}
+                badge={p.badge}
+                tint={p.tint}
+                title={p.title}
+                subtitle={p.subtitle}
+                tag={p.tag}
+                tagTint={p.tagTint}
+                trace={p.trace}
+                divider={p.divider}
+                disabled={!bt.pairReady}
+                onPress={() => {
+                  guardedPush(p.pushLabel, p.pushKey, p.b64);
+                }}
+              />
+            ),
+          )}
         </Group>
 
         <SectionLabel note={session || "starting…"}>Connection log</SectionLabel>

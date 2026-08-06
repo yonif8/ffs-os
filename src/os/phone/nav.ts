@@ -88,6 +88,12 @@ export class PhoneNav {
     return this.stack[this.stack.length - 1];
   }
 
+  /** Current screen id/title/kind + stack depth — for FUT-253 nav telemetry. */
+  describe(): { id: string; title: string; kind: string; depth: number } {
+    const s = this.top().screen;
+    return { id: s.id, title: s.title, kind: s.kind, depth: this.stack.length };
+  }
+
   /** True while the current screen renders the image path (so callers can skip text repaints). */
   onImageScreen(): boolean {
     return this.top().screen.kind === "image";

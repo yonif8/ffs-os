@@ -206,6 +206,11 @@ enum G2Flash {
   static let goldenStock = GoldenVector(
     sha256: "f4dfb0b49ad3de3c2daf17f8a27a157c3dc98411d6a0d3ab2cfd0918f41b9afa",
     ps: 3_523_396, progEnd: 0x0079_4324, pass: true)
+  // FUT-246 — unmodified stock 2.2.7.14 (the restore-to-stock escape hatch for the current
+  // base). md5 verified against Even's own CDN (ededa37…); ps/prog_end from g2flash.py.
+  static let goldenStock27 = GoldenVector(
+    sha256: "0fced0aebcc6c88db6f76dba34f91b805d842a5fc297bfd7fa6d6a34ec83cecb",
+    ps: 3_557_884, progEnd: 0x0079_C9DC, pass: true)
   // FUT-167 canary: stock 2.2.6.10 with ONLY the reported firmware-version string changed
   // (2.2.6.10 → 2.2.6.77, 10 length-preserving rodata edits, checksums recomputed). Because
   // the edit is length-preserving, ps + prog_end are byte-for-byte identical to stock —
@@ -287,6 +292,17 @@ enum G2Flash {
   static let goldenLoader = GoldenVector(
     sha256: "373bfe9aa3645f1cda5b0204df1db3516e16347f31dcc9a39846442022c43103",
     ps: 3_566_014, progEnd: 0x0079_E99E, pass: true)
+
+  // FUT-246 resident OTA loader REBASED onto stock 2.2.7.14 (the firmware Yoni's glasses now
+  // run). Same loader as goldenLoader above, but every firmware address is re-derived for the
+  // new base (g2fw.h dual-base table) and it carries the FUT-244 pair: a loader body-CRC that
+  // refuses a corrupt payload frame as LD04 instead of branching into it, and the ffs_ui_patch
+  // prop-id migration. ps/prog_end computed from the built image via g2flash.py, with the
+  // 2.2.6.10 loader as a control (it reproduced goldenLoader exactly). prog_end 0x007A7186 =
+  // 291 KB under the 0x007F0000 ceiling. See CFW docs/GOLDEN.md + FUT-246.
+  static let goldenLoader27 = GoldenVector(
+    sha256: "7ecf5f4948e510469cc85cd77c1a291e67bf78800f93a40cb918cf5f326eb9a6",
+    ps: 3_600_806, progEnd: 0x007A_7186, pass: true)
 
   /// Run the parse+guard on `img` and assert it reproduces the golden vector. Returns
   /// nil on success, or a failure description. Any non-nil result MUST block flashing.

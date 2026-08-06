@@ -174,6 +174,85 @@ export interface OnDisconnectedEvent {
   /** Which lens dropped. The other lens's state is unaffected. */
   side: G2Side;
   reason: string | null;
+  /**
+   * FUT-253: the raw CBError/NSError code (0 = a clean, error-free disconnect;
+   * nonzero = involuntary drop, e.g. 0x06 supervision-timeout vs 0x13 remote-terminated).
+   */
+  code: number;
+  /** FUT-253: the NSError domain the code belongs to (e.g. "CBErrorDomain"). */
+  domain: string;
+}
+
+// ---- FUT-253 native BLE observability (Step 3) ---------------------------
+
+/** Live connected-RSSI reading, polled per side in the 5s heartbeat. */
+export interface OnRssiEvent {
+  side: G2Side;
+  /** dBm; more negative = weaker. */
+  rssi: number;
+}
+
+/** The ATT write-without-response payload ceiling for a side, read once at char-bind. */
+export interface OnMtuEvent {
+  side: G2Side;
+  /** Max bytes per write-without-response packet. */
+  mtu: number;
+}
+
+/** A connect ATTEMPT failed (distinct from a drop of an established link). */
+export interface OnConnectFailedEvent {
+  side: G2Side;
+  /** Raw CBError/NSError code (-1 if the error was absent). */
+  code: number;
+  /** NSError domain (e.g. "CBErrorDomain"). */
+  domain: string;
+  /** Human-readable localizedDescription. */
+  desc: string;
+}
+
+/**
+ * Write-drain throughput meter, emitted per side on a fixed ~1s interval (never per
+ * write) while a side has traffic or a backlog. Idle sides emit nothing.
+ */
+export interface OnTxMeterEvent {
+  side: G2Side;
+  /** Bytes written in this interval. */
+  bytes: number;
+  /** Packets written in this interval. */
+  pkts: number;
+  /** Current write-queue depth at tick time (backpressure indicator). */
+  queueDepth: number;
+}
+
+/** The write-without-response buffer saturated; the paced drain has paused. */
+export interface OnTxStallEvent {
+  side: G2Side;
+  queueDepth: number;
+}
+
+/** The write buffer drained and the paused drain resumed. */
+export interface OnTxResumeEvent {
+  side: G2Side;
+  queueDepth: number;
+}
+
+/** A notify-subscription state change (promoted from the free-text log). */
+export interface OnSubscribeEvent {
+  side: G2Side;
+  /** Full UUID of the characteristic whose notify state changed. */
+  characteristic: string;
+  /** true = subscribed (notifying), false = unsubscribed. */
+  on: boolean;
+}
+
+/** An image-fragment ACK resolved or timed out (render-pipeline signal, FUT-249). */
+export interface OnImgAckEvent {
+  session: number;
+  fragment: number;
+  /** Whether the fragment was acknowledged successfully. */
+  ok: boolean;
+  /** true if this fired from the ACK timeout rather than a real ack. */
+  timedOut: boolean;
 }
 
 /** Result of the zero-write flash-channel probe (FUT-167 Stage 1). */
@@ -211,6 +290,15 @@ export interface FfsBleEvents {
   onDisconnected: OnDisconnectedEvent;
   onFlashProbe: OnFlashProbeEvent;
   onFlashProgress: OnFlashProgressEvent;
+  // FUT-253 native BLE observability (Step 3).
+  onRssi: OnRssiEvent;
+  onMtu: OnMtuEvent;
+  onConnectFailed: OnConnectFailedEvent;
+  onTxMeter: OnTxMeterEvent;
+  onTxStall: OnTxStallEvent;
+  onTxResume: OnTxResumeEvent;
+  onSubscribe: OnSubscribeEvent;
+  onImgAck: OnImgAckEvent;
   onRingConnected: OnRingConnectedEvent;
   onRingDisconnected: OnRingDisconnectedEvent;
   onRingRaw: OnRingRawEvent;
@@ -327,6 +415,22 @@ interface FfsBleNativeModule {
   setDashboardData(json: string): void;
   /** P3: tear down the EvenHub session (stops the keep-alive heartbeat). */
   stopSession(): void;
+  /**
+   * TEST AFFORDANCE — inject a synthetic gesture as if the hardware had sent it, so the
+   * input→render path can be driven without a finger on the temple pad or the ring.
+   *
+   * The native side builds the REAL wire frame and pushes it through the REAL decode, so
+   * everything from the protocol up through nav and rendering is genuinely exercised — and it
+   * arrives as an ordinary `onGesture` event, indistinguishable to this layer on purpose.
+   *
+   * ⚠️ It proves NOTHING about whether a real touch reaches the phone. That is the open
+   * FUT-249 / FUT-233 question and only real hardware answers it; every injection logs
+   * "SIMULATED" so a green run here can never be mistaken for on-glass proof (cardinal rule 1).
+   *
+   * `device: "glasses"` accepts tap | double_tap | swipe_up | swipe_down.
+   * `device: "ring"` accepts hold | single_tap | double_tap | swipe_up | swipe_down.
+   */
+  simulateGesture(device: "glasses" | "ring", gesture: string): void;
 
   /**
    * Tiny persistent key/value store (FUT-236) — used so the calibration run knows

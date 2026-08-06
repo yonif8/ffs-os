@@ -1,0 +1,47 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+  xmlns:tools="http://schemas.android.com/tools">
+
+  <!-- Declared here as well as in app.json so the module is self-contained: whatever
+       app embeds ffs-ble gets the permissions its driver actually needs, via manifest
+       merge. Android 12+ (API 31) split the old BLUETOOTH/BLUETOOTH_ADMIN into these
+       runtime permissions; the target phone is Android 13 (API 33). -->
+  <!--
+    `neverForLocation` is not cosmetic and it is not optional. WITHOUT it, API 31+ requires
+    BLUETOOTH_SCAN *and* a granted ACCESS_FINE_LOCATION *and* location services switched on
+    before a scan returns anything; when those are not all true the scan still reports SUCCESS
+    and simply delivers zero results. That silent-empty-scan is the single most confusing
+    failure in Android BLE, and it looks exactly like "the glasses aren't advertising". With
+    the flag, none of the location machinery is involved.
+
+    It is also truthful here: we scan for two known peripherals by name and never derive
+    location from advertisements.
+
+    Caveat worth knowing before debugging a dead scan: the flag makes the system filter out
+    beacon-shaped advertisements. The G2 uses company ID "ER" with a serial/MAC payload, not an
+    iBeacon/Eddystone layout, so it is not affected. But if a scan ever comes back empty on
+    hardware, this flag is suspect #1. G2Central logs a diagnostic naming it after 10 barren
+    seconds rather than leaving you to guess.
+  -->
+  <uses-permission
+    android:name="android.permission.BLUETOOTH_SCAN"
+    android:usesPermissionFlags="neverForLocation"
+    tools:targetApi="s" />
+  <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+  <!-- Legacy (API <= 30) BLE scanning required location. Kept with maxSdkVersion so it
+       is not requested on the API 31+ path, where BLUETOOTH_SCAN covers it. -->
+  <uses-permission
+    android:name="android.permission.ACCESS_FINE_LOCATION"
+    android:maxSdkVersion="30" />
+  <uses-permission
+    android:name="android.permission.BLUETOOTH"
+    android:maxSdkVersion="30" />
+  <uses-permission
+    android:name="android.permission.BLUETOOTH_ADMIN"
+    android:maxSdkVersion="30" />
+
+  <uses-feature
+    android:name="android.hardware.bluetooth_le"
+    android:required="true" />
+
+</manifest>
