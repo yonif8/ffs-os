@@ -45,5 +45,8 @@ fi
 # tree; EAS_NO_VCS makes eas bundle the working dir as-is instead of the git HEAD.
 export EAS_NO_VCS=1
 
-echo "→ Publishing OTA to branch 'production' (runtimeVersion 1.0.0): $MSG"
+# Read the real runtimeVersion from app.json so this line can never drift again (it said
+# "1.0.0" while app.json carried 1.2.0). EAS uses app.json's value, not this echo.
+RTV="$(node -e "process.stdout.write(String(require('./app.json').expo.runtimeVersion))" 2>/dev/null || echo '?')"
+echo "→ Publishing OTA to branch 'production' (runtimeVersion ${RTV}): $MSG"
 bunx eas-cli update --branch production --message "$MSG" --environment production --non-interactive
