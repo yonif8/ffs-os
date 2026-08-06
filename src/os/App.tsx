@@ -630,7 +630,7 @@ function AppInner() {
       FfsBle.addListener("onPairReady", () => glog.emit("drv", "pair_ready", {})),
       FfsBle.addListener("onStateChange", (p) => glog.emit("drv", "adapter_state", { state: p.state })),
       FfsBle.addListener("onDisconnected", (e) =>
-        glog.emit("drv", "disconnected", { side: e.side, reason: e.reason ?? null })),
+        glog.emit("drv", "disconnected", { side: e.side, reason: e.reason ?? null, code: e.code, domain: e.domain })),
       FfsBle.addListener("onDeviceInfo", (e) => {
         glog.emit("drv", "device_info", { batt: e.battery, chg: e.charging, l: e.leftVersion, r: e.rightVersion });
         if (`${e.leftVersion ?? ""} ${e.rightVersion ?? ""}`.includes("LOADER")) {
@@ -697,6 +697,21 @@ function AppInner() {
           FfsBle.requestDeviceInfo();
         }
       }),
+      // FUT-253 Step 3: native BLE link-level observability. cat:"ble" for link signals
+      // (rssi/mtu/throughput/backpressure), cat:"drv" for the render-pipeline ack. All are
+      // telemetry-only — non-throwing, and glog.emit itself never throws into the app.
+      FfsBle.addListener("onRssi", (e) => glog.emit("ble", "rssi", { side: e.side, rssi: e.rssi })),
+      FfsBle.addListener("onMtu", (e) => glog.emit("ble", "mtu", { side: e.side, mtu: e.mtu })),
+      FfsBle.addListener("onConnectFailed", (e) =>
+        glog.emit("ble", "connect_failed", { side: e.side, code: e.code, domain: e.domain, desc: e.desc })),
+      FfsBle.addListener("onTxMeter", (e) =>
+        glog.emit("ble", "tx_meter", { side: e.side, bytes: e.bytes, pkts: e.pkts, depth: e.queueDepth })),
+      FfsBle.addListener("onTxStall", (e) => glog.emit("ble", "tx_stall", { side: e.side, depth: e.queueDepth })),
+      FfsBle.addListener("onTxResume", (e) => glog.emit("ble", "tx_resume", { side: e.side, depth: e.queueDepth })),
+      FfsBle.addListener("onSubscribe", (e) =>
+        glog.emit("ble", "subscribe", { side: e.side, characteristic: e.characteristic, on: e.on })),
+      FfsBle.addListener("onImgAck", (e) =>
+        glog.emit("drv", "img_ack", { session: e.session, fragment: e.fragment, ok: e.ok, timedOut: e.timedOut })),
     ];
     return () => subs.forEach((s) => s.remove());
   }, []);
