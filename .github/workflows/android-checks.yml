@@ -1,0 +1,95 @@
+name: Android checks
+
+# Lightweight, no-APK CI for the Android target. Deliberately does NOT build an APK:
+# the fast APK loop is local (Windows box -> adb), and a cold NDK build on a runner
+# would cost ~14 minutes to tell us nothing the local build didn't.
+#
+# What this DOES catch, which nothing else does:
+#   - a native binding added on one platform and forgotten on the other
+#     (check-native-parity.py) -- that mistake type-checks, builds clean, and only
+#     throws at runtime, on one platform.
+#   - a wrong mask/shift in the hand-translated Kotlin wire protocol
+#     (:ffs-ble:test golden byte vectors) -- that shows up on-glass as a silently
+#     rejected packet, which is brutal to bisect.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [master, main]
+    paths-ignore:
+      - "README.md"
+      - "**/*.md"
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache bun install cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install JS deps
+        run: bun install
+
+      # These three need no Android toolchain at all, so they run first and fail fast.
+      - name: Check every screen is reachable from the entry point
+        run: python3 scripts/check-reachable.py
+
+      - name: Check iOS/Android native module API parity
+        run: python3 scripts/check-native-parity.py
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Gradle (with cache)
+        uses: gradle/actions/setup-gradle@v4
+
+      # android/ is gitignored and generated, so CI must produce it the same way the
+      # local box does. Pure Node -- no Android SDK needed for this step.
+      - name: Expo prebuild (generate native android project)
+        run: npx expo prebuild -p android --no-install --clean
+
+      # Golden byte-vector tests for the hand-translated wire protocol. Pure JVM, no
+      # device and no emulator -- G2Protocol.kt is byte manipulation only.
+      #
+      # NOTE: the Expo root project pins ndkVersion 27.1.12297006. Unit tests should not
+      # need native code built, but if a transitive Expo module drags in an
+      # externalNativeBuild during configuration this step will fetch that NDK and get
+      # slow. If that happens, the fix is to install the pinned NDK explicitly rather than
+      # to drop the test.
+      - name: ffs-ble protocol unit tests
+        working-directory: android
+        run: ./gradlew :ffs-ble:testDebugUnitTest --console=plain
+
+      - name: Upload test report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffs-ble-test-report
+          path: modules/ffs-ble/android/build/reports/tests/
+          if-no-files-found: ignore

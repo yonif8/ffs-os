@@ -31,6 +31,14 @@ import re
 import sys
 from pathlib import Path
 
+# This script prints non-ASCII status glyphs. On Windows the console defaults to cp1252,
+# so those raise UnicodeEncodeError and the check "fails" having actually passed. Harmless
+# on the Linux/macOS CI runners; not harmless now that Windows is the dev box driving the
+# Android build loop, where these guards are run by hand before every build.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 REPO = Path(__file__).resolve().parent.parent
 ENTRY = REPO / "index.ts"
 ROOTS = [REPO / "src", REPO / "modules"]

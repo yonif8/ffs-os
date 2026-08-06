@@ -3,7 +3,7 @@
     "name": "FFS Glasses OS",
     "slug": "ffs-glasses-os",
     "scheme": "ffsglassesos",
-    "version": "0.12.0",
+    "version": "0.12.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -20,7 +20,7 @@
     },
     "ios": {
       "supportsTablet": false,
-      "buildNumber": "53",
+      "buildNumber": "55",
       "bundleIdentifier": "com.futurefounders.glassesos",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
@@ -57,6 +57,9 @@
         {
           "ios": {
             "ccacheEnabled": true
+          },
+          "android": {
+            "buildArchs": ["armeabi-v7a"]
           }
         }
       ]

@@ -88,6 +88,17 @@ private final class G2Lens {
   /// The paced drain loop is currently running for this side (the write-lock).
   var draining = false
 
+  // FUT-253 tx observability. All touched ONLY on the CB serial queue, like the
+  // rest of this box — no extra locking.
+  /// Bytes/packets written since the last tx-meter tick (reset each interval).
+  var txBytesAccum = 0
+  var txPktsAccum = 0
+  /// The write-without-response buffer is full and the drain is paused waiting on
+  /// `peripheralIsReadyToSendWriteWithoutResponse` (guards one-shot stall/resume emits).
+  var txStalled = false
+  /// The MTU (max write-without-response length) has been reported once for this side.
+  var mtuReported = false
+
   /// Inbound transport reassembler for this side (independent syncId stream).
   let rx = G2RxReassembler()
 
@@ -133,6 +144,16 @@ final class G2Central: NSObject {
   /// Inter-packet pacing for the per-side write queues (P0 spec: 6ms).
   private static let WRITE_PACING_MS = 6
 
+  /// FUT-253: master switch for the write-backpressure GATE (the one behavioral change
+  /// in the Step-3 observability work). OFF = the proven prior behavior — the drain writes
+  /// unconditionally, paced only by WRITE_PACING_MS; the read-only tx-meter / RSSI / MTU /
+  /// CBError telemetry all still ship. ON = pause the drain when the write-without-response
+  /// buffer is saturated and resume from `peripheralIsReadyToSendWriteWithoutResponse`
+  /// (the intended fix for the saturation→supervision-timeout drop). Because ON alters
+  /// write hot-path timing near the 6ms pacer / heartbeat / anim frame-gating, it stays OFF
+  /// until proven on-glass (cardinal rule 1). Flip to true for a dedicated on-glass test.
+  static let ENABLE_BACKPRESSURE_GATE = false
+
   // MARK: - Callback closures (wired by the Expo module)
 
   /// (message) — every log line, already timestamped by `log(_:)`.
@@ -149,8 +170,10 @@ final class G2Central: NSObject {
   var onPairReady: (() -> Void)?
   /// (base64Payload, characteristicUUID, side) — a notification arrived.
   var onNotify: ((String, String, String) -> Void)?
-  /// (name, side, reason?) — a lens disconnected.
-  var onDisconnected: ((String, String, String?) -> Void)?
+  /// (name, side, reason?, code, domain) — a lens disconnected. `code`/`domain` are the
+  /// raw CBError/NSError values (code=0 for a clean, error-free disconnect) — FUT-253:
+  /// 0x06 supervision-timeout vs 0x13 remote-terminated distinguish a walk-away from a crash.
+  var onDisconnected: ((String, String, String?, Int, String) -> Void)?
   /// (gesture, side, source?) — a decoded touch gesture ("tap"/"double_tap"/"swipe_up"/"swipe_down").
   /// `source` is the firmware's `eventSource` where it exists (1/3 = temple pads, 2 = believed
   /// ring, never yet observed), and nil for text/list events which carry no such field — FUT-233.
@@ -164,6 +187,34 @@ final class G2Central: NSObject {
   var onFlashProbe: ((Bool, Bool, String) -> Void)?
   /// (message, progress 0…1, done, ok) — FUT-167 Stage 2 CFW flash/validate progress.
   var onFlashProgress: ((String, Double, Bool, Bool) -> Void)?
+
+  // MARK: - FUT-253 observability callbacks (native BLE link telemetry)
+
+  /// (side, rssi) — a live connected-RSSI reading, polled in the 5s heartbeat. The
+  /// single best predictor of an imminent drop, and never read before FUT-253.
+  var onRssi: ((String, Int) -> Void)?
+  /// (side, mtu) — the ATT write-without-response payload ceiling for a side, read once
+  /// at char-bind. Tells us the real per-packet budget the drain is pacing against.
+  var onMtu: ((String, Int) -> Void)?
+  /// (side, code, domain, desc) — a connect ATTEMPT failed (distinct from a drop). `code`
+  /// is the raw CBError/NSError code (e.g. 0x06 connection timeout), `domain` its NSError
+  /// domain. Free-text-only before FUT-253.
+  var onConnectFailed: ((String, Int, String, String) -> Void)?
+  /// (side, bytesPerInterval, pktsPerInterval, queueDepth) — write-drain throughput meter,
+  /// emitted on a fixed interval (NEVER per write) while a side has traffic or a backlog.
+  var onTxMeter: ((String, Int, Int, Int) -> Void)?
+  /// (side, queueDepth) — the write-without-response buffer saturated; the paced drain has
+  /// paused and is waiting on `peripheralIsReadyToSendWriteWithoutResponse`. The saturation
+  /// the drain path has always feared, now observable.
+  var onTxStall: ((String, Int) -> Void)?
+  /// (side, queueDepth) — the write buffer drained and the paused drain has resumed.
+  var onTxResume: ((String, Int) -> Void)?
+  /// (side, characteristicUUID, on) — a notify-subscription state change (promoted from the
+  /// free-text `onLog` line). The right lens's notify channel is the whole protocol path.
+  var onSubscribe: ((String, String, Bool) -> Void)?
+  /// (session, fragment, ok, timedOut) — an image-fragment ACK resolved (or timed out).
+  /// Promoted from free text — the render-pipeline signal FUT-249 needs.
+  var onImgAck: ((Int, Int, Bool, Bool) -> Void)?
 
   // ---- FUT-167 Stage 2 flash state (internal so the G2CentralFlash extension file
   // can reach it; the OTA state machine runs on `flashQueue`, off the CB queue). ----
@@ -415,6 +466,7 @@ final class G2Central: NSObject {
     // The lens may have disconnected between steps — bail and release the lock.
     guard lens.connected, let writeChar = lens.writeChar else {
       lens.draining = false
+      lens.txStalled = false
       lens.writeQueue.removeAll()
       return
     }
@@ -422,13 +474,64 @@ final class G2Central: NSObject {
       lens.draining = false
       return
     }
+    // FUT-253 backpressure GATE (default OFF — see ENABLE_BACKPRESSURE_GATE): don't write
+    // into a saturated write-without-response buffer (the drop / supervision-timeout the
+    // drain path has always feared). Pause here — keeping draining=true so we still hold
+    // this side's write-lock — and resume from `peripheralIsReadyToSendWriteWithoutResponse`.
+    // Emit tx_stall once on entering the stall (queue depth tells us how bad the backlog is).
+    if G2Central.ENABLE_BACKPRESSURE_GATE, !lens.peripheral.canSendWriteWithoutResponse {
+      if !lens.txStalled {
+        lens.txStalled = true
+        log("tx STALL side=\(lens.side.rawValue) depth=\(lens.writeQueue.count)")
+        onTxStall?(lens.side.rawValue, lens.writeQueue.count)
+      }
+      return
+    }
     let packet = lens.writeQueue.removeFirst()
     lens.peripheral.writeValue(packet, for: writeChar, type: .withoutResponse)
+    lens.txBytesAccum += packet.count
+    lens.txPktsAccum += 1
+    ensureTxMeterLocked()
 
     let deadline = DispatchTime.now() + .milliseconds(G2Central.WRITE_PACING_MS)
     queue.asyncAfter(deadline: deadline) { [weak self, weak lens] in
       guard let self = self, let lens = lens else { return }
       self.drainStepLocked(lens)
+    }
+  }
+
+  // MARK: - FUT-253 tx-throughput meter
+
+  /// Interval (ms) at which the write-drain throughput meter is emitted per side.
+  private static let TX_METER_INTERVAL_MS = 1000
+  /// Whether the periodic tx-meter tick is currently scheduled.
+  private var txMeterRunning = false
+
+  /// Ensure the tx-meter tick loop is running (idempotent). Started from the drain
+  /// the moment a side writes anything; self-stops once no lens is connected.
+  private func ensureTxMeterLocked() {
+    guard !txMeterRunning else { return }
+    txMeterRunning = true
+    queue.asyncAfter(deadline: .now() + .milliseconds(G2Central.TX_METER_INTERVAL_MS)) {
+      [weak self] in self?.txMeterTickLocked()
+    }
+  }
+
+  /// One tx-meter interval: for each connected side that saw traffic OR still has a
+  /// backlog, emit bytes/pkts-this-interval + current queue depth, then reset the
+  /// accumulators. Emits nothing for idle sides (bounds the meter's own volume).
+  private func txMeterTickLocked() {
+    guard !lenses.isEmpty else { txMeterRunning = false; return }
+    for lens in lenses.values {
+      let depth = lens.writeQueue.count
+      if lens.txPktsAccum > 0 || depth > 0 {
+        onTxMeter?(lens.side.rawValue, lens.txBytesAccum, lens.txPktsAccum, depth)
+      }
+      lens.txBytesAccum = 0
+      lens.txPktsAccum = 0
+    }
+    queue.asyncAfter(deadline: .now() + .milliseconds(G2Central.TX_METER_INTERVAL_MS)) {
+      [weak self] in self?.txMeterTickLocked()
     }
   }
 
@@ -779,12 +882,6 @@ final class G2Central: NSObject {
       guard let data = Data(base64Encoded: base64), !data.isEmpty else {
         self.log("pushToService ignored — bad/empty base64"); return
       }
-      // A service message frames into ≤255 packets of 236 B; anything larger cannot be
-      // sent and used to trap in the framer. Reject here with a readable log instead.
-      guard data.count <= G2Wire.MAX_REASSEMBLY_BYTES else {
-        self.log("pushToService ignored — payload too large (\(data.count) B > \(G2Wire.MAX_REASSEMBLY_BYTES) B)")
-        return
-      }
       self.sendToServiceLocked(serviceId: serviceId, payload: data)
       self.log("pushToService 0x\(String(serviceId, radix: 16)) → both (\(data.count) B)")
     }
@@ -1028,11 +1125,8 @@ final class G2Central: NSObject {
     var m = dashModel
     if let v = obj["time"] as? String { m.time = v }
     if let v = obj["date"] as? String { m.date = v }
-    // Battery is a percentage and drives a bar width in FfsDashboard — clamp it like `tile`
-    // below. Unclamped, `Int(v)` also trapped outright on a Double past Int.max (e.g. 1e30).
-    if let v = obj["battery"] as? Int { m.battery = max(0, min(100, v)) }
-    // NB: clamp in Double space — `Int(1e30)` traps before any Int-side clamp could run.
-    else if let v = obj["battery"] as? Double, v.isFinite { m.battery = Int(min(100, max(0, v)).rounded()) }
+    if let v = obj["battery"] as? Int { m.battery = v }
+    else if let v = obj["battery"] as? Double { m.battery = Int(v) }
     if let v = obj["tile"] as? Int { m.tile = max(0, min(FfsDashboard.TILE_COUNT - 1, v)) }
     if let v = obj["calendarTitle"] as? String { m.calendarTitle = v }
     if let v = obj["calendarSub"] as? String { m.calendarSub = v }
@@ -1291,6 +1385,7 @@ final class G2Central: NSObject {
       self.imgAckResolve = nil
       self.imgAckTimer = nil
       self.log("img: ack TIMEOUT session=\(session) fragment=\(fragment)")
+      self.onImgAck?(Int(session), Int(fragment), false, true)  // FUT-253: structured timeout
       resolve?(false)
     }
     imgAckTimer = timer
@@ -1304,6 +1399,7 @@ final class G2Central: NSObject {
     imgAckExpect = nil
     imgAckTimer?.cancel()
     imgAckTimer = nil
+    onImgAck?(Int(session), Int(fragment), success, false)  // FUT-253: structured ack
     let resolve = imgAckResolve
     imgAckResolve = nil
     resolve?(success)
@@ -1512,6 +1608,12 @@ final class G2Central: NSObject {
       return
     }
     sendEvenHubLocked(G2EvenHub.heartbeat(magicRandom: counters.nextMagic()), to: .both)
+    // FUT-253: piggyback a live RSSI poll on the heartbeat. The reading lands async in
+    // `peripheral(_:didReadRSSI:error:)` → onRssi. Only flows while the session is up
+    // (heartbeat is gated on sessionAuthed+pairReady) — see report for that limitation.
+    for lens in lenses.values where lens.connected {
+      lens.peripheral.readRSSI()
+    }
     schedule(5000) { [weak self] in self?.heartbeatTickLocked() }
   }
 
@@ -1554,6 +1656,64 @@ final class G2Central: NSObject {
     // finding: FUT-233 wants to know whether a ring event ever reaches this path.
     log("GESTURE: \(gesture) (side=\(side.rawValue), source=\(source.map(String.init) ?? "none"))")
     onGesture?(gesture, side.rawValue, source.map(Int.init))
+  }
+
+  /// TEST AFFORDANCE — inject a synthetic touch gesture as if the glasses had sent it, so the
+  /// input→render path can be driven without a finger on the temple pad.
+  ///
+  /// The frame is built to the real firmware shape (evenhub_main_msg_ctx{cmd=2,
+  /// f13=SendDeviceEvent{f3=SysEvent{...}}}) and pushed through the REAL transport framer, the
+  /// REAL reassembler, the REAL parseGesture, the REAL 100ms dedup and the REAL onGesture emit —
+  /// so everything from the wire format up through the OS's navigation and rendering is
+  /// genuinely exercised.
+  ///
+  /// ⚠️ What it CANNOT prove is the half below it: that a finger on the pad produces this frame
+  /// and that it reaches us over BLE. That is the open FUT-249/FUT-233 question and only a real
+  /// touch answers it. Per cardinal rule 1 a green run here is NOT on-glass proof of input,
+  /// which is why every injection logs "SIMULATED".
+  ///
+  /// Deliberately routed through the framer rather than calling onGesture directly: a shortcut
+  /// that skipped the decode would keep passing after a protocol change broke it.
+  func simulateGesture(_ gesture: String) {
+    queue.async { [weak self] in
+      guard let self = self else { return }
+      let eventType: Int32
+      switch gesture {
+      case "tap": eventType = 0
+      case "swipe_up": eventType = 1
+      case "swipe_down": eventType = 2
+      case "double_tap": eventType = 3
+      default:
+        self.log("simulateGesture: unknown glasses gesture '\(gesture)'"
+          + " (tap | double_tap | swipe_up | swipe_down)")
+        return
+      }
+      // Sys_ItemEvent{ f1=eventType, f2=eventSource }. Source 1 is a temple pad — the only
+      // value real telemetry has ever carried.
+      var sys = G2ProtobufWriter()
+      sys.writeInt32Field(1, eventType)
+      sys.writeInt32Field(2, 1)
+      var devEvent = G2ProtobufWriter()
+      devEvent.writeMessageField(3, sys.data)
+      var msg = G2ProtobufWriter()
+      msg.writeInt32Field(1, 2)  // rspOsNotifyEvent
+      msg.writeInt32Field(2, self.counters.nextMagic())
+      msg.writeMessageField(13, devEvent.data)
+
+      self.log("SIMULATED GESTURE '\(gesture)' — synthetic frame, NOT from the hardware")
+      // A fresh reassembler, so an injection can never splice itself into a real message the
+      // right lens happens to be part-way through.
+      let rx = G2RxReassembler()
+      let packets = G2Transport.buildPackets(
+        syncId: 0, serviceId: G2ServiceID.evenHub.rawValue, payload: msg.data, reserveFlag: true)
+      for pkt in packets {
+        if let res = rx.feed(pkt), res.serviceId == G2ServiceID.evenHub.rawValue,
+          let g = G2EvenHub.parseGesture(res.payload)
+        {
+          self.handleGestureLocked(g.name, side: .right, source: g.source)
+        }
+      }
+    }
   }
 
   // MARK: - Device info (inbound) — FUT-169 battery + FUT-167 version read-back
@@ -1659,8 +1819,15 @@ extension G2Central: CBCentralManagerDelegate {
     error: Error?
   ) {
     let s = side(from: peripheral.name ?? "")
+    // FUT-253: surface the numeric CBError/NSError code+domain, not just the prose —
+    // 0x06 (connection timeout) vs 0x0A (peer removed pairing) point at different fixes.
+    let ns = error as NSError?
+    let code = ns?.code ?? -1
+    let domain = ns?.domain ?? ""
+    let desc = error?.localizedDescription ?? "unknown"
     log("Failed to connect to \(peripheral.name ?? "?") (side=\(s.rawValue)): "
-      + "\(error?.localizedDescription ?? "unknown")")
+      + "\(desc) [code=\(code) domain=\(domain)]")
+    onConnectFailed?(s.rawValue, code, domain, desc)
     // Drop only THIS side's provisional state; the other lens is untouched.
     if let lens = lenses[s], lens.peripheral.identifier == peripheral.identifier {
       lenses[s] = nil
@@ -1675,13 +1842,19 @@ extension G2Central: CBCentralManagerDelegate {
   ) {
     let name = peripheral.name ?? "?"
     let s = side(from: name)
+    // FUT-253: carry the numeric code/domain alongside the prose. code=0 == a clean,
+    // error-free disconnect (deliberate teardown); nonzero is an involuntary drop.
+    let ns = error as NSError?
+    let code = ns?.code ?? 0
+    let domain = ns?.domain ?? ""
     log("Disconnected from \(name) (side=\(s.rawValue)): "
-      + "\(error?.localizedDescription ?? "clean")")
-    onDisconnected?(name, s.rawValue, error?.localizedDescription)
+      + "\(error?.localizedDescription ?? "clean") [code=\(code) domain=\(domain)]")
+    onDisconnected?(name, s.rawValue, error?.localizedDescription, code, domain)
     // Tear down ONLY this side. The other lens keeps its connection + state.
     if let lens = lenses[s], lens.peripheral.identifier == peripheral.identifier {
       lens.writeQueue.removeAll()
       lens.draining = false
+      lens.txStalled = false
       lens.writeChar = nil
       lens.notifyChar = nil
       lens.audioChar = nil
@@ -1697,6 +1870,36 @@ extension G2Central: CBCentralManagerDelegate {
 extension G2Central: CBPeripheralDelegate {
   private func lens(for peripheral: CBPeripheral) -> G2Lens? {
     return lenses.values.first { $0.peripheral.identifier == peripheral.identifier }
+  }
+
+  /// FUT-253: the async result of the `readRSSI()` we fire from the heartbeat.
+  func peripheral(_ peripheral: CBPeripheral, didReadRSSI RSSI: NSNumber, error: Error?) {
+    let s = lens(for: peripheral)?.side ?? side(from: peripheral.name ?? "")
+    if let error = error {
+      log("readRSSI error (side=\(s.rawValue)): \(error.localizedDescription)")
+      return
+    }
+    onRssi?(s.rawValue, RSSI.intValue)
+  }
+
+  /// FUT-253: the write-without-response buffer has room again — resume the paused drain
+  /// for this side (see the backpressure gate in `drainStepLocked`). This delegate was
+  /// never implemented; without it a stalled side would sit paused forever.
+  func peripheralIsReadyToSendWriteWithoutResponse(_ peripheral: CBPeripheral) {
+    guard let lens = lens(for: peripheral) else { return }
+    if lens.txStalled {
+      lens.txStalled = false
+      log("tx RESUME side=\(lens.side.rawValue) depth=\(lens.writeQueue.count)")
+      onTxResume?(lens.side.rawValue, lens.writeQueue.count)
+    }
+    // Resume only if we still hold this side's write-lock and have work queued.
+    // GATED: only the backpressure gate ever pauses the drain, so only it should resume it.
+    // With the gate OFF the paced drain drives itself (WRITE_PACING_MS) and must NOT be
+    // re-entered here, or two drain loops would race on one side. (The stall/resume emit
+    // above is naturally inert when off — txStalled is only set inside the gate.)
+    if G2Central.ENABLE_BACKPRESSURE_GATE, lens.draining {
+      drainStepLocked(lens)
+    }
   }
 
   func peripheral(
@@ -1736,6 +1939,14 @@ extension G2Central: CBPeripheralDelegate {
         lens.writeChar = ch
         matched.append(ch.uuid.uuidString)
         log("Found WRITE char \(ch.uuid.uuidString) (side=\(s.rawValue))")
+        // FUT-253: read the real write-without-response payload ceiling once per side.
+        // This is the per-packet budget the 6ms-paced drain is actually writing against.
+        if !lens.mtuReported {
+          lens.mtuReported = true
+          let mtu = peripheral.maximumWriteValueLength(for: .withoutResponse)
+          log("MTU (write-without-response) side=\(s.rawValue) = \(mtu)")
+          onMtu?(s.rawValue, mtu)
+        }
       case G2Central.CHAR_NOTIFY:
         lens.notifyChar = ch
         matched.append(ch.uuid.uuidString)
@@ -1773,6 +1984,9 @@ extension G2Central: CBPeripheralDelegate {
       log("Notify state for \(characteristic.uuid) (side=\(s.rawValue)) → "
         + "\(characteristic.isNotifying ? "ON" : "OFF")")
     }
+    // FUT-253: promote the subscribe ON/OFF to a structured emit. The right lens's notify
+    // channel IS the protocol/ACK path — a silent unsubscribe explains a dead session.
+    onSubscribe?(s.rawValue, characteristic.uuid.uuidString, characteristic.isNotifying)
   }
 
   func peripheral(
@@ -1933,17 +2147,14 @@ extension G2Central {
       guard g.pass else {
         self.flashProgress("BRICK-GUARD BLOCKED: \(g.reason)", 0, done: true, ok: false); return
       }
-      let gv: G2Flash.GoldenVector? =
-        sha.lowercased() == G2Flash.goldenCFW.sha256 ? G2Flash.goldenCFW :
-        (sha.lowercased() == G2Flash.goldenStock.sha256 ? G2Flash.goldenStock :
-        (sha.lowercased() == G2Flash.goldenCanary.sha256 ? G2Flash.goldenCanary :
-        (sha.lowercased() == G2Flash.goldenFontpeek.sha256 ? G2Flash.goldenFontpeek :
-        (sha.lowercased() == G2Flash.goldenBidiOnly.sha256 ? G2Flash.goldenBidiOnly :
-        (sha.lowercased() == G2Flash.goldenHebrewFull.sha256 ? G2Flash.goldenHebrewFull :
-        (sha.lowercased() == G2Flash.goldenHebrewProbe.sha256 ? G2Flash.goldenHebrewProbe :
-        (sha.lowercased() == G2Flash.goldenFfsui.sha256 ? G2Flash.goldenFfsui :
-        (sha.lowercased() == G2Flash.goldenRamexec.sha256 ? G2Flash.goldenRamexec :
-        (sha.lowercased() == G2Flash.goldenLoader.sha256 ? G2Flash.goldenLoader : nil)))))))))
+      // sha256 → its captured golden vector. A build not in this table cannot be flashed.
+      let goldens: [G2Flash.GoldenVector] = [
+        G2Flash.goldenCFW, G2Flash.goldenStock, G2Flash.goldenStock27, G2Flash.goldenCanary,
+        G2Flash.goldenFontpeek, G2Flash.goldenBidiOnly, G2Flash.goldenHebrewFull,
+        G2Flash.goldenHebrewProbe, G2Flash.goldenFfsui, G2Flash.goldenRamexec,
+        G2Flash.goldenLoader, G2Flash.goldenLoader27,
+      ]
+      let gv = goldens.first { $0.sha256 == sha.lowercased() }
       guard let gvec = gv else {
         self.flashProgress("not a known golden build — refusing", 0, done: true, ok: false); return
       }

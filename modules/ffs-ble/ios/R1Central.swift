@@ -272,6 +272,41 @@ final class R1Central: NSObject {
     return true
   }
 
+  /// TEST AFFORDANCE — inject a synthetic ring gesture as if the R1 had sent it, so the
+  /// input→render path can be driven with no ring on a finger.
+  ///
+  /// ⚠️ This proves everything ABOVE the radio and nothing below it. In particular it cannot
+  /// answer the open FUT-233 question of which gestures the phone link actually carries — only
+  /// a real ring can, and pretending otherwise would answer it WRONG. Every injection logs
+  /// "SIMULATED".
+  ///
+  /// Unlike the Android twin, this cannot reuse `handle(_:from:)` because that takes a
+  /// CBCharacteristic, which cannot be synthesized — so the raw + decode emits are replicated.
+  /// Keep the two in step.
+  func simulateGesture(_ gesture: String) {
+    queue.async { [weak self] in
+      guard let self = self else { return }
+      let frame: Data
+      switch gesture {
+      case "hold": frame = Data([0xFF, 0x03, 0x00])
+      case "single_tap": frame = Data([0xFF, 0x04, 0x01])
+      case "double_tap": frame = Data([0xFF, 0x04, 0x02])
+      case "swipe_up": frame = Data([0xFF, 0x05, 0x00])
+      case "swipe_down": frame = Data([0xFF, 0x05, 0xFF])
+      default:
+        self.log("simulateGesture: unknown ring gesture '\(gesture)'"
+          + " (hold | single_tap | double_tap | swipe_up | swipe_down)")
+        return
+      }
+      let hex = R1Central.hex(frame)
+      self.log("SIMULATED RING GESTURE '\(gesture)' — synthetic frame, NOT from the ring")
+      self.onRaw?(String(R1BLE.NOTIFY_2.uuidString.prefix(8)), hex)
+      if let g = R1Gesture.parse(frame) {
+        self.onGesture?(g.rawValue, hex)
+      }
+    }
+  }
+
   /// "AA:BB:CC:DD:EE:FF" or "AABBCCDDEEFF" -> 6 raw bytes.
   static func parseMac(_ s: String) -> Data? {
     let cleaned =
