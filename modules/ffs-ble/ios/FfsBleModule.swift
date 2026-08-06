@@ -235,6 +235,21 @@ public class FfsBleModule: Module {
     Function("pushPayloadViaImage") { [weak self] (base64: String) in
       self?.ensureCentral().pushPayloadViaImage(base64: base64)
     }
+
+    // TEST AFFORDANCE: inject a synthetic gesture so the input→render path can be driven
+    // without a finger on the temple pad or the ring. `device` is "glasses" or "ring". Every
+    // injection logs "SIMULATED" — it exercises decode, nav and render for real, but proves
+    // nothing about whether a real touch reaches us (cardinal rule 1).
+    Function("simulateGesture") { [weak self] (device: String, gesture: String) in
+      switch device.lowercased() {
+      case "ring": self?.ensureRing().simulateGesture(gesture)
+      case "glasses": self?.ensureCentral().simulateGesture(gesture)
+      default:
+        self?.sendEvent("onLog", [
+          "message": "[ios] simulateGesture: device must be 'glasses' or 'ring', got '\(device)'"
+        ])
+      }
+    }
   }
 
   private static func parseSide(_ raw: String) -> G2Side {

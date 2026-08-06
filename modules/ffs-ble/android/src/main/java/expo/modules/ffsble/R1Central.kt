@@ -481,6 +481,33 @@ class R1Central(
         return true
     }
 
+    /**
+     * Inject a synthetic ring gesture as if the R1 had sent it.
+     *
+     * Builds the real `[0xFF, type, param]` frame and feeds it through the REAL inbound handler,
+     * so the marker check, [R1Gesture] decode, raw-hex emit and `onGesture` all run exactly as
+     * they would for a finger on the ring. See the note on `G2Central.simulateGesture` for the
+     * boundary: this proves everything ABOVE the radio and nothing below it. In particular it
+     * cannot answer the open FUT-233 question of which gestures the phone link actually carries
+     * -- only a real ring can, and pretending otherwise would answer it WRONG.
+     */
+    fun simulateGesture(gesture: String) = post {
+        val frame = when (gesture) {
+            R1Gesture.HOLD -> byteArrayOf(0xFF.toByte(), 0x03, 0x00)
+            R1Gesture.SINGLE_TAP -> byteArrayOf(0xFF.toByte(), 0x04, 0x01)
+            R1Gesture.DOUBLE_TAP -> byteArrayOf(0xFF.toByte(), 0x04, 0x02)
+            R1Gesture.SWIPE_UP -> byteArrayOf(0xFF.toByte(), 0x05, 0x00)
+            R1Gesture.SWIPE_DOWN -> byteArrayOf(0xFF.toByte(), 0x05, 0xFF.toByte())
+            else -> {
+                log("simulateGesture: unknown ring gesture '$gesture' " +
+                    "(hold | single_tap | double_tap | swipe_up | swipe_down)")
+                return@post
+            }
+        }
+        log("SIMULATED RING GESTURE '$gesture' -- synthetic frame, NOT from the ring")
+        handleLocked(frame, NOTIFY_2)
+    }
+
     /** "AA:BB:CC:DD:EE:FF" or "AABBCCDDEEFF" -> 6 raw bytes. */
     fun parseMac(s: String): ByteArray? {
         val cleaned = s.replace(":", "").replace("-", "")

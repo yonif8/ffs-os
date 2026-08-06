@@ -1658,6 +1658,64 @@ final class G2Central: NSObject {
     onGesture?(gesture, side.rawValue, source.map(Int.init))
   }
 
+  /// TEST AFFORDANCE — inject a synthetic touch gesture as if the glasses had sent it, so the
+  /// input→render path can be driven without a finger on the temple pad.
+  ///
+  /// The frame is built to the real firmware shape (evenhub_main_msg_ctx{cmd=2,
+  /// f13=SendDeviceEvent{f3=SysEvent{...}}}) and pushed through the REAL transport framer, the
+  /// REAL reassembler, the REAL parseGesture, the REAL 100ms dedup and the REAL onGesture emit —
+  /// so everything from the wire format up through the OS's navigation and rendering is
+  /// genuinely exercised.
+  ///
+  /// ⚠️ What it CANNOT prove is the half below it: that a finger on the pad produces this frame
+  /// and that it reaches us over BLE. That is the open FUT-249/FUT-233 question and only a real
+  /// touch answers it. Per cardinal rule 1 a green run here is NOT on-glass proof of input,
+  /// which is why every injection logs "SIMULATED".
+  ///
+  /// Deliberately routed through the framer rather than calling onGesture directly: a shortcut
+  /// that skipped the decode would keep passing after a protocol change broke it.
+  func simulateGesture(_ gesture: String) {
+    queue.async { [weak self] in
+      guard let self = self else { return }
+      let eventType: Int32
+      switch gesture {
+      case "tap": eventType = 0
+      case "swipe_up": eventType = 1
+      case "swipe_down": eventType = 2
+      case "double_tap": eventType = 3
+      default:
+        self.log("simulateGesture: unknown glasses gesture '\(gesture)'"
+          + " (tap | double_tap | swipe_up | swipe_down)")
+        return
+      }
+      // Sys_ItemEvent{ f1=eventType, f2=eventSource }. Source 1 is a temple pad — the only
+      // value real telemetry has ever carried.
+      var sys = G2ProtobufWriter()
+      sys.writeInt32Field(1, eventType)
+      sys.writeInt32Field(2, 1)
+      var devEvent = G2ProtobufWriter()
+      devEvent.writeMessageField(3, sys.data)
+      var msg = G2ProtobufWriter()
+      msg.writeInt32Field(1, 2)  // rspOsNotifyEvent
+      msg.writeInt32Field(2, self.counters.nextMagic())
+      msg.writeMessageField(13, devEvent.data)
+
+      self.log("SIMULATED GESTURE '\(gesture)' — synthetic frame, NOT from the hardware")
+      // A fresh reassembler, so an injection can never splice itself into a real message the
+      // right lens happens to be part-way through.
+      let rx = G2RxReassembler()
+      let packets = G2Transport.buildPackets(
+        syncId: 0, serviceId: G2ServiceID.evenHub.rawValue, payload: msg.data, reserveFlag: true)
+      for pkt in packets {
+        if let res = rx.feed(pkt), res.serviceId == G2ServiceID.evenHub.rawValue,
+          let g = G2EvenHub.parseGesture(res.payload)
+        {
+          self.handleGestureLocked(g.name, side: .right, source: g.source)
+        }
+      }
+    }
+  }
+
   // MARK: - Device info (inbound) — FUT-169 battery + FUT-167 version read-back
 
   private var lastDeviceInfoAt: TimeInterval = 0

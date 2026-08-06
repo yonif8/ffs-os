@@ -1,6 +1,10 @@
 package expo.modules.ffsble
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
@@ -189,6 +193,25 @@ class FfsBleModule : Module() {
       ensureCentral()?.pushPayloadViaImage(base64)
     }
 
+    // ---- test affordance ----
+
+    /**
+     * Inject a synthetic gesture so the input -> render path can be driven without a finger on
+     * the temple pad or the ring. `device` is "glasses" or "ring". Every injection logs
+     * "SIMULATED": it exercises decode, nav and render for real, but proves nothing about
+     * whether a real touch reaches us -- see the note on G2Central.simulateGesture.
+     */
+    Function("simulateGesture") { device: String, gesture: String ->
+      when (device.lowercase()) {
+        "ring" -> ensureRing()?.simulateGesture(gesture)
+        "glasses" -> ensureCentral()?.simulateGesture(gesture)
+        else -> sendEvent(
+          "onLog",
+          mapOf("message" to "[android] simulateGesture: device must be 'glasses' or 'ring', got '$device'")
+        )
+      }
+    }
+
     // ---- flashing (FUT-167) ----
 
     // Stage 1 is a ZERO-WRITE probe of already-discovered GATT: no brick risk, so it ships now.
@@ -199,12 +222,81 @@ class FfsBleModule : Module() {
       notYet("startCfwFlash", "Phase 4 (brick risk -- flash from the iOS app for now)")
     }
 
+    OnCreate { registerSimulationReceiver() }
+
     OnDestroy {
+      unregisterSimulationReceiver()
       central?.shutdown()
       central = null
       ring?.shutdown()
       ring = null
     }
+  }
+
+  // ---- adb-driven gesture injection (DEBUG BUILDS ONLY) ----
+
+  private var simReceiver: BroadcastReceiver? = null
+
+  /**
+   * Register the receiver that lets `adb shell am broadcast` inject a gesture:
+   *
+   *   adb shell am broadcast -a com.futurefounders.ffs.SIMULATE_GESTURE \
+   *     --es device glasses --es gesture tap -p com.futurefounders.glassesos
+   *
+   * WHY THIS EXISTS: the input->render path (FUT-249) is the project's open front, and every
+   * iteration on it otherwise costs a human finger on a temple pad. This makes the whole loop
+   * -- change code, build, install, fire a gesture, read the result -- runnable from the dev
+   * machine with nobody holding the hardware.
+   *
+   * WHY IT IS SAFE: the receiver has to be EXPORTED for the shell uid to reach it, and an
+   * exported "make the app think the user did something" endpoint is a genuine hole in a
+   * shipped app. So it is registered ONLY when the app itself is debuggable, checked against
+   * the app's own ApplicationInfo flag rather than a library BuildConfig (which does not
+   * reliably track the consuming app's variant). A release build never registers it and there
+   * is nothing to reach.
+   */
+  private fun registerSimulationReceiver() {
+    val context = appContext.reactContext ?: return
+    val debuggable =
+      (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+    if (!debuggable) return
+
+    val receiver = object : BroadcastReceiver() {
+      override fun onReceive(ctx: Context?, intent: Intent?) {
+        val device = intent?.getStringExtra("device") ?: "glasses"
+        val gesture = intent?.getStringExtra("gesture") ?: return
+        when (device.lowercase()) {
+          "ring" -> ensureRing()?.simulateGesture(gesture)
+          else -> ensureCentral()?.simulateGesture(gesture)
+        }
+      }
+    }
+    val filter = IntentFilter(SIMULATE_ACTION)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+    } else {
+      @Suppress("UnspecifiedRegisterReceiverFlag")
+      context.registerReceiver(receiver, filter)
+    }
+    simReceiver = receiver
+    sendEvent(
+      "onLog",
+      mapOf("message" to "[android] debug build: gesture injection listening on $SIMULATE_ACTION")
+    )
+  }
+
+  private fun unregisterSimulationReceiver() {
+    val r = simReceiver ?: return
+    simReceiver = null
+    try {
+      appContext.reactContext?.unregisterReceiver(r)
+    } catch (_: IllegalArgumentException) {
+      // Already gone; not worth failing a teardown over.
+    }
+  }
+
+  private companion object {
+    const val SIMULATE_ACTION = "com.futurefounders.ffs.SIMULATE_GESTURE"
   }
 
   /**
