@@ -41,6 +41,14 @@ object G2ServiceID {
     const val G2_SETTING: Int = 9
     const val GESTURE_CTRL: Int = 13
     const val ONBOARDING: Int = 16
+    /**
+     * ⛔ DO NOT WRITE TO THIS unless you know exactly which field you are touching.
+     * `dev_config` (0x80) looks like a settings service but is a set of developer/debug knobs.
+     * `reference/g2-kit-unofficial/ble/docs/settings.md` records that poking at them **bricked a
+     * pair of glasses** during early RE -- recoverable, but it took a power-cycle and a re-pair.
+     * Everything a normal app needs (brightness, wear, silent, head-up, lens x/y) lives on
+     * [G2_SETTING] (0x09) instead.
+     */
     const val DEVICE_SETTINGS: Int = 0x80
     const val EVEN_HUB_CTRL: Int = 0x81
     const val EVEN_HUB: Int = 0xE0
@@ -1027,6 +1035,70 @@ object G2Setting {
         w.writeInt32Field(1, CMD_DEVICE_RECEIVE_INFO)
         w.writeInt32Field(2, magicRandom)
         w.writeMessageField(3, info.data)
+        return w.data
+    }
+
+    /**
+     * HUD BRIGHTNESS. Field numbers cross-checked against the generated schema in
+     * `reference/g2-kit-unofficial/ble/gen/g2_setting_pb.ts` (MIT) -- the same file confirms our
+     * existing [setHeadUpSwitch] encoding byte for byte (deviceReceiveHeadUpSetting = 4,
+     * headUpSwitch = 1), which is why that envelope is reused here rather than re-derived.
+     *
+     *     DeviceReceive_Brightness { autoAdjust = 1, brightnessLevel = 2,
+     *                                leftCalibration = 3, rightCalibration = 4 }
+     *     DeviceReceiveInfoFromAPP { deviceReceiveBrightness = 1, ... }
+     *
+     * ⚠️ The scale is 0-100 but the mapping to actual lens output is **NONLINEAR** -- the
+     * firmware converts level -> luminance -> drive current (`SVC_Settings_BrightnessLevelToLumAndCurrent`,
+     * "Convert brightness level %d to current %d, lum=%d"). Do not assume 50 is "half".
+     *
+     * ⚠️ `level = 0` blanks the lens VISUALLY but does NOT enter any power-saving state.
+     *
+     * [autoAdjust] hands control to the ambient-light sensor (the firmware's ALS drives it:
+     * "ALSSyncHandler, recv brightness_level:%d"). Turn it OFF to hold a level -- otherwise the
+     * ALS will move the brightness back and any measurement taken through the camera rig is
+     * against a moving target.
+     *
+     * PRACTICAL NOTE: a LOWER brightness makes the HUD markedly easier for the phone camera to
+     * focus on, so this is also an instrument control for every visual proof this project makes.
+     */
+    fun setBrightness(
+        magicRandom: Int,
+        level: Int,
+        autoAdjust: Boolean = false,
+        leftCalibration: Int = 0,
+        rightCalibration: Int = 0
+    ): ByteArray {
+        val b = G2ProtobufWriter()
+        b.writeInt32Field(1, if (autoAdjust) 1 else 0)
+        b.writeInt32Field(2, level.coerceIn(0, 100))
+        if (leftCalibration != 0) b.writeInt32Field(3, leftCalibration)
+        if (rightCalibration != 0) b.writeInt32Field(4, rightCalibration)
+        val info = G2ProtobufWriter()
+        info.writeMessageField(1, b.data)
+        val w = G2ProtobufWriter()
+        w.writeInt32Field(1, CMD_DEVICE_RECEIVE_INFO)
+        w.writeInt32Field(2, magicRandom)
+        w.writeMessageField(3, info.data)
+        return w.data
+    }
+
+    /** APPRequestSettingType. Used as `settingInfoType` (field 1) on a read request. */
+    const val REQ_BRIGHTNESS_INFO: Int = 0
+    const val REQ_BASIC_SETTING: Int = 1
+
+    /**
+     * Read settings back. The reply is a full snapshot (battery, firmware, autoBrightnessLevel,
+     * head-up angle, wear/silent switches, x/y lens coords) -- see `deviceReceiveRequestFromApp`
+     * in the generated schema. [REQ_BRIGHTNESS_INFO] is the narrow brightness read.
+     */
+    fun querySettings(magicRandom: Int, settingInfoType: Int = REQ_BASIC_SETTING): ByteArray {
+        val req = G2ProtobufWriter()
+        req.writeInt32Field(1, settingInfoType)
+        val w = G2ProtobufWriter()
+        w.writeInt32Field(1, CMD_DEVICE_RECEIVE_REQUEST)
+        w.writeInt32Field(2, magicRandom)
+        w.writeMessageField(4, req.data)
         return w.data
     }
 

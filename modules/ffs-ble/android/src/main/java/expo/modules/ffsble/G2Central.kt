@@ -2288,6 +2288,45 @@ class G2Central(
     // the container lifecycle and the raw-bytes-over-image fragmenter, because the FUT-216
     // payload push rides exactly the same channel and needs neither of those renderers.
 
+    /**
+     * HUD BRIGHTNESS (sid 0x09). 0-100, nonlinear; [autoAdjust] hands control to the ambient-light
+     * sensor. Sent to BOTH lenses -- brightness is a per-lens driver setting, and sending it to one
+     * side leaves the pair visibly mismatched.
+     *
+     * Doubles as an INSTRUMENT control: a dimmer HUD is markedly easier for the phone camera to
+     * focus on, so lowering it improves every visual proof this project makes. Turn [autoAdjust]
+     * OFF when measuring, or the ALS moves the level under you mid-observation.
+     */
+    fun setBrightness(level: Int, autoAdjust: Boolean = false) = post {
+        if (!pairReadyLocked()) {
+            log("setBrightness ignored -- pair not ready")
+            return@post
+        }
+        val clamped = level.coerceIn(0, 100)
+        withSessionLocked {
+            sendG2SettingLocked(
+                G2Setting.setBrightness(counters.nextMagic(), clamped, autoAdjust), G2Target.BOTH
+            )
+            log("setBrightness -> level=$clamped autoAdjust=$autoAdjust -> both")
+        }
+    }
+
+    /** Read the settings snapshot back (battery, firmware, brightness, head-up, wear, x/y coords). */
+    fun querySettings(brightnessOnly: Boolean = false) = post {
+        if (!pairReadyLocked()) {
+            log("querySettings ignored -- pair not ready")
+            return@post
+        }
+        dumpInbound = true // the reply shape is not decoded yet -- see the inbound-decoder task
+        withSessionLocked {
+            val type = if (brightnessOnly) G2Setting.REQ_BRIGHTNESS_INFO else G2Setting.REQ_BASIC_SETTING
+            sendG2SettingLocked(
+                G2Setting.querySettings(counters.nextMagic(), type), G2Target.RIGHT
+            )
+            log("querySettings(type=$type) -> right; watch for the inbound snapshot")
+        }
+    }
+
     /** Public: stop the running animation. The next text/image surface rebuilds the page. */
     fun stopAnimation() = post { stopAnimationLocked() }
 
