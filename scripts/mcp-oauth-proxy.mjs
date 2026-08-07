@@ -364,7 +364,28 @@ const server = https.createServer(loadTls(), async (req, res) => {
   if (p === "/mcp" || p === "/") {
     const auth = req.headers.authorization || "";
     const presented = auth.startsWith("Bearer ") ? auth.slice(7) : null;
-    const rec = presented ? tokens.get(presented) : null;
+    let rec = presented ? tokens.get(presented) : null;
+
+    // PASS-THROUGH AUTH, for the `claude mcp add --header` route.
+    //
+    // Custom connectors are dialled from ANTHROPIC'S servers, not from this machine, so a
+    // localhost URL can never serve one ("your MCP server must be reachable over the public
+    // internet from Anthropic's IP ranges"). The local CLI route is the one that works for a
+    // device on your desk -- and it sends the configured bearer, not an OAuth token.
+    //
+    // Accepting that same bearer is exactly as strong as talking to the phone directly, since it
+    // IS the phone's secret, while still buying the things this proxy exists for: the bind at
+    // session start succeeds even when the phone is asleep, and scheme/address drift is absorbed.
+    //
+    // It also self-heals across token rotation: both legs read the same config value, so updating
+    // ~/.claude.json fixes the client and the upstream in one edit.
+    if (!rec && presented) {
+      try {
+        const { token } = upstreamConfig();
+        const expected = String(token).replace(/^Bearer\s+/i, "");
+        if (presented === expected) rec = { client_id: "static-bearer", expires: Infinity };
+      } catch { /* fall through to 401 */ }
+    }
 
     // MUST be 401 (not 200) with WWW-Authenticate pointing at the PRM, or the client never
     // discovers that it needs to authenticate at all.
@@ -397,6 +418,24 @@ const server = https.createServer(loadTls(), async (req, res) => {
   }
 
   json(res, 404, { error: "not_found", path: p });
+});
+
+// CONNECTION-LEVEL LOGGING. Without this, a client that fails the TLS handshake is
+// indistinguishable from one that never dialled at all: neither produces an HTTP request, so the
+// request log stays empty either way. That ambiguity is exactly what makes "clicked Add, nothing
+// happened" hard to diagnose.
+server.on("connection", (s) => {
+  console.log(`[oauth-proxy] TCP connect from ${s.remoteAddress}:${s.remotePort}`);
+});
+server.on("tlsClientError", (err, s) => {
+  console.log(
+    `[oauth-proxy] ⚠ TLS REJECTED by client (${s.remoteAddress}): ${err.code || err.message}\n` +
+    `             => the client does not trust our certificate. Electron/Node apps use their OWN\n` +
+    `             root store (NODE_EXTRA_CA_CERTS / bundled CAs), NOT the Windows CurrentUser store.`
+  );
+});
+server.on("secureConnection", (s) => {
+  console.log(`[oauth-proxy] TLS ok (${s.getProtocol()}) authorized=${s.authorized}`);
 });
 
 server.listen(PORT, HOST, () => {
