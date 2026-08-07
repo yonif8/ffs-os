@@ -2,5 +2,9 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true
-  }
+  },
+  // Test files are run by `bun test`, which supplies its own describe/it/expect globals.
+  // tsc has no test-runner types configured, so it would report those globals as errors and
+  // drown out real type errors in app code. Run the tests with `bun test src/sdk` instead.
+  "exclude": ["**/__tests__/**", "**/*.test.ts", "**/*.test.tsx"]
 }
