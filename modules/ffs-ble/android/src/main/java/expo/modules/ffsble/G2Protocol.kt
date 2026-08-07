@@ -431,6 +431,59 @@ object G2EvenHub {
         )
     }
 
+    /**
+     * A text page at EXPLICIT geometry. Proves the container coordinate system rather than
+     * assuming it: every page so far has been full-canvas 576x288, so x/y/w/h have never
+     * actually been exercised and could be ignored, clamped, or interpreted from a different
+     * origin without anyone noticing.
+     */
+    fun textPageAt(
+        text: String,
+        x: Int, y: Int, width: Int, height: Int,
+        rebuild: Boolean,
+        magicRandom: Int,
+        borderWidth: Int = 0
+    ): ByteArray {
+        val tc = textContainer(
+            x = x, y = y, width = width, height = height, containerID = 1,
+            content = if (text.isEmpty()) " " else text, containerName = "ffs-geo",
+            borderWidth = borderWidth
+        )
+        return pageMessage(
+            textContainers = listOf(tc), imageContainers = emptyList(),
+            rebuild = rebuild, magicRandom = magicRandom
+        )
+    }
+
+    /**
+     * A page carrying BOTH a capturing list and a text container -- the "can a menu have a
+     * header?" question. `pageMessage` has always supported it; nobody has ever sent one.
+     *
+     * The list keeps the event binding (listOwnsEvents), so evt-0 is suppressed and the text is
+     * pure decoration. If the firmware honours it, menu headers are free; if it drops one of the
+     * two containers, every menu row has to carry its own context instead.
+     */
+    fun listWithHeaderPage(
+        items: List<String>,
+        header: String,
+        rebuild: Boolean,
+        magicRandom: Int
+    ): ByteArray {
+        val lc = listContainer(
+            x = 0, y = 40, width = 576, height = 248, containerID = 3,
+            items = items, containerName = "ffs-list", isEventCapture = true
+        )
+        val tc = textContainer(
+            x = 0, y = 0, width = 576, height = 40, containerID = 1,
+            content = header, containerName = "ffs-hdr", isEventCapture = false
+        )
+        return pageMessage(
+            textContainers = listOf(tc), imageContainers = emptyList(),
+            rebuild = rebuild, magicRandom = magicRandom,
+            listContainers = listOf(lc), listOwnsEvents = true
+        )
+    }
+
     /** TextContainerUpgrade (updateTextData, sub-field 9): update a live container. */
     fun updateText(containerID: Int, content: String, magicRandom: Int): ByteArray {
         val u = G2ProtobufWriter()

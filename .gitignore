@@ -44,3 +44,10 @@ yarn-error.*
 # Embedded JS bundle — a build artifact, regenerate with scripts/embed-bundle.sh
 android/app/src/main/assets/index.android.bundle
 android/app/src/main/assets/index.android.bundle.map
+
+# Transient camera-rig captures written to the repo root by scripts/hud-probe.ps1.
+# Anything worth keeping is copied into docs/proof/ with a descriptive name.
+/hud*.png
+/os[0-9]*.png
+/app_screen*.png
+/cam_focus*.png

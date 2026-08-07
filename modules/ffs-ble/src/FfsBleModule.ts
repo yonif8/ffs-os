@@ -295,6 +295,24 @@ export interface OnGlassesEvent {
   eventSource: number | null;
 }
 
+/**
+ * A raw, uninterpreted inbound EvenHub payload — the TypeScript SDK's inbound transport.
+ *
+ * Every reassembled 0xE0 frame arrives here regardless of what the native decoders made of it,
+ * so the SDK's own decoder (unit-tested against captured byte vectors) runs against live
+ * hardware bytes rather than trusting the Kotlin one.
+ */
+export interface OnEvenHubRawEvent {
+  /** base64, NO_WRAP. */
+  payload: string;
+}
+
+/** Debug-only: drive the TypeScript mini-OS from an adb broadcast. */
+export interface OnOsCommandEvent {
+  /** "boot" | "stop". */
+  cmd: string;
+}
+
 /** Map of event name → payload type. */
 export interface FfsBleEvents {
   onLog: OnLogEvent;
@@ -319,6 +337,8 @@ export interface FfsBleEvents {
   onSubscribe: OnSubscribeEvent;
   onImgAck: OnImgAckEvent;
   onGlassesEvent: OnGlassesEvent;
+  onEvenHubRaw: OnEvenHubRawEvent;
+  onOsCommand: OnOsCommandEvent;
   onRingConnected: OnRingConnectedEvent;
   onRingDisconnected: OnRingDisconnectedEvent;
   onRingRaw: OnRingRawEvent;
@@ -387,6 +407,25 @@ interface FfsBleNativeModule {
    * OTA loader), framed + chunked through the standard 0xAA transport, to both lenses.
    */
   pushToService(serviceId: number, base64: string): void;
+
+  // ---- the TypeScript SDK's transport (src/sdk) ----
+
+  /**
+   * Send one SDK-encoded EvenHub payload to the RIGHT lens, inside a session.
+   *
+   * NOT `pushToService(0xE0, …)`: that fans out to BOTH arms, whereas an EvenHub page belongs to
+   * the right lens only. Pairs with the `onEvenHubRaw` event to form the SDK's whole transport.
+   */
+  sendEvenHub(base64: string): void;
+  /**
+   * Hand page ownership to the SDK and report whether the firmware ALREADY holds a page.
+   *
+   * The SDK must seed its PageSlot with this: the firmware has one page slot and silently
+   * ignores a second CREATE, so booting the OS on a link where anything already rendered would
+   * otherwise leave the HUD unchanged with no error anywhere. Also stops any animation loop,
+   * which would rebuild the page out from under the SDK.
+   */
+  sdkTakeoverPage(): boolean;
   /**
    * HUD brightness (sid 0x09). `level` is 0–100 and nonlinear. `autoAdjust` hands control
    * back to the ambient-light sensor — pass false to HOLD a level, which is what every

@@ -45,6 +45,26 @@ export const PROVENANCE: Readonly<Record<string, ProvenanceEntry>> = {
     status: "proven",
     evidence: "48 rows declared (318B) and rendered; 7-row viewport photographed 2026-08-08",
   },
+  /**
+   * The SDK's own encoder driving a real page, end to end: TypeScript encodes, the native
+   * transport ships it to the right lens, the firmware renders it.
+   */
+  "sdk.transport": {
+    status: "proven",
+    evidence: "FfsOs home menu (82B, SDK-encoded) photographed on-glass 2026-08-08",
+  },
+  /**
+   * Navigating a screen STACK on-glass: a selection pops one page and declares the next as a
+   * REBUILD. This is the capability the per-screen page-slot bug would have broken silently.
+   *
+   * ⚠️ The INPUT was injected (a captured ListEvent replayed through the real dispatch path),
+   * because a genuine selection needs a finger on a temple pad. The RENDER is real hardware.
+   */
+  "sdk.navigation": {
+    status: "proven",
+    evidence:
+      "home -> row1 -> Settings(97B REBUILD) photographed 2026-08-08; input injected, render real",
+  },
   "sys.doubleClick": {
     status: "proven",
     evidence: "captured SysEvent{EventType=3 DOUBLE_CLICK, EventSource=1 GLASSES_R}",
@@ -63,7 +83,27 @@ export const PROVENANCE: Readonly<Record<string, ProvenanceEntry>> = {
     evidence: "SETTINGS snapshot decodes battery, L/R firmware, brightness, head-up angle",
   },
   "text.page": { status: "proven", evidence: "showText renders; used all session" },
-  "image.raw": { status: "proven", evidence: "4-bit BMP over the image channel, ACK-gated" },
+  /**
+   * RENDER-proven, not merely transport-proven. The distinction matters: the ACK stream said
+   * success=true for a whole session while the rig was mis-focused and showed nothing, so
+   * "the fragments were acknowledged" is NOT evidence that pixels reached the lens.
+   */
+  "image.raw": {
+    status: "proven",
+    evidence:
+      "testImageBmp (lit 200x100 rect, dark border, dark centre circle) photographed on-glass " +
+      "2026-08-08 — the dark centre dot is the distinctive feature text cannot fake",
+  },
+  /**
+   * Arbitrary container placement on the 576x288 canvas. Proven by MOVING one: the same string
+   * at y=0 and at y=216 landed ~49 screenshot px apart, which is the correct fraction of the
+   * ~65 px the full canvas occupies at the rig's zoom. A single placement would not have proven
+   * the axis — only the displacement does.
+   */
+  "container.geometry": {
+    status: "proven",
+    evidence: "showTextAt (0,0,288,144) vs (0,216,576,72) photographed; y displacement matches",
+  },
 
   // --- not proven; gated ---
   "list.itemName": {
@@ -82,9 +122,16 @@ export const PROVENANCE: Readonly<Record<string, ProvenanceEntry>> = {
     status: "unproven",
     evidence: "EventSource=2 believed to be the ring; never observed from our hardware",
   },
+  /**
+   * A page CAN carry a capturing list and a text container at once — so a menu header costs
+   * nothing and no row has to spend itself on context. This was the load-bearing unknown in the
+   * SDK spec: had it been false, every screen would have needed its title burned into row 0.
+   */
   "page.mixedListAndText": {
-    status: "unproven",
-    evidence: "pageMessage supports it; never sent. Would make menu headers free.",
+    status: "proven",
+    evidence:
+      "showListWithHeader photographed 2026-08-08: 'HEADER' text container above a live " +
+      "ONE/TWO/THREE/FOUR list, selected row still drawn as the rounded-rect highlight",
   },
   "text.updateInPlace": {
     status: "unproven",

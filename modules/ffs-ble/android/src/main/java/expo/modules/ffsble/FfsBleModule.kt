@@ -70,6 +70,10 @@ class FfsBleModule : Module() {
       "onNotify",
       "onGesture",
       "onGlassesEvent",
+      // Raw inbound EvenHub frames for the TypeScript SDK's own decoder.
+      "onEvenHubRaw",
+      // Debug-only: boot/stop the TypeScript mini-OS from an adb broadcast.
+      "onOsCommand",
       "onDeviceInfo",
       "onDisconnected",
       "onFlashProbe",
@@ -189,6 +193,20 @@ class FfsBleModule : Module() {
     Function("pushToService") { serviceId: Int, base64: String ->
       ensureCentral()?.pushToService(serviceId and 0xFF, base64)
     }
+
+    // ---- the TypeScript SDK's transport ----
+    // Two calls and one event are the ENTIRE native surface the SDK needs: the encoders, the
+    // decoders, the screen stack and the page-slot bookkeeping all live in TypeScript.
+
+    /** Send one SDK-encoded EvenHub payload to the RIGHT lens (see sendEvenHubFromSdk). */
+    Function("sendEvenHub") { base64: String -> ensureCentral()?.sendEvenHubFromSdk(base64) }
+
+    /**
+     * Hand page ownership to the SDK; returns whether the firmware already holds a page so the
+     * SDK can seed its PageSlot. Without this the OS's first CREATE would be a silent no-op on a
+     * link where anything had already rendered.
+     */
+    Function("sdkTakeoverPage") { ensureCentral()?.sdkTakeoverPage() ?: false }
 
     // HUD brightness (sid 0x09). 0-100, nonlinear. autoAdjust hands control to the ambient-light
     // sensor -- pass false to hold a level for measurement.
@@ -337,6 +355,17 @@ class FfsBleModule : Module() {
               // APP_REQUIRE_BRIGHTNESS_INFO and returns only the brightness block -- asking for
               // that and then wondering why `silent` reads null costs a whole verification cycle.
               "query" -> c?.querySettings(value == 0)
+              // Tier-1 render probes, driven from adb so they need no JS.
+              "image" -> c?.showImage()
+              // Geometry: value is a preset so one int extra is enough.
+              //   1 = top-left quarter, 2 = centred box, 3 = bottom strip, 0 = full canvas
+              "geo" -> when (value) {
+                1 -> c?.showTextAt("TOP-LEFT", 0, 0, 288, 144, 2)
+                2 -> c?.showTextAt("CENTRE BOX", 144, 72, 288, 144, 2)
+                3 -> c?.showTextAt("BOTTOM STRIP", 0, 216, 576, 72, 2)
+                else -> c?.showTextAt("FULL CANVAS", 0, 0, 576, 288, 2)
+              }
+              "header" -> c?.showListWithHeader(listOf("ONE", "TWO", "THREE", "FOUR"), "HEADER")
               "silent" -> c?.setSilentMode(value != 0)
               "wear" -> c?.setWearDetection(value != 0)
               "lensx" -> c?.setLensOffset(value, null)
@@ -370,6 +399,23 @@ class FfsBleModule : Module() {
             if (b64 != null) ensureCentral()?.showListThenPush(items, b64)
             else ensureCentral()?.showList(items)
           }
+          // Drive the TypeScript mini-OS. Unlike every other action here this one does NOT touch
+          // the driver -- it just forwards the command to JS, because the OS lives entirely in
+          // the SDK and the driver is only its transport.
+          OS_ACTION -> {
+            val cmd = intent.getStringExtra("cmd") ?: "boot"
+            sendEvent("onOsCommand", mapOf("cmd" to cmd))
+          }
+          // Replay a captured inbound event vector. Synthetic INPUT, real RENDER -- see
+          // G2Central.injectInboundEvenHub for exactly what that does and does not prove.
+          INJECT_ACTION -> {
+            val b64 = intent.getStringExtra("b64")
+            if (b64 == null) {
+              sendEvent("onLog", mapOf("message" to "[android] INJECT needs --es b64 <payload>"))
+            } else {
+              ensureCentral()?.injectInboundEvenHub(b64)
+            }
+          }
         }
       }
     }
@@ -380,6 +426,8 @@ class FfsBleModule : Module() {
       addAction(INFO_ACTION)
       addAction(BRIGHTNESS_ACTION)
       addAction(SETTING_ACTION)
+      addAction(OS_ACTION)
+      addAction(INJECT_ACTION)
       addAction("connect")
     }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -411,6 +459,10 @@ class FfsBleModule : Module() {
     const val LIST_ACTION = "com.futurefounders.ffs.SHOW_LIST"
     const val BRIGHTNESS_ACTION = "com.futurefounders.ffs.BRIGHTNESS"
     const val SETTING_ACTION = "com.futurefounders.ffs.SETTING"
+    /** Boot/stop the TypeScript mini-OS: `--es cmd boot|stop`. */
+    const val OS_ACTION = "com.futurefounders.ffs.OS"
+    /** Replay a captured inbound event vector: `--es b64 <payload>`. */
+    const val INJECT_ACTION = "com.futurefounders.ffs.INJECT"
     const val PUSH_ACTION = "com.futurefounders.ffs.PUSH_PAYLOAD"
     const val INFO_ACTION = "com.futurefounders.ffs.DEVICE_INFO"
   }
@@ -553,6 +605,8 @@ class FfsBleModule : Module() {
         )
       )
     }
+    // The SDK's inbound half: raw, uninterpreted EvenHub payloads.
+    c.onEvenHubRaw = { base64 -> sendEvent("onEvenHubRaw", mapOf("payload" to base64)) }
     c.onDisconnected = { name, side, reason, code, domain ->
       sendEvent(
         "onDisconnected",

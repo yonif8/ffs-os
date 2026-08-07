@@ -206,6 +206,17 @@ class G2Central(
      * declares a list once and hears only the selection, instead of re-rendering per scroll.
      */
     var onGlassesEvent: ((String, Int?, String?, Int?, String?, Int?, Int?) -> Unit)? = null
+
+    /**
+     * (base64) -- EVERY reassembled inbound EvenHub payload, before any interpretation.
+     *
+     * This is the channel the TypeScript SDK listens on. It is deliberately raw and deliberately
+     * unfiltered: the SDK carries its own decoder, unit-tested against captured byte vectors, and
+     * feeding it the real bytes is what makes those vectors evidence about the HARDWARE rather
+     * than evidence about the Kotlin decoder agreeing with itself. It also means a frame shape
+     * neither decoder recognises still reaches JS instead of vanishing into a log line.
+     */
+    var onEvenHubRaw: ((String) -> Unit)? = null
     /** (gesture, side, source?) -- a decoded touch gesture. */
     var onGesture: ((String, String, Int?) -> Unit)? = null
     /** (leftVersion?, rightVersion?, battery?, charging?) -- a device-info response. */
@@ -369,8 +380,11 @@ class G2Central(
     /**
      * A startup page has been created this session -- subsequent pages must use rebuildPage
      * (createStartupPage only takes once per session). Reset on drop.
+     *
+     * @Volatile because the SDK reads it off the bus thread via [sdkTakeoverPage] to seed its own
+     * page slot; every write still happens on the serial queue.
      */
-    private var pageCreated = false
+    @Volatile private var pageCreated = false
 
     // Image transfer state (FUT-153).
     private var imgSessionCounter = 0
@@ -1282,7 +1296,7 @@ class G2Central(
     private fun parseManufacturer(data: ByteArray?): G2Manufacturer? {
         if (data == null || data.size < 22) return null
         // bytes[0..2) == "ER" magic; not hard-required, matching the Swift original.
-        val sn = String(data, 2, 14, Charsets.US_ASCII).trim { it == ' ' }
+        val sn = String(data, 2, 14, Charsets.US_ASCII).trim { it == '\u0000' }
         val mac = (21 downTo 16).joinToString(":") { "%02X".format(data[it].toInt() and 0xFF) }
         return G2Manufacturer(sn, mac)
     }
@@ -1764,6 +1778,9 @@ class G2Central(
     private fun dispatchInboundLocked(svc: Int, payload: ByteArray, s: G2Side) {
         when (svc) {
             G2ServiceID.EVEN_HUB -> {
+                // Hand the untouched payload to JS FIRST, so the SDK sees every frame regardless
+                // of what the Kotlin decoders below make of it.
+                onEvenHubRaw?.invoke(encodeBase64(payload))
                 val gesture = G2EvenHub.parseGesture(payload)
                 if (gesture != null) {
                     handleGestureLocked(gesture.name, s, gesture.source)
@@ -1833,6 +1850,30 @@ class G2Central(
      * Deliberately routed through the framer rather than calling `onGesture` directly: a
      * shortcut that skipped the decode would keep passing after a protocol change broke it.
      */
+    /**
+     * Feed a synthetic inbound EvenHub payload through the REAL dispatch path.
+     *
+     * Exists because the only genuine sources of a list selection are a human's finger on a
+     * temple pad and the R1 ring, neither of which is available to an unattended run. Injecting a
+     * CAPTURED event vector exercises everything downstream of the radio -- the SDK's decoder,
+     * the screen stack, the page slot, and the resulting page actually rendering on the lens.
+     *
+     * ⚠️ What this proves and what it does not: the INPUT is synthetic, so this is not evidence
+     * that the firmware reports taps (that is proven separately, from real captures). It IS
+     * evidence about everything the injected event then drives, because the render goes to real
+     * hardware over the real link. The log line says so explicitly, so a future reader scrolling
+     * past cannot mistake it for a hardware capture.
+     */
+    fun injectInboundEvenHub(base64: String) = post {
+        val data = decodeBase64(base64)
+        if (data == null || data.isEmpty()) {
+            log("injectInbound ignored -- bad/empty base64")
+            return@post
+        }
+        log("INJECTED INBOUND EvenHub (${data.size}B) -- synthetic frame, NOT from the hardware")
+        dispatchInboundLocked(G2ServiceID.EVEN_HUB, data, G2Side.RIGHT)
+    }
+
     fun simulateGesture(gesture: String) = post {
         val eventType = when (gesture) {
             "tap" -> 0
@@ -2392,6 +2433,33 @@ class G2Central(
         }
     }
 
+    /** Render text at explicit geometry — proves the container coordinate system. */
+    fun showTextAt(text: String, x: Int, y: Int, w: Int, h: Int, border: Int = 0) = post {
+        if (!pairReadyLocked()) { log("showTextAt ignored -- pair not ready"); return@post }
+        withSessionLocked {
+            stopAnimationLocked()
+            val rebuild = pageCreated
+            val msg = G2EvenHub.textPageAt(text, x, y, w, h, rebuild, counters.nextMagic(), border)
+            sendEvenHubLocked(msg, G2Target.RIGHT)
+            pageCreated = true
+            log("showTextAt: '${text.take(20)}' at ($x,$y ${w}x$h) border=$border, ${msg.size}B -> right")
+        }
+    }
+
+    /** A list with a text header on the SAME page — the mixed-container question. */
+    fun showListWithHeader(items: List<String>, header: String) = post {
+        if (!pairReadyLocked()) { log("showListWithHeader ignored -- pair not ready"); return@post }
+        dumpInbound = true
+        withSessionLocked {
+            stopAnimationLocked()
+            val rebuild = pageCreated
+            val msg = G2EvenHub.listWithHeaderPage(items, header, rebuild, counters.nextMagic())
+            sendEvenHubLocked(msg, G2Target.RIGHT)
+            pageCreated = true
+            log("showListWithHeader: ${items.size} items + header '$header', ${msg.size}B -> right")
+        }
+    }
+
     /** Public: stop the running animation. The next text/image surface rebuilds the page. */
     fun stopAnimation() = post { stopAnimationLocked() }
 
@@ -2484,6 +2552,54 @@ class G2Central(
     }
 
     /**
+     * THE SDK's OUTBOUND TRANSPORT: send one EvenHub payload that the TypeScript SDK encoded.
+     *
+     * Not `pushToService(0xE0, ...)`, which fans out to BOTH arms -- an EvenHub page must go to
+     * the RIGHT lens only, the same target every native render path uses. It also runs inside
+     * `withSessionLocked`, so the first page from JS authenticates and starts the heartbeat
+     * instead of being dropped on an unauthenticated link.
+     *
+     * The SDK decides CREATE-vs-REBUILD in its own PageSlot, but this still marks `pageCreated`,
+     * because that flag means "the FIRMWARE holds a page" -- which is true no matter who put it
+     * there. Leaving it false let the two models disagree: after the SDK created a page, the next
+     * native render still believed the slot was empty, sent a CREATE, and the firmware silently
+     * ignored it. The HUD kept showing the SDK's page and the native call looked like it had
+     * simply done nothing.
+     */
+    fun sendEvenHubFromSdk(base64: String) = post {
+        if (!pairReadyLocked()) {
+            log("sendEvenHub ignored -- pair not ready (connect both lenses first)")
+            return@post
+        }
+        val data = decodeBase64(base64)
+        if (data == null || data.isEmpty()) {
+            log("sendEvenHub ignored -- bad/empty base64")
+            return@post
+        }
+        withSessionLocked {
+            sendEvenHubLocked(data, G2Target.RIGHT)
+            pageCreated = true
+            log("sendEvenHub: ${data.size}B -> right (SDK-encoded)")
+        }
+    }
+
+    /**
+     * Hand page ownership to the TypeScript SDK and report whether the firmware ALREADY holds a
+     * page.
+     *
+     * The firmware has one page slot and silently ignores a second CREATE, so the SDK's first
+     * declare must know what the native driver already did on this link -- otherwise a debug
+     * render before OS boot makes the OS's opening CREATE a no-op and the HUD never changes.
+     * Also stops any animation loop, which rebuilds the page underneath whatever is declared.
+     */
+    fun sdkTakeoverPage(): Boolean {
+        // Stopping the loop is ordered onto the serial queue; the flag read is a volatile
+        // snapshot. Safe to read first because no animation path ever writes `pageCreated`.
+        post { stopAnimationLocked() }
+        return pageCreated
+    }
+
+    /**
      * LIVE OTA delivery: push a base64 native-code payload to the resident CFW loader over the
      * evenHub IMAGE channel (service 0xE0). The blob ALREADY begins with the "FXP1" magic
      * (baked in at build time) and is sent AS-IS -- the CFW strips exactly one FXP1, so a
@@ -2523,6 +2639,10 @@ class G2Central(
     } catch (e: IllegalArgumentException) {
         null
     }
+
+    /** NO_WRAP: a wrapped base64 string arrives in JS with newlines and fails to decode. */
+    private fun encodeBase64(data: ByteArray): String =
+        android.util.Base64.encodeToString(data, android.util.Base64.NO_WRAP)
 
     // MARK: - Device info
 

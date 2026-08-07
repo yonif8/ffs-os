@@ -4,7 +4,11 @@
 
 import { Session } from "../session";
 import type { Transport } from "../screen";
-import { fromHex } from "../proto";
+import { fromHex, parseFields, u32 } from "../proto";
+import { Cmd } from "../wire";
+
+/** Envelope field 1 is the Cmd. Proto3 omits a zero, and CREATE *is* zero — so absent = CREATE. */
+const cmdOf = (bytes: Uint8Array) => u32(parseFields(bytes), 1) ?? Cmd.CREATE_STARTUP_PAGE;
 
 const envelope = (bodyHex: string) => {
   const body = fromHex(bodyHex);
@@ -144,5 +148,47 @@ describe("Session.menu", () => {
     expect(s.stats.declareCount).toBe(declares);
     expect(s.stats.bytesOut).toBe(bytes);
     expect(s.stats.scrollRoundTrips).toBe(0);
+  });
+});
+
+/**
+ * REGRESSION — the firmware has ONE page slot and silently ignores a second CREATE (FUT-153).
+ *
+ * The SDK originally derived CREATE-vs-REBUILD from each screen's own generation counter, so
+ * every pushed submenu started at generation 0 and sent a second CREATE. The firmware would drop
+ * it without any error: the glasses would just keep showing the parent menu while the phone
+ * believed it had navigated. Nothing in the stack could have reported that — which is precisely
+ * why it needs a test rather than a comment.
+ */
+describe("the page slot is per-LINK, not per-screen", () => {
+  it("a pushed submenu REBUILDs — a second CREATE would be silently dropped", async () => {
+    const { tx, sent } = harness();
+    const s = new Session({ transport: tx, magic: () => 100 });
+
+    await s.push({ rows: rows("home-a", "home-b") });
+    expect(cmdOf(sent[0])).toBe(Cmd.CREATE_STARTUP_PAGE);
+
+    await s.push({ rows: rows("child") });
+    expect(cmdOf(sent[1])).toBe(Cmd.REBUILD_PAGE);
+
+    // ...and so does the parent when the child pops back to it.
+    await s.pop();
+    expect(cmdOf(sent[sent.length - 1])).toBe(Cmd.REBUILD_PAGE);
+    expect(sent.filter((b) => cmdOf(b) === Cmd.CREATE_STARTUP_PAGE)).toHaveLength(1);
+  });
+
+  it("a dropped link resets the slot, so recovery CREATEs a fresh page", async () => {
+    const { tx, sent } = harness();
+    const s = new Session({ transport: tx, magic: () => 100 });
+    await s.push({ rows: rows("a") });
+    await s.push({ rows: rows("b") });
+    expect(cmdOf(sent[1])).toBe(Cmd.REBUILD_PAGE);
+
+    // The glasses went away and came back holding nothing at all.
+    s.onDisconnected();
+    await s.onReconnected();
+
+    // REBUILDing a page the firmware no longer has would leave the HUD blank.
+    expect(cmdOf(sent[sent.length - 1])).toBe(Cmd.CREATE_STARTUP_PAGE);
   });
 });

@@ -37,6 +37,32 @@ export interface ListScreenOptions {
   allowUnproven?: boolean;
 }
 
+/**
+ * Whether the firmware currently holds a page — CONNECTION-scoped state, deliberately not
+ * screen-scoped.
+ *
+ * The firmware has exactly one page slot, and a second CREATE on it is SILENTLY IGNORED
+ * (FUT-153). So "is this a CREATE or a REBUILD?" is a question about the LINK, not about the
+ * screen asking. Deciding it per-screen looks natural and is wrong: every pushed submenu would
+ * start life believing it had never declared, send a second CREATE, and be dropped on the floor
+ * with no error anywhere — the page simply would not change. A menu tree is precisely the shape
+ * that hits this on the very first navigation.
+ *
+ * The Kotlin driver already models it this way (`G2Central.pageCreated`, cleared on teardown);
+ * this type is the SDK agreeing with the driver instead of quietly contradicting it.
+ */
+export class PageSlot {
+  private _created = false;
+  /** True once a CREATE has landed, i.e. every later page must REBUILD. */
+  get created(): boolean { return this._created; }
+  markCreated(): void { this._created = true; }
+  /**
+   * The firmware no longer holds a page — the link dropped, or the session was torn down.
+   * The next declare must CREATE again. Mirrors `pageCreated = false` in the driver.
+   */
+  reset(): void { this._created = false; }
+}
+
 let screenSeq = 0;
 
 export class ListScreen<V = string> {
@@ -53,7 +79,13 @@ export class ListScreen<V = string> {
     private readonly tx: Transport,
     private readonly stats: SessionStats,
     private readonly opts: ListScreenOptions,
-    private readonly magic: () => number
+    private readonly magic: () => number,
+    /**
+     * The link's page slot. Defaults to a private one, which is correct ONLY for a screen that
+     * is the only thing ever declared on that link (single-screen apps, unit tests). Anything
+     * with a stack must pass the Session's shared slot — see PageSlot.
+     */
+    private readonly slot: PageSlot = new PageSlot()
   ) {
     this._rows = opts.rows as readonly Row<V>[];
   }
@@ -96,9 +128,11 @@ export class ListScreen<V = string> {
       return { generation: this._generation, ops: [{ op: "noop", reason: "identical" }], bytes: 0, reason: "identical", warnings };
     }
 
-    // A page CREATE is only valid once per session; every later page must REBUILD, because a
+    // A page CREATE is only valid once per LINK; every later page must REBUILD, because a
     // second CREATE is silently ignored by the firmware (FUT-153: "stuck on the image").
-    const rebuild = this._generation > 0;
+    // Asking the shared slot rather than this screen's own generation is what makes a pushed
+    // submenu render at all — see PageSlot.
+    const rebuild = this.slot.created;
     const bytes = encodeListPage({
       items: this._rows.map((r) => r.label),
       rebuild,
@@ -110,6 +144,7 @@ export class ListScreen<V = string> {
       this._off = this.tx.onInbound((p) => this._ingest(p));
     }
     await this.tx.sendEvenHub(bytes);
+    this.slot.markCreated();
     this._lastWire = fingerprint;
     this._generation += 1;
     this.stats.declareCount += 1;

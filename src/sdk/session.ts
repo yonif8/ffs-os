@@ -9,13 +9,20 @@
 // one: if restore is broken, the settings app breaks in the first minute of ordinary use, on a
 // perfectly healthy link. That is a much cheaper way to find the bug.
 
-import { ListScreen, newStats, type Transport, type ListScreenOptions } from "./screen";
+import { ListScreen, PageSlot, newStats, type Transport, type ListScreenOptions } from "./screen";
 import type { Row, ScreenEvent, Selection, SessionStats } from "./types";
 
 export type RestoreCause = "pop" | "reconnect" | "eviction-return";
 
 export interface SessionOptions {
   transport: Transport;
+  /**
+   * Whether the firmware ALREADY holds a page when this session starts (ask the driver via
+   * `takeoverPage()`). Seeds the page slot: if something already rendered on this link, the
+   * first declare must REBUILD, because a second CREATE is silently ignored and the HUD would
+   * simply never change.
+   */
+  pageAlreadyCreated?: boolean;
   /** Magic/nonce source. Injected so tests are deterministic — the SDK never calls Math.random. */
   magic?: () => number;
   onRestore?: (cause: RestoreCause, depth: number) => void;
@@ -23,6 +30,11 @@ export interface SessionOptions {
 
 export class Session {
   readonly stats: SessionStats = newStats();
+  /**
+   * The link's single firmware page slot, shared by every screen in the stack. One per Session
+   * because there is one per link — see PageSlot for why per-screen is a silent-failure bug.
+   */
+  readonly pageSlot = new PageSlot();
   private readonly stack: ListScreen<any>[] = [];
   private readonly tx: Transport;
   private readonly magic: () => number;
@@ -31,6 +43,7 @@ export class Session {
 
   constructor(opts: SessionOptions) {
     this.tx = opts.transport;
+    if (opts.pageAlreadyCreated) this.pageSlot.markCreated();
     this.onRestore =
       opts.onRestore;
     this.magic =
@@ -48,7 +61,7 @@ export class Session {
 
   /** Push a new list screen and declare it. */
   async push<V = string>(opts: ListScreenOptions): Promise<ListScreen<V>> {
-    const s = new ListScreen<V>(this.tx, this.stats, opts, this.magic);
+    const s = new ListScreen<V>(this.tx, this.stats, opts, this.magic, this.pageSlot);
     this.stack.push(s);
     await s.declare();
     return s;
@@ -81,6 +94,15 @@ export class Session {
     if (cause === "pop") this.stats.restores.pop += 1;
     else this.stats.restores.reconnect += 1;
     this.onRestore?.(cause, this.stack.length);
+  }
+
+  /**
+   * Call when the link DROPS. The firmware kept no page across the drop, so the slot has to be
+   * cleared or the restoring declare would go out as a REBUILD of a page that no longer exists.
+   * The driver clears its own `pageCreated` on teardown for exactly this reason.
+   */
+  onDisconnected(): void {
+    this.pageSlot.reset();
   }
 
   /** Call when the link comes back. Identical to a pop-restore, by construction. */

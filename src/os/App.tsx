@@ -35,6 +35,7 @@ import { PhoneNav, type PhoneCtx } from "./phone/nav";
 import { homeScreen, textTestScreen, setTextTestContent } from "./phone/screens";
 import { Group, Progress, Row, SectionLabel } from "./ui";
 import { GENERATED_PAYLOADS } from "./payloads.generated";
+import { attachOsCommandListener } from "./runtime";
 
 // Read the REAL shipped version rather than a hand-maintained copy. A hardcoded
 // "0.11.1" had drifted three releases behind app.json, so telemetry reported the
@@ -715,6 +716,10 @@ function AppInner() {
     ];
     return () => subs.forEach((s) => s.remove());
   }, []);
+
+  // The mini-OS. Listens for the debug `OS` broadcast (`--es cmd boot|stop`) and runs FfsOs
+  // against the SDK. Nothing here drives the glasses directly — the OS owns the HUD once booted.
+  useEffect(() => attachOsCommandListener((m) => glog.emit("os", "log", { m })), []);
 
   // FUT-167 soft precheck: a real flash arms ONLY when the warranty phrase is typed
   // AND every readiness item is acknowledged. Single source of truth — both the FLASH
