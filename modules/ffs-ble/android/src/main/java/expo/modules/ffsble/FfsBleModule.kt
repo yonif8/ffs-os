@@ -196,6 +196,10 @@ class FfsBleModule : Module() {
       ensureCentral()?.setBrightness(level, autoAdjust)
     }
 
+    Function("setSilentMode") { on: Boolean -> ensureCentral()?.setSilentMode(on) }
+    Function("setWearDetection") { on: Boolean -> ensureCentral()?.setWearDetection(on) }
+    Function("setLensOffset") { x: Int, y: Int -> ensureCentral()?.setLensOffset(x, y) }
+
     Function("querySettings") { brightnessOnly: Boolean ->
       ensureCentral()?.querySettings(brightnessOnly)
     }
@@ -319,6 +323,27 @@ class FfsBleModule : Module() {
           // HUD brightness. Also an INSTRUMENT control: a dimmer HUD is much easier for the
           // phone camera to focus on, so this is used to set up every visual proof.
           //   adb shell am broadcast -a com.futurefounders.ffs.BRIGHTNESS --ei level 20 -p <pkg>
+          // Generic settings poke, so every sid-0x09 setter can be proven WITHOUT a camera:
+          // set a non-zero value, then read the snapshot back and compare.
+          //   am broadcast -a com.futurefounders.ffs.SETTING --es key silent --ei value 1
+          SETTING_ACTION -> {
+            val key = intent.getStringExtra("key") ?: return
+            val value = intent.getIntExtra("value", 0)
+            sendEvent("onLog", mapOf("message" to "[android] debug setting: $key=$value"))
+            val c = ensureCentral()
+            when (key.lowercase()) {
+              // A read of the FULL snapshot. `--ei value 1` = APP_REQUIRE_BASIC_SETTING, which is
+              // the one that carries silent / wear / head-up / lens x,y. value 0 is
+              // APP_REQUIRE_BRIGHTNESS_INFO and returns only the brightness block -- asking for
+              // that and then wondering why `silent` reads null costs a whole verification cycle.
+              "query" -> c?.querySettings(value == 0)
+              "silent" -> c?.setSilentMode(value != 0)
+              "wear" -> c?.setWearDetection(value != 0)
+              "lensx" -> c?.setLensOffset(value, null)
+              "lensy" -> c?.setLensOffset(null, value)
+              else -> sendEvent("onLog", mapOf("message" to "[android] unknown setting key: $key"))
+            }
+          }
           BRIGHTNESS_ACTION -> {
             val level = intent.getIntExtra("level", -1)
             if (level < 0) {
@@ -354,6 +379,7 @@ class FfsBleModule : Module() {
       addAction(PUSH_ACTION)
       addAction(INFO_ACTION)
       addAction(BRIGHTNESS_ACTION)
+      addAction(SETTING_ACTION)
       addAction("connect")
     }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -384,6 +410,7 @@ class FfsBleModule : Module() {
     const val FLASH_ACTION = "com.futurefounders.ffs.FLASH"
     const val LIST_ACTION = "com.futurefounders.ffs.SHOW_LIST"
     const val BRIGHTNESS_ACTION = "com.futurefounders.ffs.BRIGHTNESS"
+    const val SETTING_ACTION = "com.futurefounders.ffs.SETTING"
     const val PUSH_ACTION = "com.futurefounders.ffs.PUSH_PAYLOAD"
     const val INFO_ACTION = "com.futurefounders.ffs.DEVICE_INFO"
   }

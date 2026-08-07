@@ -1324,8 +1324,11 @@ object G2Setting {
             headUpAngle = r[8] as? Int,
             wearDetectionSwitch = r[10] as? Int,
             silentModeSwitch = r[14] as? Int,
-            lensX = r[15] as? Int,
-            lensY = r[16] as? Int
+            // ⚠️ x = field 4, y = field 3. Fields 15/16 are left/rightCalibrationRestored —
+            // BRIGHTNESS calibration, not lens position. The wrong pair was read here until a
+            // non-zero lensX set on hardware stubbornly read back absent.
+            lensX = r[4] as? Int,
+            lensY = r[3] as? Int
         )
     }
 
