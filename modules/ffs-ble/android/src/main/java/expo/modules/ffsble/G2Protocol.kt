@@ -385,14 +385,24 @@ object G2EvenHub {
         rebuild: Boolean,
         magicRandom: Int,
         containerID: Int = 3,
-        containerName: String = "ffs-list"
+        containerName: String = "ffs-list",
+        /**
+         * Extra containers to co-declare on the list's page. The reason this exists is
+         * measured, not theoretical: pushing a CFW payload rides the evenHub IMAGE channel,
+         * and `ensureAnimContainerLocked` will REBUILD the whole page to create its landing
+         * container if one is not already present -- destroying the list microseconds before
+         * the payload runs. container_census_probe caught exactly that (ret=0x6C8780AF: two
+         * nodes, lowest id 0, no id 3 -- i.e. evt-0 + the anim container, our list gone).
+         * Co-declaring the anim container here keeps ONE page that satisfies both.
+         */
+        imageContainers: List<ByteArray> = emptyList()
     ): ByteArray {
         val lc = listContainer(
             x = 0, y = 0, width = 576, height = 288, containerID = containerID,
             items = items, containerName = containerName, isEventCapture = true
         )
         return pageMessage(
-            textContainers = emptyList(), imageContainers = emptyList(),
+            textContainers = emptyList(), imageContainers = imageContainers,
             rebuild = rebuild, magicRandom = magicRandom,
             listContainers = listOf(lc), listOwnsEvents = true
         )

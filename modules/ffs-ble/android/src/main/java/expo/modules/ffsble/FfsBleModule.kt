@@ -290,13 +290,36 @@ class FfsBleModule : Module() {
             ensureCentral()?.startCfwFlash(url, sha, dry)
           }
           "connect" -> ensureCentral()?.connectPair()
+          // Push an FXP1-framed native payload to the resident CFW loader. This is what makes
+          // payload iteration scriptable: build with `ffs-sdk pack`, broadcast the base64, read
+          // the result out of the next device-info ⟨LOADER … ret=0x…⟩ line. Without it every
+          // probe needs the payload baked into a JS release first.
+          PUSH_ACTION -> {
+            val b64 = intent.getStringExtra("b64") ?: return
+            sendEvent(
+              "onLog",
+              mapOf("message" to "[android] debug payload push: ${b64.length} b64 chars")
+            )
+            ensureCentral()?.pushPayloadViaImage(b64)
+          }
+          // Ask the glasses for battery/firmware/CFW-loader diagnostics. The ⟨LOADER⟩ block in
+          // the reply is how a pushed payload reports its ret= value back.
+          INFO_ACTION -> ensureCentral()?.requestDeviceInfo()
           // LIST-1: declare a native on-glass list. `items` is comma-separated; defaults to a
           // numbered set so the probe can be fired with no arguments at all.
           LIST_ACTION -> {
             val raw = intent.getStringExtra("items")
             val items = raw?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
               ?: (0..7).map { "Item $it" }
-            ensureCentral()?.showList(items)
+            // Optional `b64`: declare the list and push a payload at it as ONE atomic action.
+            // This exists because the two-broadcast form is unrunnable in practice -- the
+            // round trip between two external commands is tens of seconds, and in that window the
+            // link can drop, JS re-renders its home page on reconnect, and the list the
+            // payload was meant to find is gone. Sequencing them INSIDE the driver's serial
+            // queue removes the window entirely.
+            val b64 = intent.getStringExtra("b64")
+            if (b64 != null) ensureCentral()?.showListThenPush(items, b64)
+            else ensureCentral()?.showList(items)
           }
         }
       }
@@ -304,6 +327,8 @@ class FfsBleModule : Module() {
     val filter = IntentFilter(SIMULATE_ACTION).apply {
       addAction(FLASH_ACTION)
       addAction(LIST_ACTION)
+      addAction(PUSH_ACTION)
+      addAction(INFO_ACTION)
       addAction("connect")
     }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -333,6 +358,8 @@ class FfsBleModule : Module() {
     const val SIMULATE_ACTION = "com.futurefounders.ffs.SIMULATE_GESTURE"
     const val FLASH_ACTION = "com.futurefounders.ffs.FLASH"
     const val LIST_ACTION = "com.futurefounders.ffs.SHOW_LIST"
+    const val PUSH_ACTION = "com.futurefounders.ffs.PUSH_PAYLOAD"
+    const val INFO_ACTION = "com.futurefounders.ffs.DEVICE_INFO"
   }
 
   /**
