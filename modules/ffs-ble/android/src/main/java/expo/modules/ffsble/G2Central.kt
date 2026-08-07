@@ -1767,9 +1767,18 @@ class G2Central(
                 val gesture = G2EvenHub.parseGesture(payload)
                 if (gesture != null) {
                     handleGestureLocked(gesture.name, s, gesture.source)
-                    // LIST-1: a native-list reply carries a selected-item index whose field
-                    // number we have never observed. Dump the frame that produced the gesture
-                    // so the layout is learned from the hardware rather than guessed.
+                    // THE SAME FRAME carries the structured event. Observed on-glass 2026-08-07:
+                    // a temple tap on a declared list arrives as gesture AND as
+                    // Cmd=2 / DevEvent(13) / ListEvent(1){ContainerID=3, ContainerName="ffs-list",
+                    // CurrentSelectItemIndex=1}. Decoding it here (not only in the else branch)
+                    // is what turns "a tap happened" into "the user chose row 1".
+                    G2EvenHub.decodeEvent(payload)?.let { evt ->
+                        log("GLASSES EVENT: ${evt.describe()}")
+                        onGlassesEvent?.invoke(
+                            evt.kind, evt.containerId, evt.containerName,
+                            evt.itemIndex, evt.itemName, evt.eventType, evt.eventSource
+                        )
+                    }
                     if (dumpInbound) log("EvenHub event fields:\n" + G2EvenHub.describePayload(payload))
                 } else {
                     val ack = G2EvenHub.parseImageAck(payload)
@@ -1796,6 +1805,11 @@ class G2Central(
                 // FUT-169 / FUT-167: a device-info response (battery / version). Routed purely
                 // by service id, so it can never swallow an EvenHub gesture/image-ack frame.
                 G2Setting.parseDeviceInfo(payload)?.let { handleDeviceInfoLocked(it, s) }
+                // The full settings snapshot. This is the camera-free verification loop: set a
+                // value, read it back, compare. Quantitative, so it beats eyeballing the HUD.
+                G2Setting.parseSettingsSnapshot(payload)?.let {
+                    log("SETTINGS (side=${s.raw}): ${it.describe()}")
+                }
             }
         }
     }
@@ -2349,6 +2363,32 @@ class G2Central(
                 G2Setting.querySettings(counters.nextMagic(), type), G2Target.RIGHT
             )
             log("querySettings(type=$type) -> right; watch for the inbound snapshot")
+        }
+    }
+
+    /** Suppress the audio cue on container pushes / notifications. */
+    fun setSilentMode(enabled: Boolean) = post { sendSettingLocked("setSilentMode(%s)".format(enabled)) { m -> G2Setting.setSilentMode(m, enabled) } }
+
+    /** Nose-bridge proximity sensor. Transitions emit an async sid-0x0d state-change event. */
+    fun setWearDetection(enabled: Boolean) = post { sendSettingLocked("setWearDetection(%s)".format(enabled)) { m -> G2Setting.setWearDetection(m, enabled) } }
+
+    /**
+     * Nudge the rendered image. Applied to EVERY frame, per-arm, range ~ +/-20 px. This is the
+     * only way to improve the camera rig's FRAMING without a human re-aiming the phone.
+     */
+    fun setLensOffset(x: Int?, y: Int?) = post {
+        if (x != null) sendSettingLocked("setLensX($x)") { m -> G2Setting.setLensX(m, x) }
+        if (y != null) sendSettingLocked("setLensY($y)") { m -> G2Setting.setLensY(m, y) }
+    }
+
+    private fun sendSettingLocked(label: String, build: (Int) -> ByteArray) {
+        if (!pairReadyLocked()) {
+            log("$label ignored -- pair not ready")
+            return
+        }
+        withSessionLocked {
+            sendG2SettingLocked(build(counters.nextMagic()), G2Target.BOTH)
+            log("$label -> both")
         }
     }
 

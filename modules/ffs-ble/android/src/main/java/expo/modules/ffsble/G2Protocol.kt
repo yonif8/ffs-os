@@ -617,32 +617,38 @@ object G2EvenHub {
 
         (f[13] as? ByteArray)?.let { devEvent ->
             val d = G2ProtobufReader(devEvent).parseFields()
+            // ⚠️ PROTO3 DEFAULT OMISSION -- the field that matters most is the one most often
+            // ABSENT. Measured on-glass: tapping row 0 yields NO CurrentSelectItemIndex field at
+            // all (0 is the default, so it is not encoded), and a plain CLICK yields no EventType
+            // (CLICK == 0). Reading these as null would make "the user chose the first row with a
+            // single tap" -- by far the commonest event -- look like a decode failure. Absent
+            // scalar means 0, not unknown.
             (d[1] as? ByteArray)?.let { le ->
                 val e = G2ProtobufReader(le).parseFields()
                 return G2GlassesEvent(
                     kind = "list-click",
-                    containerId = e[1] as? Int,
+                    containerId = (e[1] as? Int) ?: 0,
                     containerName = str(e[2]),
-                    itemName = str(e[3]),
-                    itemIndex = e[4] as? Int,
-                    eventType = e[5] as? Int
+                    itemName = str(e[3]) ?: "",
+                    itemIndex = (e[4] as? Int) ?: 0,
+                    eventType = (e[5] as? Int) ?: EventType.CLICK
                 )
             }
             (d[2] as? ByteArray)?.let { te ->
                 val e = G2ProtobufReader(te).parseFields()
                 return G2GlassesEvent(
                     kind = "text-click",
-                    containerId = e[1] as? Int,
+                    containerId = (e[1] as? Int) ?: 0,
                     containerName = str(e[2]),
-                    eventType = e[3] as? Int
+                    eventType = (e[3] as? Int) ?: EventType.CLICK
                 )
             }
             (d[3] as? ByteArray)?.let { se ->
                 val e = G2ProtobufReader(se).parseFields()
                 return G2GlassesEvent(
                     kind = "sys-event",
-                    eventType = e[1] as? Int,
-                    eventSource = e[2] as? Int
+                    eventType = (e[1] as? Int) ?: EventType.CLICK,
+                    eventSource = (e[2] as? Int) ?: EventSource.NONE
                 )
             }
         }
@@ -1219,9 +1225,109 @@ object G2Setting {
         return w.data
     }
 
+    /**
+     * The rest of the sid-0x09 surface. Every one of these is the SAME envelope as
+     * [setBrightness] / [setHeadUpSwitch], differing only in which `DeviceReceiveInfoFromAPP`
+     * sub-field is populated:
+     *
+     *   deviceReceiveBrightness = 1   deviceReceiveYCoordinate = 2   deviceReceiveXCoordinate = 3
+     *   deviceReceiveHeadUpSetting = 4  deviceReceiveWearDetection = 5  deviceReceiveSilentMode = 6
+     *   deviceReceiveAppPage = 7      deviceReceiveAdvancedSetting = 8
+     *
+     * Field numbers from the generated schema, not the prose docs.
+     */
+    private fun infoEnvelope(magicRandom: Int, subField: Int, sub: ByteArray): ByteArray {
+        val info = G2ProtobufWriter()
+        info.writeMessageField(subField, sub)
+        val w = G2ProtobufWriter()
+        w.writeInt32Field(1, CMD_DEVICE_RECEIVE_INFO)
+        w.writeInt32Field(2, magicRandom)
+        w.writeMessageField(3, info.data)
+        return w.data
+    }
+
+    private fun oneField(field: Int, value: Int): ByteArray =
+        G2ProtobufWriter().apply { writeInt32Field(field, value) }.data
+
+    /** Suppress the audio cue on container pushes and notifications. */
+    fun setSilentMode(magicRandom: Int, enabled: Boolean): ByteArray =
+        infoEnvelope(magicRandom, 6, oneField(1, if (enabled) 1 else 0))
+
+    /**
+     * Wear detection -- the nose-bridge PROXIMITY sensor. When it transitions worn/unworn the
+     * glasses emit an async state-change event on sid 0x0d. Prefer subscribing over polling.
+     */
+    fun setWearDetection(magicRandom: Int, enabled: Boolean): ByteArray =
+        infoEnvelope(magicRandom, 5, oneField(1, if (enabled) 1 else 0))
+
+    /**
+     * Lens X offset. Fine IPD/centering calibration -- the firmware applies it to EVERY rendered
+     * frame, so it physically moves the image in the wearer's view. Range is small (~ ±20 px) and
+     * it is PER-ARM.
+     *
+     * Also an INSTRUMENT control: this is the only way to improve the camera rig's FRAMING without
+     * a human physically re-aiming the phone. See docs/VERIFICATION-RIG.md.
+     */
+    fun setLensX(magicRandom: Int, level: Int): ByteArray =
+        infoEnvelope(magicRandom, 3, oneField(1, level))
+
+    /** Lens Y offset. See [setLensX]. */
+    fun setLensY(magicRandom: Int, level: Int): ByteArray =
+        infoEnvelope(magicRandom, 2, oneField(1, level))
+
     /** APPRequestSettingType. Used as `settingInfoType` (field 1) on a read request. */
     const val REQ_BRIGHTNESS_INFO: Int = 0
     const val REQ_BASIC_SETTING: Int = 1
+
+    /**
+     * Decode the settings snapshot the device returns (`deviceReceiveRequestFromApp`, envelope
+     * field 4). Field numbers per the generated schema; the ones marked (x) are corroborated by
+     * MentraOS and faceclaw independently.
+     *
+     * ⚠️ `chargingStatus` is field 13 per g2-kit, but Even-G2-RE decoded a real packet on the much
+     * older 2.0.7.16 and put charging at f18 with brightness at f8. Treat charging as UNVERIFIED
+     * on 2.2.7.14 until we see it move on our own hardware.
+     */
+    data class G2SettingsSnapshot(
+        val battery: Int? = null,
+        val chargingStatus: Int? = null,
+        val leftFirmware: String? = null,
+        val rightFirmware: String? = null,
+        val autoBrightnessLevel: Int? = null,
+        val autoBrightnessSwitch: Int? = null,
+        val headUpSwitch: Int? = null,
+        val headUpAngle: Int? = null,
+        val wearDetectionSwitch: Int? = null,
+        val silentModeSwitch: Int? = null,
+        val lensX: Int? = null,
+        val lensY: Int? = null
+    ) {
+        fun describe(): String =
+            "batt=$battery charging=$chargingStatus L=$leftFirmware R=$rightFirmware " +
+                "brightness=$autoBrightnessLevel auto=$autoBrightnessSwitch " +
+                "headUp=$headUpSwitch angle=$headUpAngle wear=$wearDetectionSwitch " +
+                "silent=$silentModeSwitch lensX=$lensX lensY=$lensY"
+    }
+
+    fun parseSettingsSnapshot(payload: ByteArray): G2SettingsSnapshot? {
+        val f = G2ProtobufReader(payload).parseFields()
+        val body = f[4] as? ByteArray ?: return null
+        val r = G2ProtobufReader(body).parseFields()
+        return G2SettingsSnapshot(
+            battery = r[12] as? Int,                       // (x)
+            chargingStatus = r[13] as? Int,                // UNVERIFIED — see note above
+            leftFirmware = (r[5] as? ByteArray)?.toString(Charsets.UTF_8),   // (x)
+            rightFirmware = (r[6] as? ByteArray)?.toString(Charsets.UTF_8),  // (x)
+            autoBrightnessLevel = r[2] as? Int,
+            autoBrightnessSwitch = r[18] as? Int,
+            headUpSwitch = r[7] as? Int,
+            headUpAngle = r[8] as? Int,
+            wearDetectionSwitch = r[10] as? Int,
+            silentModeSwitch = r[14] as? Int,
+            lensX = r[15] as? Int,
+            lensY = r[16] as? Int
+        )
+    }
 
     /**
      * Read settings back. The reply is a full snapshot (battery, firmware, autoBrightnessLevel,
