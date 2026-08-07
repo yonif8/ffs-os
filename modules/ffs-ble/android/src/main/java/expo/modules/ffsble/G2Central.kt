@@ -199,6 +199,13 @@ class G2Central(
     var onNotify: ((String, String, String) -> Unit)? = null
     /** (name, side, reason?, code, domain) -- a lens disconnected. code=0 is a clean teardown. */
     var onDisconnected: ((String, String, String?, Int, String) -> Unit)? = null
+
+    /**
+     * An inbound event from the glasses: (kind, containerId, containerName, itemIndex, itemName,
+     * eventType, eventSource). This is how a natively-owned screen reports back -- the phone
+     * declares a list once and hears only the selection, instead of re-rendering per scroll.
+     */
+    var onGlassesEvent: ((String, Int?, String?, Int?, String?, Int?, Int?) -> Unit)? = null
     /** (gesture, side, source?) -- a decoded touch gesture. */
     var onGesture: ((String, String, Int?) -> Unit)? = null
     /** (leftVersion?, rightVersion?, battery?, charging?) -- a device-info response. */
@@ -1766,9 +1773,18 @@ class G2Central(
                     if (dumpInbound) log("EvenHub event fields:\n" + G2EvenHub.describePayload(payload))
                 } else {
                     val ack = G2EvenHub.parseImageAck(payload)
+                    val evt = if (ack == null) G2EvenHub.decodeEvent(payload) else null
                     if (ack != null) {
                         log("img: ack session=${ack.session} fragment=${ack.fragment} success=${ack.success}")
                         handleImageAckLocked(ack.session, ack.fragment, ack.success)
+                    } else if (evt != null) {
+                        // THE RETURN PATH of the hybrid architecture: the glasses owned the
+                        // interaction and are telling us only what the user chose.
+                        log("GLASSES EVENT: ${evt.describe()}")
+                        onGlassesEvent?.invoke(
+                            evt.kind, evt.containerId, evt.containerName,
+                            evt.itemIndex, evt.itemName, evt.eventType, evt.eventSource
+                        )
                     } else if (dumpInbound) {
                         // Anything the decoders did not recognise. Silence here is how a new
                         // message shape stays invisible.
