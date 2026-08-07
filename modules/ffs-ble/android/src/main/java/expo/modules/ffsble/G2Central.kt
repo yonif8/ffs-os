@@ -1052,6 +1052,22 @@ class G2Central(
         lenses[side] = lens
         log("Connecting to ${disc.name} (side=${side.raw}, direct=$fromAdvertisement)")
 
+        // STOP SCANNING BEFORE connectGatt. Measured 2026-08-07 on the Redmi A2+ (MediaTek):
+        // the LEFT lens failed with "GATT_ERROR (133) -- connect timeout" and the watchdog then
+        // retried every 6s, so a pair took ~40s to come up and looked like a link that "drops and
+        // re-pairs on its own". It is not a drop -- everConnected was false, i.e. a failed
+        // ATTEMPT. An active LE scan concurrent with connectGatt is the classic 133 on MediaTek
+        // and Broadcom stacks: the controller cannot service a scan window and an initiator at
+        // once, so the connect request times out.
+        //
+        // maybeStopScanningLocked() below could not prevent this -- it only stops once EVERY
+        // wanted side is in the map, so the first lens always connected mid-scan, and the second
+        // connectGatt was issued while the scan was still running too.
+        //
+        // Safe to stop unconditionally: if a side is still missing, the recovery watchdog
+        // re-arms a scan within RECOVER_TIMEOUT_MS (see runRecoveryLocked -> startScanLocked).
+        stopScanLocked()
+
         // autoConnect is the single most consequential argument here and it has no iOS
         // equivalent. false = "connect now, fail after ~30s with status 133" -- correct when we
         // have just seen the device advertise. true = "connect whenever it shows up, never time
@@ -2051,22 +2067,66 @@ class G2Central(
      *
      * Turns [dumpInbound] on for the duration, because the reply's shape is unknown.
      */
-    fun showList(items: List<String>) = post {
+    /**
+     * Declare a native list and push a payload at it as ONE atomic action.
+     *
+     * The two-step form (broadcast the list, then broadcast the payload) is not runnable from a
+     * remote driver: the round trip between two external commands is tens of seconds, and this
+     * link drops and re-pairs on roughly that cadence. Every time it does, JS re-renders its home
+     * page via [showText] and the list the payload was built to find no longer exists -- which is
+     * exactly what container_census_probe measured (ret=0x6C8780AF: two nodes, lowest id 0, no
+     * id 3). Sequencing both on this queue collapses that window to [settleMs].
+     *
+     * The wait is a real requirement, not padding: the firmware needs time to build the page
+     * before a payload can find its container. It is deliberately short so the pair has little
+     * chance to churn in between.
+     */
+    fun showListThenPush(items: List<String>, base64: String, settleMs: Long = 1500) = post {
+        if (!pairReadyLocked()) {
+            log("showListThenPush ignored -- pair not ready")
+            return@post
+        }
+        showListLocked(items)
+        log("showListThenPush: list declared, payload push in ${settleMs}ms")
+        schedule(settleMs) {
+            if (!pairReadyLocked()) {
+                log("showListThenPush: pair dropped during settle -- payload NOT pushed")
+                return@schedule
+            }
+            pushPayloadViaImageLocked(base64)
+        }
+    }
+
+    fun showList(items: List<String>) = post { showListLocked(items) }
+
+    private fun showListLocked(items: List<String>) {
         if (!pairReadyLocked()) {
             log("showList ignored -- pair not ready (connect both lenses first)")
-            return@post
+            return
         }
         if (items.isEmpty()) {
             log("showList ignored -- no items")
-            return@post
+            return
         }
         dumpInbound = true
         withSessionLocked {
             stopAnimationLocked()
             val rebuild = pageCreated
-            val msg = G2EvenHub.listPageMessage(items, rebuild, counters.nextMagic())
+            // Co-declare the anim/payload landing container ON THE LIST'S PAGE. Without this,
+            // the first pushPayloadViaImage rebuilds the page to create it and the list is gone
+            // before the payload executes -- measured, not guessed (container_census_probe
+            // ret=0x6C8780AF). Declaring it here and asserting animContainerReady makes
+            // ensureAnimContainerLocked short-circuit, so the push leaves the page alone.
+            val ic = G2EvenHub.imageContainer(
+                x = 0, y = 0, width = 576, height = 288,
+                containerID = ANIM_CID, containerName = ANIM_NAME
+            )
+            val msg = G2EvenHub.listPageMessage(
+                items, rebuild, counters.nextMagic(), imageContainers = listOf(ic)
+            )
             sendEvenHubLocked(msg, G2Target.RIGHT)
             pageCreated = true
+            animContainerReady = true
             log(
                 "showList: ${if (rebuild) "rebuilt" else "created"} NATIVE list page, " +
                     "${items.size} items, ${msg.size}B -> right. Swipe now: if the highlight " +
@@ -2231,11 +2291,28 @@ class G2Central(
     /** Public: stop the running animation. The next text/image surface rebuilds the page. */
     fun stopAnimation() = post { stopAnimationLocked() }
 
+    /**
+     * Stop the frame loop AND forget the landing container. Correct only for callers that
+     * REPLACE the page (text/image/list surfaces, disconnects) -- after those the container
+     * genuinely no longer exists on-glass.
+     */
     private fun stopAnimationLocked() {
+        stopAnimationLoopLocked()
+        animContainerReady = false
+    }
+
+    /**
+     * Stop the frame loop ONLY, leaving [animContainerReady] alone.
+     *
+     * The distinction matters: a caller that merely wants to avoid interleaving its own frames
+     * with a running animation must NOT also declare the container gone, or the next
+     * [ensureAnimContainerLocked] rebuilds the whole page. That rebuild is what silently
+     * destroyed a declared list microseconds before a payload ran looking for it.
+     */
+    private fun stopAnimationLoopLocked() {
         if (animActive) log("anim: stop $animId")
         animActive = false
         animId = ""
-        animContainerReady = false
     }
 
     private fun ensureAnimContainerLocked(done: () -> Unit) {
@@ -2312,17 +2389,21 @@ class G2Central(
      * This REPLACES the dead svc-0x90 push: local_dispatch keys on inner 16-bit command codes,
      * not the transport serviceId, so a svc-0x90 message never reached the CFW.
      */
-    fun pushPayloadViaImage(base64: String) = post {
+    fun pushPayloadViaImage(base64: String) = post { pushPayloadViaImageLocked(base64) }
+
+    private fun pushPayloadViaImageLocked(base64: String) {
         if (!pairReadyLocked()) {
             log("pushPayload ignored -- pair not ready (connect both lenses first)")
-            return@post
+            return
         }
         val blob = decodeBase64(base64)
         if (blob == null || blob.isEmpty()) {
             log("pushPayload ignored -- bad/empty base64")
-            return@post
+            return
         }
-        stopAnimationLocked() // don't interleave FXP1 payload frames with mode-2 anim frames
+        // Stop the frame LOOP only. Using the container-invalidating variant here would force
+        // ensureAnimContainerLocked to rebuild the page, wiping any list we were pushed at.
+        stopAnimationLoopLocked()
         withSessionLocked {
             startHeartbeatsLocked() // keep the link alive during delivery
             ensureAnimContainerLocked {

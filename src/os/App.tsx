@@ -794,58 +794,36 @@ function AppInner() {
     }
   };
 
-  // Own the screen while the pair is ready: start the reclaim manager, paint the current
-  // phone-OS screen, and route touchpad gestures into navigation. Tear down on disconnect.
+  // ⛔ THE LEGACY JS PHONE-OS NO LONGER OWNS THE HUD (2026-08-07, Yoni's call: "get rid of it").
+  //
+  // This effect used to start screenOwner, paint the JS home menu, and route gestures into
+  // PhoneNav the moment the pair went ready. That model is obsolete and actively harmful now
+  // that the glasses render and drive their own native containers:
+  //   * Every re-render repainted the HUD via showText, DESTROYING any natively-declared page.
+  //     This is what made the FUT-249 gesture-injection probe read "no list found" — the JS home
+  //     page had replaced the list before the payload ran.
+  //   * It re-rendered the whole page on the phone for every scroll (~156 ms round trip), which
+  //     is exactly the phone-in-the-loop design the native list container replaces.
+  //   * Gestures were routed into PhoneNav, competing with the firmware's own event binding.
+  //
+  // The phone-side UI is untouched: explicit buttons still call navRef/screenOwner on demand.
+  // What is gone is the AUTOMATIC ownership. Do not restore this without a deliberate decision —
+  // if it comes back, every native on-glass screen starts getting clobbered again.
+  //
+  // (Kept for reference: FUT-236 required suppressing gesture routing during a calibration run,
+  // because routing taps into navigation activated a menu item mid-measurement and dropped both
+  // lenses. With routing gone entirely, that hazard goes with it.)
   useEffect(() => {
-    if (!bt.pairReady) return;
-    // FUT-236: while a calibration run is active the OS must NOT act on gestures.
-    // Measured 2026-07-28: during the temple-touchpad steps, taps were routed into
-    // navigation, which activated a menu item and started streaming an 11.6 KB image
-    // animation to the glasses — and BOTH lenses then dropped with "connection has
-    // timed out unexpectedly", corrupting that step and the two after it.
-    // An instrument that changes the thing it is measuring is not an instrument.
-    if (calibrating) return;
-    const nav = navRef.current!;
-    screenOwner.start();
-    void screenOwner.setSurface(() => nav.paint());
-    glog.emit("os", "phone_os_up", {});
-    const sub = FfsBle.addListener("onGesture", (g) => {
-      // Input can now arrive from the glasses' touchpads OR the R1 ring (FUT-233).
-      // `device`/`source` are logged so telemetry can tell them apart after the fact.
-      const nav_gesture = toNavGesture(g);
-      glog.emit("os", "nav_gesture", {
-        gesture: g.gesture,
-        side: g.side,
-        device: g.device,
-        source: g.source,
-        nav: nav_gesture,
-      });
-      if (nav_gesture) nav.handleGesture(nav_gesture);
-    });
-    return () => {
-      sub.remove();
-      screenOwner.stop();
-    };
+    if (!bt.pairReady || calibrating) return;
+    glog.emit("os", "phone_os_up", { hudOwned: false });
   }, [bt.pairReady, calibrating]);
 
-  // Keep the HUD status-bar clock live: re-paint the current screen at each minute
-  // boundary while the pair is ready — but skip while the image screen is up (a re-paint
-  // there would needlessly re-stream the bitmap). Minute-ALIGNED, 1/min (well under the
-  // FUT-136 keep-alive cadence that provoked firmware evictions).
-  useEffect(() => {
-    if (!bt.pairReady) return;
-    let timer: ReturnType<typeof setTimeout>;
-    const scheduleNextMinute = () => {
-      const msToNextMinute = 60_000 - (Date.now() % 60_000);
-      timer = setTimeout(() => {
-        const nav = navRef.current!;
-        if (!nav.ownsHudSurface()) screenOwner.reclaimNow();
-        scheduleNextMinute();
-      }, msToNextMinute + 50);
-    };
-    scheduleNextMinute();
-    return () => clearTimeout(timer);
-  }, [bt.pairReady]);
+  // ⛔ REMOVED with the HUD-ownership effect above: a once-a-minute repaint to keep the JS
+  // status-bar clock ticking. Harmless when JS owned the screen; fatal now — it silently wiped
+  // whatever native page was on the glasses, on a 60-second timer, with no log line to explain
+  // it. That is why a declared list would survive a push and then vanish "on its own" a minute
+  // later. If a live clock is wanted again, it must be drawn by the glasses, not repainted by
+  // the phone.
 
   const health = sup.health;
   const hc = healthColor(health);

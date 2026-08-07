@@ -125,13 +125,11 @@ export function useConnectionSupervisor(
       wasConnectedRef.current = true;
       if (droppedUnexpectedly) setDroppedUnexpectedly(false);
       if (wasDown) append(ready ? "healthy" : "degraded", "connected");
-      // The moment the pair is READY, re-assert our HUD surface. Deferred a tick so it
-      // sequences AFTER the launcher's own connect effects (screenOwner.start + setSurface)
-      // rather than racing them onto the BLE write path. reclaimNow no-ops if no surface.
-      if (ready) {
-        const t = setTimeout(() => screenOwner.reclaimNow(), 0);
-        return () => clearTimeout(t);
-      }
+      // ⛔ REMOVED 2026-08-07: this re-asserted the JS HUD surface the moment the pair went
+      // ready. With the legacy phone-OS no longer owning the HUD (see App.tsx), re-claiming on
+      // every reconnect is precisely the behaviour that repainted over natively-declared pages —
+      // and because this link re-pairs on its own, it fired repeatedly without user action.
+      // It is also why a single connect produced TWO paints ("created" then "rebuilt" text page).
       return;
     }
 
