@@ -54,6 +54,35 @@ $cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json
 $srv = $cfg.mcpServers.'android-device'
 if (-not $srv) { throw "no 'android-device' MCP server in ~/.claude.json" }
 if (-not $Url) { $Url = $srv.url }
+
+# PREFER THE USB TUNNEL when one is up.
+#
+# Measured 2026-08-08: the phone dozed, WiFi went into power-save, and the MCP server *and* adb
+# both became unreachable WHILE PING STILL ANSWERED -- which reads as "adb is slow" rather than
+# "the device is gone" and cost a long detour. Over USB none of that can happen, and it is also
+# ~3x faster (67 ms vs 210 ms to the same endpoint).
+#
+# Port 18080 is the one `adb-keepalive.ps1` re-asserts on every reconnect, so it is the DURABLE
+# local port -- an ad-hoc `adb forward tcp:8080 tcp:8080` works too but silently disappears on the
+# next replug, because `adb forward` is per-transport.
+#
+# ⚠️ USB adb needs the phone's USB mode set to FILE TRANSFER. On "No data transfer" (the MIUI
+# default) the ADB interface is not exposed at all, and `adb devices` comes back EMPTY even
+# though the phone displays "USB debugging connected" -- which is a genuinely misleading pair of
+# signals and cost a long detour on 2026-08-08.
+if (-not $PSBoundParameters.ContainsKey('Url')) {
+  try {
+    $u = [Uri]$Url
+    foreach ($p in @(18080, $u.Port)) {
+      $local = "$($u.Scheme)://127.0.0.1:$p$($u.AbsolutePath)"
+      # Any HTTP status means the server answered (401 = alive, wants the token) => tunnel live.
+      $probe = try {
+        (Invoke-WebRequest -Uri $local -Method POST -TimeoutSec 2 -SkipHttpErrorCheck -ErrorAction Stop).StatusCode
+      } catch { 0 }
+      if ($probe -ne 0) { $Url = $local; break }
+    }
+  } catch { }
+}
 $token = ($srv.headers.PSObject.Properties | Select-Object -First 1).Value
 if (-not $token) { throw "no auth header on the android-device server config" }
 
