@@ -240,13 +240,79 @@ object G2EvenHub {
         return w.data
     }
 
-    /** CreateStartUpPageContainer: f1=total, f3=repeated TextObject, f4=repeated ImageObject. */
+    /**
+     * ListContainerProperty (FUT-249 / LIST-1). The firmware carries a COMPLETE native list
+     * interaction engine -- `common_list_*` -- reachable over this protobuf with no CFW at all.
+     * Its own log strings describe the whole chain:
+     *
+     *   protobuf -> evenhub_ui_page_create -> "List container bound to events"
+     *            -> evenhub_list_event_inject_adapter -> common_list_inject_event
+     *            -> native focus move + scroll animation + rubber-band at the ends
+     *            -> common_list_event_callback: selected_index=%d, item_name=%s
+     *
+     * That is declare-once / execute-natively / report-on-selection: the phone sends this once
+     * and hears nothing again until the user SELECTS, while scrolling happens on-glass. It was
+     * never encoded because FUT-153 closed with "List/scroll containers not needed yet".
+     *
+     * Layout mirrors textContainer for f1-f10, then:
+     *   f11 = List_ItemContainerProperty { f1=ItemCount, f2=ItemWidth,
+     *                                      f3=IsItemSelectBorderEn, f4=repeated ItemName }
+     *   f12 = IsEventCapture
+     *
+     * ⚠️ The firmware binds events to exactly ONE container per page
+     * ("evenhub_bind_event_container: already has event binding"), so a page carrying a
+     * capturing list MUST NOT also carry the evt-0 container -- see pageMessage.
+     */
+    fun listContainer(
+        x: Int,
+        y: Int,
+        width: Int,
+        height: Int,
+        containerID: Int,
+        items: List<String>,
+        containerName: String? = null,
+        isEventCapture: Boolean = true,
+        itemWidth: Int = 0,
+        selectBorder: Boolean = true,
+        borderWidth: Int = 0,
+        borderColor: Int = 0,
+        borderRadius: Int = 0,
+        paddingLength: Int = 0
+    ): ByteArray {
+        val item = G2ProtobufWriter()
+        item.writeInt32Field(1, items.size)
+        item.writeInt32Field(2, if (itemWidth > 0) itemWidth else width)
+        item.writeInt32Field(3, if (selectBorder) 1 else 0)
+        for (name in items) item.writeStringField(4, name)
+
+        val w = G2ProtobufWriter()
+        w.writeInt32Field(1, x)
+        w.writeInt32Field(2, y)
+        w.writeInt32Field(3, width)
+        w.writeInt32Field(4, height)
+        w.writeInt32Field(5, borderWidth)
+        w.writeInt32Field(6, borderColor)
+        w.writeInt32Field(7, borderRadius)
+        w.writeInt32Field(8, paddingLength)
+        w.writeInt32Field(9, containerID)
+        if (containerName != null) w.writeStringField(10, containerName)
+        w.writeMessageField(11, item.data)
+        w.writeInt32Field(12, if (isEventCapture) 1 else 0)
+        return w.data
+    }
+
+    /**
+     * CreateStartUpPageContainer: f1=total, f2=repeated ListObject, f3=repeated TextObject,
+     * f4=repeated ImageObject.
+     */
     private fun createStartupPageContainer(
         textContainers: List<ByteArray>,
-        imageContainers: List<ByteArray> = emptyList()
+        imageContainers: List<ByteArray> = emptyList(),
+        listContainers: List<ByteArray> = emptyList()
     ): ByteArray {
         val w = G2ProtobufWriter()
-        w.writeInt32Field(1, textContainers.size + imageContainers.size)
+        w.writeInt32Field(1, textContainers.size + imageContainers.size + listContainers.size)
+        for (lc in listContainers) w.writeMessageField(2, lc)
         for (tc in textContainers) w.writeMessageField(3, tc)
         for (ic in imageContainers) w.writeMessageField(4, ic)
         return w.data
@@ -283,17 +349,53 @@ object G2EvenHub {
         textContainers: List<ByteArray>,
         imageContainers: List<ByteArray>,
         rebuild: Boolean,
-        magicRandom: Int
+        magicRandom: Int,
+        listContainers: List<ByteArray> = emptyList(),
+        /**
+         * Set when one of [listContainers] carries IsEventCapture=1. The firmware binds events
+         * to exactly ONE container per page and logs
+         * "evenhub_bind_event_container: already has event binding" for the rest -- so evt-0,
+         * which is normally what keeps gestures alive, would STARVE a capturing list of the
+         * very swipes it needs. Suppressing it is the difference between a native list that
+         * scrolls and one that renders and sits frozen; the frozen case looks exactly like the
+         * firmware refusing to do this at all, which is the false negative to avoid.
+         */
+        listOwnsEvents: Boolean = false
     ): ByteArray {
         val page = createStartupPageContainer(
-            textContainers = listOf(eventCaptureContainer()) + textContainers,
-            imageContainers = imageContainers
+            textContainers = if (listOwnsEvents) textContainers
+            else listOf(eventCaptureContainer()) + textContainers,
+            imageContainers = imageContainers,
+            listContainers = listContainers
         )
         return if (rebuild) {
             message(G2EvenHubCmd.REBUILD_PAGE, 7, page, magicRandom)
         } else {
             message(G2EvenHubCmd.CREATE_STARTUP_PAGE, 3, page, magicRandom)
         }
+    }
+
+    /**
+     * A page whose whole content is one native, interactive list. This is the LIST-1 probe and,
+     * if it works, the foundation of the launcher: the phone declares it once and the glasses
+     * own every scroll.
+     */
+    fun listPageMessage(
+        items: List<String>,
+        rebuild: Boolean,
+        magicRandom: Int,
+        containerID: Int = 3,
+        containerName: String = "ffs-list"
+    ): ByteArray {
+        val lc = listContainer(
+            x = 0, y = 0, width = 576, height = 288, containerID = containerID,
+            items = items, containerName = containerName, isEventCapture = true
+        )
+        return pageMessage(
+            textContainers = emptyList(), imageContainers = emptyList(),
+            rebuild = rebuild, magicRandom = magicRandom,
+            listContainers = listOf(lc), listOwnsEvents = true
+        )
     }
 
     /**
@@ -537,10 +639,43 @@ object G2EvenHub {
         }
         val listData = df[1] as? ByteArray
         if (listData != null) {
-            val g = gestureName(listData, 5)
+            // absentIsClick, same protobuf zero-omission rule that hid single-tap on SysEvent
+            // (FUT-160): a selection at index 0 with eventType CLICK omits BOTH fields.
+            val g = gestureName(listData, 5, absentIsClick = true)
             if (g != null) return G2GestureDecode(g, null)
         }
         return null
+    }
+
+    /**
+     * Field-by-field dump of an inbound EvenHub payload, for learning a message shape we have
+     * never seen rather than guessing at it.
+     *
+     * The native ListContainer's reply carries a selected-item index, but its field number is
+     * not documented anywhere we have and the stale `.ts` cannot be trusted for it. Printing
+     * what actually arrives is faster and more honest than encoding a guess and then debugging
+     * why the guess is silent. Nested length-delimited fields are recursed one level, which is
+     * enough to reach SysEvent/TextEvent/ListEvent inside SendDeviceEvent.
+     */
+    fun describePayload(payload: ByteArray, depth: Int = 2): String {
+        fun render(bytes: ByteArray, d: Int, indent: String): String {
+            val sb = StringBuilder()
+            for ((field, value) in G2ProtobufReader(bytes).parseFields()) {
+                when (value) {
+                    is Int -> sb.append("$indent f$field=$value\n")
+                    is ByteArray -> {
+                        val hex = value.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+                        val ascii = value.toString(Charsets.UTF_8).filter { it.code in 32..126 }
+                        sb.append("$indent f$field=[${value.size}B] $hex")
+                        if (ascii.length >= 2) sb.append("  \"$ascii\"")
+                        sb.append("\n")
+                        if (d > 0 && value.isNotEmpty()) sb.append(render(value, d - 1, "$indent  "))
+                    }
+                }
+            }
+            return sb.toString()
+        }
+        return render(payload, depth, "  ")
     }
 
     /**

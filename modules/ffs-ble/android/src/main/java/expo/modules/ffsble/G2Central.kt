@@ -329,6 +329,14 @@ class G2Central(
     private var scanResultsSeen = 0
 
     /**
+     * Dump every inbound EvenHub payload field-by-field. Costly and noisy, so it is off by
+     * default and turned on for protocol archaeology -- e.g. learning the native ListEvent's
+     * shape, which is documented nowhere we trust.
+     */
+    @Volatile
+    var dumpInbound = false
+
+    /**
      * Readiness snapshots for the synchronous JS probes. The Swift driver answered
      * `isPairReady()` with a blocking hop onto the CoreBluetooth queue; doing that here would
      * mean a cross-thread round trip on every poll from JS (and a deadlock the moment it is
@@ -1736,11 +1744,19 @@ class G2Central(
                 val gesture = G2EvenHub.parseGesture(payload)
                 if (gesture != null) {
                     handleGestureLocked(gesture.name, s, gesture.source)
+                    // LIST-1: a native-list reply carries a selected-item index whose field
+                    // number we have never observed. Dump the frame that produced the gesture
+                    // so the layout is learned from the hardware rather than guessed.
+                    if (dumpInbound) log("EvenHub event fields:\n" + G2EvenHub.describePayload(payload))
                 } else {
                     val ack = G2EvenHub.parseImageAck(payload)
                     if (ack != null) {
                         log("img: ack session=${ack.session} fragment=${ack.fragment} success=${ack.success}")
                         handleImageAckLocked(ack.session, ack.fragment, ack.success)
+                    } else if (dumpInbound) {
+                        // Anything the decoders did not recognise. Silence here is how a new
+                        // message shape stays invisible.
+                        log("EvenHub UNDECODED (${payload.size}B):\n" + G2EvenHub.describePayload(payload))
                     }
                 }
             }
@@ -2021,6 +2037,41 @@ class G2Central(
                 sendTextPageLocked(text)
                 startHeartbeatsLocked()
             }
+        }
+    }
+
+    /**
+     * LIST-1 / the launcher primitive: declare a NATIVE list and let the glasses own it.
+     *
+     * Unlike [showText], this is sent once and then the phone is silent. If the firmware
+     * behaves as its log strings describe, swiping scrolls and animates ON-GLASS with zero BLE
+     * traffic, and we hear back only when the user selects an item. That is the whole hybrid
+     * architecture in one message -- which is why this is the experiment everything else waits
+     * on rather than just another render call.
+     *
+     * Turns [dumpInbound] on for the duration, because the reply's shape is unknown.
+     */
+    fun showList(items: List<String>) = post {
+        if (!pairReadyLocked()) {
+            log("showList ignored -- pair not ready (connect both lenses first)")
+            return@post
+        }
+        if (items.isEmpty()) {
+            log("showList ignored -- no items")
+            return@post
+        }
+        dumpInbound = true
+        withSessionLocked {
+            stopAnimationLocked()
+            val rebuild = pageCreated
+            val msg = G2EvenHub.listPageMessage(items, rebuild, counters.nextMagic())
+            sendEvenHubLocked(msg, G2Target.RIGHT)
+            pageCreated = true
+            log(
+                "showList: ${if (rebuild) "rebuilt" else "created"} NATIVE list page, " +
+                    "${items.size} items, ${msg.size}B -> right. Swipe now: if the highlight " +
+                    "moves with NO tx traffic, the glasses own the interaction."
+            )
         }
     }
 
