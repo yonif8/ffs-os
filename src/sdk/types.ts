@@ -90,9 +90,18 @@ export const PROVENANCE: Readonly<Record<string, ProvenanceEntry>> = {
     status: "unproven",
     evidence: "Cmd 5 updateText is built but has never been sent",
   },
-  "settings.silent": { status: "unproven", evidence: "setter written; not yet read back" },
-  "settings.wearDetect": { status: "unproven", evidence: "setter written; not yet read back" },
-  "settings.lensOffset": { status: "unproven", evidence: "setter written; not yet read back" },
+  "settings.silent": {
+    status: "proven",
+    evidence: "set 1 -> BASIC_SETTING snapshot read back silent=1 (2026-08-08)",
+  },
+  "settings.wearDetect": {
+    status: "proven",
+    evidence: "set 1 -> snapshot read back wear=1 (2026-08-08)",
+  },
+  "settings.lensOffset": {
+    status: "proven",
+    evidence: "set x=7 y=3 -> snapshot read back lensX=7 lensY=3; fields 4/3, NOT 15/16",
+  },
   "cfw.injectScroll": {
     status: "proven",
     evidence: "G2FW_LIST_INJECT_EVENT ret=0x68FC10FF twice, focus 0->1, DOWN=0 UP=1",
