@@ -53,6 +53,13 @@ ALLOWLIST: dict[str, str] = {
     # this guard can start enforcing today; it is a real finding awaiting triage, not
     # an exemption. See FUT-233.
     "src/os/hud.ts": "orphan found 2026-07-28 by this check; awaiting triage — do not copy this pattern",
+    # The pure-TS SDK landed as "step 0" (2026-08-07) — encoder + event normalizer,
+    # cross-checked against the native driver but not yet consumed by App.tsx. It is a
+    # deliberate not-yet-wired module, not a lost screen: nothing user-facing is hiding
+    # behind it. Delete these three lines the moment the app imports the SDK for real.
+    "src/sdk/wire.ts": "SDK step 0, 2026-08-07 — consumer (App.tsx) not written yet",
+    "src/sdk/proto.ts": "SDK step 0, 2026-08-07 — consumer (App.tsx) not written yet",
+    "src/sdk/events.ts": "SDK step 0, 2026-08-07 — consumer (App.tsx) not written yet",
 }
 
 # Matches: import ... from "X" / export ... from "X" / require("X") / import("X")
@@ -126,6 +133,13 @@ def main() -> int:
                 # iOS/Android native sources aren't part of the JS graph.
                 and "ios" not in p.parts
                 and "android" not in p.parts
+                # Tests are reached by the test runner, never by the app entry point.
+                # Flagging them is this check's own bug, not a finding: a test that the
+                # app imported would be the actual defect. (Caught 2026-08-08 when
+                # src/sdk/__tests__/wire.test.ts turned CI red on both platforms.)
+                and "__tests__" not in p.parts
+                and ".test." not in p.name
+                and ".spec." not in p.name
             ):
                 all_files.append(p)
 

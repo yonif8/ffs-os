@@ -4,13 +4,16 @@ name: iOS Unsigned IPA (for SideStore)
 # an installable iOS binary without a Mac or a paid Apple Developer account.
 # SideStore re-signs it on Yoni's iPhone with his free Apple ID. (FUT-139, POC path.)
 
+# DORMANT since 2026-08-08 — manual dispatch only, no push trigger.
+# Android is the primary platform (see CLAUDE.md "Operating model"); the iPhone/SideStore
+# path has had no work since the pivot, so every push was mailing out a failure for a
+# binary nobody installs. It is not *passing* either: on Xcode 26.3 the runner rejects
+# modules/ffs-ble/ios/G2Central.swift's `peripheralIsReadyToSendWriteWithoutResponse`
+# (renamed to `peripheralIsReady(toSendWriteWithoutResponse:)`), so the build fails at
+# exit 65 before it ever produces an .ipa. Fix that rename before re-arming the trigger,
+# or the first `workflow_dispatch` will just fail again.
 on:
   workflow_dispatch: {}
-  push:
-    branches: [master, main]
-    paths-ignore:
-      - "README.md"
-      - "**/*.md"
 
 jobs:
   build:
