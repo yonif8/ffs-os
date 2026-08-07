@@ -69,6 +69,7 @@ class FfsBleModule : Module() {
       "onPairReady",
       "onNotify",
       "onGesture",
+      "onGlassesEvent",
       "onDeviceInfo",
       "onDisconnected",
       "onFlashProbe",
@@ -506,6 +507,23 @@ class FfsBleModule : Module() {
       sendEvent(
         "onFlashProgress",
         mapOf("message" to message, "progress" to progress, "done" to done, "ok" to ok)
+      )
+    }
+    // THE RETURN PATH: a natively-owned on-glass screen reporting what the user chose.
+    // eventType: 0 click, 1 scroll-top, 2 scroll-bottom, 3 double-click, 4/5 fg enter/exit,
+    // 6 abnormal-exit, 7 system-exit.  eventSource: 1 glasses-R, 2 ring, 3 glasses-L.
+    c.onGlassesEvent = { kind, containerId, containerName, itemIndex, itemName, eventType, eventSource ->
+      sendEvent(
+        "onGlassesEvent",
+        mapOf(
+          "kind" to kind,
+          "containerId" to containerId,
+          "containerName" to containerName,
+          "itemIndex" to itemIndex,
+          "itemName" to itemName,
+          "eventType" to eventType,
+          "eventSource" to eventSource
+        )
       )
     }
     c.onDisconnected = { name, side, reason, code, domain ->

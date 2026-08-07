@@ -527,6 +527,142 @@ object G2EvenHub {
      * inner f8=errorCode (success == 4), f3=session, f6=fragmentIndex. Null if the payload
      * is not an image ACK.
      */
+    /**
+     * OsEventTypeList -- what the firmware reports a user did. From the generated schema in
+     * `reference/g2-kit-unofficial/ble/gen/EvenHub_pb.ts` (MIT).
+     *
+     * ⚠️ There is NO long-press type. g2-kit's prose `docs/events.md` claims a long-press
+     * (`status=1`); the generated schema has no such value and the audit flagged those docs as
+     * contradicting their own protos. Do not design a gesture around it without proving it first.
+     */
+    object EventType {
+        const val CLICK = 0          // single tap
+        const val SCROLL_TOP = 1
+        const val SCROLL_BOTTOM = 2
+        const val DOUBLE_CLICK = 3   // double tap
+        const val FOREGROUND_ENTER = 4
+        const val FOREGROUND_EXIT = 5
+        const val ABNORMAL_EXIT = 6
+        const val SYSTEM_EXIT = 7
+
+        fun name(v: Int?): String = when (v) {
+            CLICK -> "click"; SCROLL_TOP -> "scroll-top"; SCROLL_BOTTOM -> "scroll-bottom"
+            DOUBLE_CLICK -> "double-click"; FOREGROUND_ENTER -> "fg-enter"
+            FOREGROUND_EXIT -> "fg-exit"; ABNORMAL_EXIT -> "abnormal-exit"
+            SYSTEM_EXIT -> "system-exit"; else -> "type($v)"
+        }
+    }
+
+    /** EventSourceType -- WHICH input produced the event. The ring is a first-class source. */
+    object EventSource {
+        const val NONE = 0
+        const val GLASSES_R = 1
+        const val RING = 2
+        const val GLASSES_L = 3
+
+        fun name(v: Int?): String = when (v) {
+            GLASSES_R -> "glasses-R"; RING -> "ring"; GLASSES_L -> "glasses-L"
+            NONE, null -> "none"; else -> "source($v)"
+        }
+    }
+
+    /** A decoded inbound event from the glasses. */
+    data class G2GlassesEvent(
+        val kind: String,
+        val containerId: Int? = null,
+        val containerName: String? = null,
+        val itemIndex: Int? = null,
+        val itemName: String? = null,
+        val eventType: Int? = null,
+        val eventSource: Int? = null,
+        val eventId: Int? = null,
+        val eventData: Int? = null
+    ) {
+        fun describe(): String = buildString {
+            append(kind)
+            containerName?.let { append(" container='").append(it).append('\'') }
+            containerId?.let { append(" id=").append(it) }
+            if (itemIndex != null) append(" index=").append(itemIndex)
+            itemName?.let { append(" item='").append(it).append('\'') }
+            if (eventType != null) append(" type=").append(EventType.name(eventType))
+            if (eventSource != null) append(" src=").append(EventSource.name(eventSource))
+            if (eventId != null) append(" eventId=").append(eventId)
+            if (eventData != null) append(" eventData=").append(eventData)
+        }
+    }
+
+    private fun str(v: Any?): String? =
+        (v as? ByteArray)?.toString(Charsets.UTF_8)
+
+    /**
+     * Decode an inbound EvenHub event -- THE return path of the hybrid architecture. The glasses
+     * own the interaction natively and tell us only what the user chose, which is the whole point
+     * of declaring a list instead of re-rendering a page per scroll.
+     *
+     * Envelope (evenhub_main_msg_ctx): Cmd = 1, MagicRandom = 2, DevEvent = 13, DevPrivateEvent = 16.
+     *   Cmd 2  (OS_NOITY_EVENT_TO_APP_PACKET) -> DevEvent{ ListEvent=1, TextEvent=2, SysEvent=3 }
+     *   Cmd 11 (OS_PRIVATE_EVENT_PACKET)      -> DevPrivateEvent{ ContainerID=1, ContainerName=2,
+     *                                                             eventId=3, eventData=4 }
+     *   List_ItemEvent: ContainerID=1, ContainerName=2, CurrentSelectItemName=3,
+     *                   CurrentSelectItemIndex=4, EventType=5
+     *   Text_ItemEvent: ContainerID=1, ContainerName=2, EventType=3
+     *   Sys_ItemEvent:  EventType=1, EventSource=2
+     *
+     * All field numbers from the generated schema, never from the prose docs -- those disagree
+     * with their own protos (see docs/G2-CAPABILITY-MAP.md).
+     */
+    fun decodeEvent(payload: ByteArray): G2GlassesEvent? {
+        val f = G2ProtobufReader(payload).parseFields()
+        val cmd = f[1] as? Int ?: return null
+
+        (f[13] as? ByteArray)?.let { devEvent ->
+            val d = G2ProtobufReader(devEvent).parseFields()
+            (d[1] as? ByteArray)?.let { le ->
+                val e = G2ProtobufReader(le).parseFields()
+                return G2GlassesEvent(
+                    kind = "list-click",
+                    containerId = e[1] as? Int,
+                    containerName = str(e[2]),
+                    itemName = str(e[3]),
+                    itemIndex = e[4] as? Int,
+                    eventType = e[5] as? Int
+                )
+            }
+            (d[2] as? ByteArray)?.let { te ->
+                val e = G2ProtobufReader(te).parseFields()
+                return G2GlassesEvent(
+                    kind = "text-click",
+                    containerId = e[1] as? Int,
+                    containerName = str(e[2]),
+                    eventType = e[3] as? Int
+                )
+            }
+            (d[3] as? ByteArray)?.let { se ->
+                val e = G2ProtobufReader(se).parseFields()
+                return G2GlassesEvent(
+                    kind = "sys-event",
+                    eventType = e[1] as? Int,
+                    eventSource = e[2] as? Int
+                )
+            }
+        }
+
+        (f[16] as? ByteArray)?.let { pe ->
+            val e = G2ProtobufReader(pe).parseFields()
+            return G2GlassesEvent(
+                kind = "private-event",
+                containerId = e[1] as? Int,
+                containerName = str(e[2]),
+                eventId = e[3] as? Int,
+                eventData = e[4] as? Int
+            )
+        }
+
+        // Recognised envelope, unrecognised body -- worth surfacing rather than dropping.
+        if (cmd == 2 || cmd == 11) return G2GlassesEvent(kind = "event-cmd$cmd")
+        return null
+    }
+
     fun parseImageAck(payload: ByteArray): G2ImageAck? {
         val f = G2ProtobufReader(payload).parseFields()
         val resData = f[6] as? ByteArray ?: return null
