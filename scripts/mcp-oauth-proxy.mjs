@@ -3,9 +3,14 @@
 //     node scripts/mcp-oauth-proxy.mjs          # listens on 127.0.0.1:8791
 //
 // Then add it in the desktop app's "custom connector" form with JUST the URL:
-//     http://127.0.0.1:8791/mcp
+//     https://127.0.0.1:8791/mcp
 // Leave the OAuth client id/secret blank -- this server supports Dynamic Client Registration,
 // so Claude registers itself and no credential ever has to be typed in.
+//
+// HTTPS IS REQUIRED BY THE FORM (it rejects http:// outright), so this serves TLS from a
+// self-signed cert in .certs/ with SANs for localhost / 127.0.0.1 / ::1. Trust it once:
+//     Import-Certificate -FilePath .certs\proxy-cert.pem -CertStoreLocation Cert:\CurrentUser\Root
+// CurrentUser needs no admin rights, and the key never leaves this machine.
 //
 // WHY THIS EXISTS
 // ---------------
@@ -42,6 +47,7 @@
 // on; the hop is a USB cable. Do not reuse that choice off-box.
 
 import http from "node:http";
+import https from "node:https";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -50,7 +56,26 @@ import { execFile } from "node:child_process";
 
 const PORT = Number(process.env.FFS_OAUTH_PROXY_PORT || 8791);
 const HOST = "127.0.0.1";
-const ISSUER = `http://${HOST}:${PORT}`;
+
+// TLS IS MANDATORY, not optional: the desktop app's custom-connector form rejects http:// URLs
+// outright. The cert is self-signed with SANs for localhost/127.0.0.1/::1 (see scripts/README or
+// the generation command in git history). Because it is self-signed, it must be trusted once --
+// import .certs/proxy-cert.pem into the CurrentUser "Trusted Root Certification Authorities"
+// store, which needs no admin rights.
+const CERT_DIR = path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\//, "")), "..", ".certs");
+function loadTls() {
+  const key = path.join(CERT_DIR, "proxy-key.pem");
+  const cert = path.join(CERT_DIR, "proxy-cert.pem");
+  if (!fs.existsSync(key) || !fs.existsSync(cert)) {
+    console.error(`[oauth-proxy] missing TLS material in ${CERT_DIR}`);
+    console.error(`[oauth-proxy] generate it with:`);
+    console.error(`    openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -config san.cnf \\`);
+    console.error(`      -keyout .certs/proxy-key.pem -out .certs/proxy-cert.pem`);
+    process.exit(1);
+  }
+  return { key: fs.readFileSync(key), cert: fs.readFileSync(cert) };
+}
+const ISSUER = `https://${HOST}:${PORT}`;
 
 // --- upstream (the phone) -------------------------------------------------------------------
 
@@ -208,7 +233,7 @@ function parseForm(buf, contentType = "") {
 
 // --- server ---------------------------------------------------------------------------------
 
-const server = http.createServer(async (req, res) => {
+const server = https.createServer(loadTls(), async (req, res) => {
   const url = new URL(req.url, ISSUER);
   const p = url.pathname;
 
