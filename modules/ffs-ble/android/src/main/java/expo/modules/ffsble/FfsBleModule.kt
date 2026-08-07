@@ -189,6 +189,16 @@ class FfsBleModule : Module() {
       ensureCentral()?.pushToService(serviceId and 0xFF, base64)
     }
 
+    // HUD brightness (sid 0x09). 0-100, nonlinear. autoAdjust hands control to the ambient-light
+    // sensor -- pass false to hold a level for measurement.
+    Function("setBrightness") { level: Int, autoAdjust: Boolean ->
+      ensureCentral()?.setBrightness(level, autoAdjust)
+    }
+
+    Function("querySettings") { brightnessOnly: Boolean ->
+      ensureCentral()?.querySettings(brightnessOnly)
+    }
+
     Function("pushPayloadViaImage") { base64: String ->
       ensureCentral()?.pushPayloadViaImage(base64)
     }
@@ -305,6 +315,19 @@ class FfsBleModule : Module() {
           // Ask the glasses for battery/firmware/CFW-loader diagnostics. The ⟨LOADER⟩ block in
           // the reply is how a pushed payload reports its ret= value back.
           INFO_ACTION -> ensureCentral()?.requestDeviceInfo()
+          // HUD brightness. Also an INSTRUMENT control: a dimmer HUD is much easier for the
+          // phone camera to focus on, so this is used to set up every visual proof.
+          //   adb shell am broadcast -a com.futurefounders.ffs.BRIGHTNESS --ei level 20 -p <pkg>
+          BRIGHTNESS_ACTION -> {
+            val level = intent.getIntExtra("level", -1)
+            if (level < 0) {
+              ensureCentral()?.querySettings(true)
+            } else {
+              val auto = intent.getBooleanExtra("auto", false)
+              sendEvent("onLog", mapOf("message" to "[android] debug brightness: level=$level auto=$auto"))
+              ensureCentral()?.setBrightness(level, auto)
+            }
+          }
           // LIST-1: declare a native on-glass list. `items` is comma-separated; defaults to a
           // numbered set so the probe can be fired with no arguments at all.
           LIST_ACTION -> {
@@ -329,6 +352,7 @@ class FfsBleModule : Module() {
       addAction(LIST_ACTION)
       addAction(PUSH_ACTION)
       addAction(INFO_ACTION)
+      addAction(BRIGHTNESS_ACTION)
       addAction("connect")
     }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -358,6 +382,7 @@ class FfsBleModule : Module() {
     const val SIMULATE_ACTION = "com.futurefounders.ffs.SIMULATE_GESTURE"
     const val FLASH_ACTION = "com.futurefounders.ffs.FLASH"
     const val LIST_ACTION = "com.futurefounders.ffs.SHOW_LIST"
+    const val BRIGHTNESS_ACTION = "com.futurefounders.ffs.BRIGHTNESS"
     const val PUSH_ACTION = "com.futurefounders.ffs.PUSH_PAYLOAD"
     const val INFO_ACTION = "com.futurefounders.ffs.DEVICE_INFO"
   }
