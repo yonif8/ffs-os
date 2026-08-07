@@ -45,6 +45,20 @@ TS = MODULE / "src" / "FfsBleModule.ts"
 SWIFT = MODULE / "ios" / "FfsBleModule.swift"
 KOTLIN = MODULE / "android" / "src" / "main" / "java" / "expo" / "modules" / "ffsble" / "FfsBleModule.kt"
 
+# iOS is parked (2026-08-08): .github/workflows/ios-unsigned.yml is workflow_dispatch-only
+# and the Swift driver does not even compile on the runner's Xcode 26.3. Demanding lockstep
+# parity with a frozen, unbuildable platform would turn CI red on every new Android
+# capability, and "add a Swift stub" would buy nothing — an unbuildable stub proves nothing.
+#
+# So while this is True, iOS lag is reported as a WARNING and the guard's teeth are on
+# contract <-> Android, which is what actually decides whether shared JS can call a thing.
+# A name missing from the *contract* is still a hard failure on either platform: that is
+# the original bug this check was written for.
+#
+# Set back to False when the iOS build is revived (see the Swift rename noted in the
+# workflow) — the warnings printed below are the exact to-port list.
+IOS_PARKED = True
+
 # Names allowed to exist on one platform only. Keep this SHORT and always say why.
 # An entry here is a deliberate act that shows up in review; forgetting to port a
 # binding is not.
@@ -77,8 +91,10 @@ def ts_surface(path: Path) -> tuple[set[str], set[str]]:
     return fns - events, events
 
 
-def report(kind: str, ts: set[str], ios: set[str], android: set[str]) -> list[str]:
+def report(kind: str, ts: set[str], ios: set[str], android: set[str]) -> tuple[list[str], list[str]]:
+    """(hard errors, iOS-drift warnings) — see IOS_PARKED above for why they're split."""
     errs: list[str] = []
+    warns: list[str] = []
     for name in sorted(ts | ios | android):
         if name in ALLOWLIST:
             continue
@@ -87,8 +103,15 @@ def report(kind: str, ts: set[str], ios: set[str], android: set[str]) -> list[st
             continue
         have = ", ".join(k for k, v in where.items() if v) or "nowhere"
         miss = ", ".join(k for k, v in where.items() if not v)
-        errs.append(f"  {kind} {name!r}: present in [{have}] - MISSING from [{miss}]")
-    return errs
+        line = f"  {kind} {name!r}: present in [{have}] - MISSING from [{miss}]"
+        # While iOS is parked, a name the contract and Android agree on is fully usable
+        # by the app; only the frozen Swift driver lags. That's drift to record, not a
+        # reason to block Android work.
+        if IOS_PARKED and where["contract"] == where["Android"]:
+            warns.append(line)
+        else:
+            errs.append(line)
+    return errs, warns
 
 
 def main() -> int:
@@ -101,8 +124,15 @@ def main() -> int:
     ios_fns, ios_events = native_surface(SWIFT)
     and_fns, and_events = native_surface(KOTLIN)
 
-    errs = report("function", ts_fns, ios_fns, and_fns)
-    errs += report("event", ts_events, ios_events, and_events)
+    fn_errs, fn_warns = report("function", ts_fns, ios_fns, and_fns)
+    ev_errs, ev_warns = report("event", ts_events, ios_events, and_events)
+    errs = fn_errs + ev_errs
+    warns = fn_warns + ev_warns
+
+    if warns:
+        print("iOS driver is behind the contract (parked, not blocking):\n")
+        print("\n".join(warns))
+        print("\nThis is the to-port list for whoever revives the iOS build.\n")
 
     if errs:
         print("Native module API surface is NOT in parity:\n", file=sys.stderr)
@@ -117,7 +147,8 @@ def main() -> int:
 
     print(
         f"native parity OK - {len(ts_fns)} functions, {len(ts_events)} events "
-        f"across contract / iOS / Android"
+        f"across contract / Android"
+        + (f"; iOS parked with {len(warns)} behind" if warns else " / iOS")
         + (f" ({len(ALLOWLIST)} allowlisted)" if ALLOWLIST else "")
     )
     return 0
