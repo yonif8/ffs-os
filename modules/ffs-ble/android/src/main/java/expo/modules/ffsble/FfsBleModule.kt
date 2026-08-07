@@ -217,9 +217,12 @@ class FfsBleModule : Module() {
     // Stage 1 is a ZERO-WRITE probe of already-discovered GATT: no brick risk, so it ships now.
     Function("flashDryRun") { ensureCentral()?.flashDryRun() }
 
-    // Stage 2 writes firmware. Phase 4, deliberately last -- see the class header.
-    Function("startCfwFlash") { _: String, _: String, _: Boolean ->
-      notYet("startCfwFlash", "Phase 4 (brick risk -- flash from the iOS app for now)")
+    // Stage 2 writes firmware. LIVE as of FUT-260. Everything upstream of the first write is a
+    // refusal gate: SHA match, EVENOTA parse, MRAM brick-guard, known-golden lookup, and a
+    // self-test that the guard still reproduces its own vector. `dryRun=true` runs that entire
+    // chain and stops before any byte is written.
+    Function("startCfwFlash") { url: String, sha256: String, dryRun: Boolean ->
+      ensureCentral()?.startCfwFlash(url, sha256, dryRun)
     }
 
     OnCreate { registerSimulationReceiver() }
@@ -263,15 +266,37 @@ class FfsBleModule : Module() {
 
     val receiver = object : BroadcastReceiver() {
       override fun onReceive(ctx: Context?, intent: Intent?) {
-        val device = intent?.getStringExtra("device") ?: "glasses"
-        val gesture = intent?.getStringExtra("gesture") ?: return
-        when (device.lowercase()) {
-          "ring" -> ensureRing()?.simulateGesture(gesture)
-          else -> ensureCentral()?.simulateGesture(gesture)
+        when (intent?.action) {
+          SIMULATE_ACTION -> {
+            val device = intent.getStringExtra("device") ?: "glasses"
+            val gesture = intent.getStringExtra("gesture") ?: return
+            when (device.lowercase()) {
+              "ring" -> ensureRing()?.simulateGesture(gesture)
+              else -> ensureCentral()?.simulateGesture(gesture)
+            }
+          }
+          // Drives the OTA flasher from adb so the flash loop needs no UI navigation. Every
+          // refusal gate in G2Flasher still applies -- this only chooses WHEN to run the chain,
+          // never what it is allowed to accept. `dry` defaults to TRUE: the destructive form
+          // has to be asked for explicitly, so a malformed command validates instead of writes.
+          FLASH_ACTION -> {
+            val url = intent.getStringExtra("url") ?: return
+            val sha = intent.getStringExtra("sha") ?: return
+            val dry = intent.getBooleanExtra("dry", true)
+            sendEvent(
+              "onLog",
+              mapOf("message" to "[android] debug flash request: dry=$dry sha=${sha.take(12)}... url=$url")
+            )
+            ensureCentral()?.startCfwFlash(url, sha, dry)
+          }
+          "connect" -> ensureCentral()?.connectPair()
         }
       }
     }
-    val filter = IntentFilter(SIMULATE_ACTION)
+    val filter = IntentFilter(SIMULATE_ACTION).apply {
+      addAction(FLASH_ACTION)
+      addAction("connect")
+    }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
       context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
     } else {
@@ -297,6 +322,7 @@ class FfsBleModule : Module() {
 
   private companion object {
     const val SIMULATE_ACTION = "com.futurefounders.ffs.SIMULATE_GESTURE"
+    const val FLASH_ACTION = "com.futurefounders.ffs.FLASH"
   }
 
   /**

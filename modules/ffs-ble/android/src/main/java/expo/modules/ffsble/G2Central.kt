@@ -373,6 +373,16 @@ class G2Central(
 
     private var recoverTimer: Runnable? = null
 
+    /**
+     * The CFW OTA flasher (FUT-260). Owns its own thread and blocks on acks, so it is handed
+     * ready-made targets and never reaches back into driver state. `flasher.active` gates the
+     * notify router and the heartbeat below.
+     */
+    private val flasher = G2Flasher(
+        log = { msg -> log(msg) },
+        onProgress = { msg, frac, done, ok -> onFlashProgress?.invoke(msg, frac, done, ok) }
+    )
+
     private var lastGestureName = ""
     private var lastGestureAt = 0L
     private var lastDeviceInfoAt = 0L
@@ -1686,6 +1696,14 @@ class G2Central(
         val lens = lensFor(gatt)
         val s = lens?.side ?: sideFromName(gatt.device.name ?: "")
 
+        // FUT-167 Stage 2: during a flash the DATA-notify characteristic carries OTA ack frames.
+        // Hand them to the flasher and do NOT run them through gesture/image parsing -- they are
+        // a different protocol entirely and would decode as garbage.
+        if (flasher.active && uuid == FLASH_DATA_NOTIFY) {
+            flasher.offerRx(data)
+            return
+        }
+
         val b64 = android.util.Base64.encodeToString(data, android.util.Base64.NO_WRAP)
         // Compact log -- the full payload goes to JS as base64 via onNotify, tagged side.
         log("Notify ${uuidString(uuid)} (side=${s.raw}, ${data.size} bytes)")
@@ -1934,6 +1952,13 @@ class G2Central(
     }
 
     private fun heartbeatTickLocked() {
+        // A flash owns the link exclusively; EvenHub traffic during an OTA transfer competes
+        // with firmware blocks for the same radio and is exactly what the flasher's own 12s
+        // CTRL keep-alive replaces.
+        if (flasher.active) {
+            schedule(5000) { heartbeatTickLocked() }
+            return
+        }
         if (!heartbeatRunning || !sessionAuthed || !pairReadyLocked()) {
             heartbeatRunning = false
             return
@@ -2477,6 +2502,80 @@ class G2Central(
         val detail = "FLASH DRY-RUN (zero-write, no data sent)\n${l.second}\n${r.second}"
         log("flashDryRun -- ${l.second}; ${r.second}")
         onFlashProbe?.invoke(l.first, r.first, detail)
+    }
+
+    /**
+     * FUT-167 Stage 2 / FUT-260: the real CFW OTA flash. Downloads [urlStr], verifies
+     * [expectedSha256], runs the MRAM brick-guard + golden-vector self-test, then either stops
+     * ([dryRun] = true, no writes at all) or flashes both lenses. Progress via onFlashProgress.
+     *
+     * Resolves the OTA characteristics HERE, on the serial queue, and hands the flasher
+     * finished targets — it must never read driver state from its own thread.
+     *
+     * Order note: the DATA-notify subscription is enabled first and given time to bind before
+     * the transfer starts, because the very first ack would otherwise arrive on an unsubscribed
+     * characteristic and be lost — which presents as a begin-ack timeout and looks exactly like
+     * a dead OTA channel.
+     */
+    fun startCfwFlash(urlStr: String, expectedSha256: String, dryRun: Boolean) = post {
+        if (flasher.active) {
+            log("startCfwFlash ignored -- a flash is already running")
+            return@post
+        }
+        stopAnimationLocked()
+
+        val targets = ArrayList<G2Flasher.Target>()
+        val missing = ArrayList<String>()
+        for (side in listOf(G2Side.LEFT, G2Side.RIGHT)) {
+            val lens = lenses[side]
+            val gatt = lens?.gatt
+            if (lens == null || !lens.connected || gatt == null) {
+                missing.add("${side.raw}: not connected"); continue
+            }
+            val dataWrite = findCharLocked(gatt, FLASH_DATA_WRITE)
+            val dataNotify = findCharLocked(gatt, FLASH_DATA_NOTIFY)
+            val ctrlWrite = lens.writeChar // CTRL write == CHAR_WRITE (…E5401)
+            if (dataWrite == null || dataNotify == null || ctrlWrite == null) {
+                missing.add(
+                    "${side.raw}: missing " + listOfNotNull(
+                        if (dataWrite == null) "DATA.write" else null,
+                        if (dataNotify == null) "DATA.notify" else null,
+                        if (ctrlWrite == null) "CTRL.write" else null
+                    ).joinToString("/")
+                )
+                continue
+            }
+            targets.add(G2Flasher.Target(side.raw, gatt, dataWrite, dataNotify, ctrlWrite))
+            // Subscribe to the OTA ack channel before any transfer begins.
+            subscribeLocked(lens, dataNotify)
+        }
+
+        if (missing.isNotEmpty()) {
+            val detail = "OTA channels unavailable -- ${missing.joinToString("; ")}"
+            log("startCfwFlash refused: $detail")
+            onFlashProgress?.invoke(detail, 0.0, true, false)
+            return@post
+        }
+
+        // Let the CCCD writes land before the first ack can arrive (iOS sleeps 2.5s here).
+        log("startCfwFlash: ${targets.size} lens(es) ready, dryRun=$dryRun -- settling subscriptions")
+        schedule(2500) {
+            flasher.start(targets, urlStr, expectedSha256, dryRun) {
+                // Back on the flasher's thread; hop home before touching driver state.
+                post {
+                    log("flash finished -- restoring session")
+                    if (pairReadyLocked()) startHeartbeatsLocked()
+                }
+            }
+        }
+    }
+
+    /** Find a characteristic by UUID anywhere in a link's discovered services. */
+    private fun findCharLocked(gatt: BluetoothGatt, uuid: UUID): BluetoothGattCharacteristic? {
+        for (svc in gatt.services.orEmpty()) {
+            for (ch in svc.characteristics.orEmpty()) if (ch.uuid == uuid) return ch
+        }
+        return null
     }
 
     // MARK: - Small helpers
