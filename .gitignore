@@ -40,3 +40,7 @@ yarn-error.*
 /ios
 /android
 .certs/
+
+# Embedded JS bundle — a build artifact, regenerate with scripts/embed-bundle.sh
+android/app/src/main/assets/index.android.bundle
+android/app/src/main/assets/index.android.bundle.map
