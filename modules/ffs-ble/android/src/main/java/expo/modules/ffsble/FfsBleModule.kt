@@ -290,11 +290,20 @@ class FfsBleModule : Module() {
             ensureCentral()?.startCfwFlash(url, sha, dry)
           }
           "connect" -> ensureCentral()?.connectPair()
+          // LIST-1: declare a native on-glass list. `items` is comma-separated; defaults to a
+          // numbered set so the probe can be fired with no arguments at all.
+          LIST_ACTION -> {
+            val raw = intent.getStringExtra("items")
+            val items = raw?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
+              ?: (0..7).map { "Item $it" }
+            ensureCentral()?.showList(items)
+          }
         }
       }
     }
     val filter = IntentFilter(SIMULATE_ACTION).apply {
       addAction(FLASH_ACTION)
+      addAction(LIST_ACTION)
       addAction("connect")
     }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -323,6 +332,7 @@ class FfsBleModule : Module() {
   private companion object {
     const val SIMULATE_ACTION = "com.futurefounders.ffs.SIMULATE_GESTURE"
     const val FLASH_ACTION = "com.futurefounders.ffs.FLASH"
+    const val LIST_ACTION = "com.futurefounders.ffs.SHOW_LIST"
   }
 
   /**
