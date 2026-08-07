@@ -1179,6 +1179,14 @@ class G2Central(
      */
     private fun armRecoverWatchdogLocked() {
         cancelRecoverWatchdogLocked()
+        // OBSERVED ON-GLASS 2026-08-07 during the first Android flash: the LEFT lens reboots
+        // the instant its transfer commits, which drops the pair, which re-arms this watchdog,
+        // which then starts SCANNING and reconnecting *while the RIGHT lens is still receiving
+        // firmware blocks*. It happened to survive that run, but a scan plus a fresh GATT
+        // connection competing with an OTA transfer is not something to leave to luck: a
+        // corrupted block mid-main-app is a half-written lens. The flasher owns the link
+        // exclusively for its duration, exactly as the heartbeat already stands down.
+        if (flasher.active) return
         if (!wantsPair && wantsSingleSide == null) return
         if (intentReadyLocked()) return
         // Wrapped, then STORED -- removeCallbacks matches by identity, so the object we post
@@ -1198,6 +1206,8 @@ class G2Central(
      * (3) ensure a scan is running for a genuinely-absent side.
      */
     private fun runRecoveryLocked() {
+        // Second guard: a watchdog armed before the flash started must not fire during it.
+        if (flasher.active) return
         if (!wantsPair && wantsSingleSide == null) return
         if (intentReadyLocked()) return
         log("Recovery watchdog -- connect intent not ready within ${RECOVER_TIMEOUT_MS}ms; recovering")
