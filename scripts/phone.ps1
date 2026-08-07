@@ -70,16 +70,54 @@ if (-not $Url) { $Url = $srv.url }
 # default) the ADB interface is not exposed at all, and `adb devices` comes back EMPTY even
 # though the phone displays "USB debugging connected" -- which is a genuinely misleading pair of
 # signals and cost a long detour on 2026-08-08.
+
+# TLS: the server can be switched to HTTPS in the app (Settings -> Security -> Enable HTTPS),
+# and it then presents a SELF-SIGNED certificate. Windows PowerShell 5.1 has no
+# -SkipCertificateCheck, so validation is disabled process-wide here.
+#
+# That is acceptable ONLY because of where this connects: 127.0.0.1 through an adb USB forward,
+# i.e. a cable, not a network. There is no meaningful man-in-the-middle to protect against on a
+# loopback socket, and the bearer token still authenticates every call. Do NOT reuse this
+# pattern against a remote host.
+if (-not ([System.Management.Automation.PSTypeName]'FfsCertBypass').Type) {
+  Add-Type -TypeDefinition @'
+using System.Net;
+using System.Security.Cryptography.X509Certificates;
+public static class FfsCertBypass {
+  public static void Enable() {
+    ServicePointManager.ServerCertificateValidationCallback = delegate { return true; };
+    ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls;
+  }
+}
+'@
+}
+[FfsCertBypass]::Enable()
+
 if (-not $PSBoundParameters.ContainsKey('Url')) {
   try {
     $u = [Uri]$Url
+    # Try BOTH schemes: the app's HTTPS toggle changes the scheme out from under the configured
+    # URL, and a stale scheme fails with a connection error that looks like "the phone is gone"
+    # rather than "the protocol changed" -- exactly the kind of misread that cost time today.
+    $candidates = @()
     foreach ($p in @(18080, $u.Port)) {
-      $local = "$($u.Scheme)://127.0.0.1:$p$($u.AbsolutePath)"
-      # Any HTTP status means the server answered (401 = alive, wants the token) => tunnel live.
-      $probe = try {
-        (Invoke-WebRequest -Uri $local -Method POST -TimeoutSec 2 -SkipHttpErrorCheck -ErrorAction Stop).StatusCode
-      } catch { 0 }
-      if ($probe -ne 0) { $Url = $local; break }
+      foreach ($scheme in @('https', 'http')) {
+        $candidates += "${scheme}://127.0.0.1:${p}$($u.AbsolutePath)"
+      }
+    }
+    foreach ($c in $candidates) {
+      # "Reachable" means the server ANSWERED, not that it said 200 -- an unauthenticated probe
+      # correctly gets 401.
+      #
+      # ⚠️ Windows PowerShell 5.1 has NO -SkipHttpErrorCheck (that is PS 6+): any non-2xx THROWS.
+      # Using it here silently made every probe fail, so no candidate was ever selected and the
+      # script fell back to the stale configured URL. The distinction that matters is whether the
+      # exception carries an HTTP Response (server replied) or not (nothing listening / wrong
+      # scheme).
+      # curl, for the same TLS reason as Invoke-Rpc. A returned status code -- including 401,
+      # which is the correct answer to an unauthenticated probe -- means the server ANSWERED.
+      $code = & curl.exe -sk -o NUL -w '%{http_code}' --max-time 3 -X POST $c 2>$null
+      if ($LASTEXITCODE -eq 0 -and $code -and $code -ne '000') { $Url = $c; break }
     }
   } catch { }
 }
@@ -101,16 +139,43 @@ function Invoke-Rpc {
   if (-not $IsNotification) { $payload.id = [guid]::NewGuid().ToString() }
   $body = $payload | ConvertTo-Json -Depth 20 -Compress
 
-  $resp = Invoke-WebRequest -Uri $Url -Method POST -Headers $headers -Body $body `
-    -UseBasicParsing -TimeoutSec 60
-  # The session id only appears on the initialize response; every later call must echo it back.
-  if ($resp.Headers['mcp-session-id']) {
-    $script:headers['Mcp-Session-Id'] = [string]$resp.Headers['mcp-session-id']
+  # TRANSPORT IS curl.exe, NOT Invoke-WebRequest.
+  #
+  # Once the app's HTTPS toggle is on it serves TLS that Windows PowerShell 5.1 cannot complete:
+  # Invoke-WebRequest fails with "The underlying connection was closed" even with certificate
+  # validation disabled, because PS 5.1 runs on .NET Framework, whose SChannel stack does not do
+  # TLS 1.3. curl.exe (shipped with Windows 10+) negotiates it fine against the same endpoint, so
+  # the fix is to stop using the .NET stack rather than to keep tuning it.
+  #
+  # -k is safe HERE and only here: this talks to 127.0.0.1 through an adb USB forward -- a cable,
+  # not a network -- and the bearer token still authenticates every call.
+  $tmpBody = [System.IO.Path]::GetTempFileName()
+  $tmpHdr = [System.IO.Path]::GetTempFileName()
+  try {
+    [System.IO.File]::WriteAllText($tmpBody, $body, [System.Text.UTF8Encoding]::new($false))
+    $args = @(
+      '-sk', '--max-time', '60',
+      '-X', 'POST', $Url,
+      '-D', $tmpHdr,
+      '--data-binary', "@$tmpBody"
+    )
+    foreach ($k in $headers.Keys) { $args += @('-H', "${k}: $($headers[$k])") }
+    $text = & curl.exe @args 2>$null
+    if ($LASTEXITCODE -ne 0) { throw "curl failed (exit $LASTEXITCODE) for $Url" }
+
+    # The session id appears only on the initialize response; every later call must echo it back.
+    $hdrText = Get-Content $tmpHdr -Raw -ErrorAction SilentlyContinue
+    if ($hdrText -match '(?im)^mcp-session-id:\s*(.+?)\s*$') {
+      $script:headers['Mcp-Session-Id'] = $Matches[1]
+    }
+  } finally {
+    Remove-Item $tmpBody, $tmpHdr -ErrorAction SilentlyContinue
   }
-  if (-not $resp.Content) { return $null }
+
+  if (-not $text) { return $null }
+  if ($text -is [array]) { $text = $text -join "`n" }
   # streamable-HTTP may answer as SSE ("event: message\ndata: {...}") even when it usually
   # returns plain JSON. Unwrap that case rather than failing to parse.
-  $text = $resp.Content
   if ($text -match '(?m)^data:\s*(.+)$') { $text = $Matches[1] }
   return $text | ConvertFrom-Json
 }
