@@ -92,6 +92,16 @@ function upstreamConfig() {
   return { url: srv.url, token };
 }
 
+/**
+ * USB-ONLY BY DEFAULT.
+ *
+ * Every candidate is 127.0.0.1, i.e. the adb forward — a cable. The phone's LAN address is NOT
+ * tried, deliberately: WiFi is the path that dies silently when the phone dozes (power-save keeps
+ * ping answering while the MCP server and adb are both gone), and a quiet failover to it hides
+ * the fact that the cable dropped. Failing loudly on USB is more useful than succeeding vaguely.
+ *
+ * Set FFS_ALLOW_LAN=1 to re-enable the LAN fallback.
+ */
 function candidates(configuredUrl) {
   const u = new URL(configuredUrl);
   const p = u.pathname || "/mcp";
@@ -100,7 +110,7 @@ function candidates(configuredUrl) {
   for (const port of [18080, u.port || 8080]) {
     for (const scheme of ["https", "http"]) out.push(`${scheme}://127.0.0.1:${port}${p}`);
   }
-  out.push(u.toString());
+  if (process.env.FFS_ALLOW_LAN === "1" && u.hostname !== "127.0.0.1") out.push(u.toString());
   return out;
 }
 
