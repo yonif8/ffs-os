@@ -344,6 +344,14 @@ class G2Central(
     private var sessionAuthed = false
     private var heartbeatRunning = false
     /**
+     * A handshake is running. `sessionAuthed` only flips at the END of the ~1.4s chain, so it
+     * cannot serve as the guard -- callers arriving inside that window all see false. Observed
+     * on-glass 2026-08-07: two handshakes 7ms apart, every auth command sent twice.
+     */
+    private var authInProgress = false
+    /** Callers that arrived mid-handshake, run in order once it completes. */
+    private val authWaiters = ArrayList<() -> Unit>()
+    /**
      * A startup page has been created this session -- subsequent pages must use rebuildPage
      * (createStartupPage only takes once per session). Reset on drop.
      */
@@ -1838,6 +1846,19 @@ class G2Central(
      * on the queue after the final step.
      */
     private fun runAuthLocked(done: () -> Unit) {
+        // RE-ENTRY GUARD. `sessionAuthed` only flips at the END of a ~1.4s chain, so two callers
+        // arriving inside that window both saw false and both started a full handshake -- every
+        // auth command went out twice, during the most timing-sensitive phase of the session,
+        // and the two completions raced `pageCreated` (observed on-glass 2026-08-07: two
+        // "starting handshake" lines 7ms apart, then "created text page" immediately followed by
+        // "rebuilt text page"). Queue the later callers onto the handshake already running.
+        if (authInProgress) {
+            authWaiters.add(done)
+            log("runAuth: already in progress -- queued (${authWaiters.size} waiting)")
+            return
+        }
+        authInProgress = true
+        authWaiters.add(done)
         log("runAuth: starting handshake")
         sendDevSettingsLocked(G2DevSettings.authCmd(counters.nextMagic()), G2Target.LEFT)
         schedule(200) {
@@ -1873,8 +1894,14 @@ class G2Central(
                                 log("runAuth: disabled stock head-up dashboard -> both")
                                 schedule(200) {
                                     sessionAuthed = true
-                                    log("runAuth: handshake complete (session authed)")
-                                    done()
+                                    authInProgress = false
+                                    // Copy before running: a waiter may itself call back into
+                                    // the session and mutate this list mid-iteration.
+                                    val waiters = ArrayList(authWaiters)
+                                    authWaiters.clear()
+                                    log("runAuth: handshake complete (session authed)" +
+                                        ", ${waiters.size} waiter(s)")
+                                    for (w in waiters) w()
                                 }
                             }
                         }
@@ -1925,6 +1952,10 @@ class G2Central(
         if (sessionAuthed || heartbeatRunning) log("session reset (a lens dropped)")
         sessionAuthed = false
         heartbeatRunning = false
+        // A drop mid-handshake must not leave the guard latched, or every later showText/
+        // pushPayload would queue a waiter onto a chain that is never going to complete.
+        authInProgress = false
+        authWaiters.clear()
         pageCreated = false
         stopAnimationLocked()
         // Fail any in-flight image fragment so its transfer chain unwinds.
