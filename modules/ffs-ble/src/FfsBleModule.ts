@@ -276,6 +276,25 @@ export interface OnFlashProgressEvent {
   ok: boolean;
 }
 
+/**
+ * THE RETURN PATH: a natively-owned on-glass screen reporting what the user chose.
+ * Fires without the phone driving the interaction — the firmware's own list engine
+ * handles the scroll and only reports the outcome.
+ */
+export interface OnGlassesEvent {
+  /** Which shape of report this is (the container/event family). */
+  kind: string;
+  containerId: number | null;
+  containerName: string | null;
+  /** Index of the selected row within its container. */
+  itemIndex: number | null;
+  itemName: string | null;
+  /** 0 click, 1 scroll-top, 2 scroll-bottom, 3 double-click, 4/5 fg enter/exit, 6 abnormal-exit, 7 system-exit. */
+  eventType: number | null;
+  /** 1 glasses-R, 2 ring, 3 glasses-L. */
+  eventSource: number | null;
+}
+
 /** Map of event name → payload type. */
 export interface FfsBleEvents {
   onLog: OnLogEvent;
@@ -299,6 +318,7 @@ export interface FfsBleEvents {
   onTxResume: OnTxResumeEvent;
   onSubscribe: OnSubscribeEvent;
   onImgAck: OnImgAckEvent;
+  onGlassesEvent: OnGlassesEvent;
   onRingConnected: OnRingConnectedEvent;
   onRingDisconnected: OnRingDisconnectedEvent;
   onRingRaw: OnRingRawEvent;
@@ -367,6 +387,18 @@ interface FfsBleNativeModule {
    * OTA loader), framed + chunked through the standard 0xAA transport, to both lenses.
    */
   pushToService(serviceId: number, base64: string): void;
+  /**
+   * HUD brightness (sid 0x09). `level` is 0–100 and nonlinear. `autoAdjust` hands control
+   * back to the ambient-light sensor — pass false to HOLD a level, which is what every
+   * visual proof needs (see docs/VERIFICATION-RIG.md; the rig default is 15).
+   */
+  setBrightness(level: number, autoAdjust: boolean): void;
+  /**
+   * Read the sid-0x09 settings snapshot back off the glasses. Pass true to ask for
+   * brightness only. The reply arrives as a log/settings event, not a return value —
+   * this is how a setter is proven WITHOUT pointing a camera at the HUD.
+   */
+  querySettings(brightnessOnly: boolean): void;
   /**
    * FUT-216 (LIVE OTA delivery): push a base64 native-code payload to the resident CFW loader
    * over the evenHub image channel (service 0xE0), "FXP1"-magic framed. Replaces pushToService
