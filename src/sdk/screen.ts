@@ -191,6 +191,18 @@ export class ListScreen<V = string> {
     }
   }
 
+  /**
+   * Forget the last-declared fingerprint so the next declare() actually writes.
+   *
+   * Needed by restore: after a pop or a reconnect the GLASSES no longer hold this page, but the
+   * screen object still believes it does — so the identical-content no-op would suppress exactly
+   * the write that puts it back. The no-op is an optimisation about the glasses' state, and when
+   * that state is externally invalidated it has to be told.
+   */
+  forceRedeclare(): void {
+    this._lastWire = null;
+  }
+
   close(): void {
     this._state = "closed";
     this._off?.();
