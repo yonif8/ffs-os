@@ -2296,6 +2296,15 @@ class G2Central(
      * Doubles as an INSTRUMENT control: a dimmer HUD is markedly easier for the phone camera to
      * focus on, so lowering it improves every visual proof this project makes. Turn [autoAdjust]
      * OFF when measuring, or the ALS moves the level under you mid-observation.
+     *
+     * MEASURED THROUGH THE RIG on a 4-row list -- **use level 15**:
+     *   100 = the selected row blows out to an unreadable white blob
+     *    20 = readable
+     *    15 = ALL rows crisp  <-- the working default
+     *    10 = selected row fine, lower rows still dim
+     *     5 = selected row crisp, but the UNSELECTED rows go nearly invisible
+     * Judge the WHOLE screen, not the highlighted row: 5 was picked first on the strength of the
+     * selected row alone and was wrong.
      */
     fun setBrightness(level: Int, autoAdjust: Boolean = false) = post {
         if (!pairReadyLocked()) {
