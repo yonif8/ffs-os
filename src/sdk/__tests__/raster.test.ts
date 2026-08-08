@@ -8,6 +8,7 @@
 import { inflateSync } from "node:zlib";
 import { adler32, zlibStored } from "../deflate";
 import { Raster } from "../raster";
+import { parseImageAck } from "../events";
 
 describe("zlibStored", () => {
   it("produces a stream a real inflater accepts, byte for byte", () => {
@@ -70,5 +71,25 @@ describe("Raster", () => {
     const back = new Uint8Array(inflateSync(Buffer.from(msg.subarray(1))));
     expect(back.length).toBe(32 * 16);
     expect(back.every((v) => v === 128)).toBe(true);
+  });
+});
+
+describe("parseImageAck", () => {
+  /** Build ImgResCmd: envelope f6 { f3 session, f6 fragment, f8 errorCode }. */
+  function ack(session: number, fragment: number, err: number) {
+    const inner = [0x18, session, 0x30, fragment, 0x40, err]; // f3, f6, f8 varints
+    return Uint8Array.from([0x08, 0x02, 0x32, inner.length, ...inner]);
+  }
+
+  it("reads session and fragment, and treats errorCode 4 as SUCCESS", () => {
+    expect(parseImageAck(ack(3, 2, 4))).toEqual({ session: 3, fragment: 2, ok: true });
+  });
+
+  it("any other errorCode is a failure — 0 is NOT success here", () => {
+    expect(parseImageAck(ack(1, 0, 0))?.ok).toBe(false);
+  });
+
+  it("returns null for a frame that is not an image ack", () => {
+    expect(parseImageAck(Uint8Array.from([0x08, 0x02]))).toBeNull();
   });
 });

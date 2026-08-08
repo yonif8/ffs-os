@@ -9,7 +9,7 @@ import FfsBle from "../../modules/ffs-ble";
 import { FfsOs } from "../sdk/os";
 import { Session } from "../sdk/session";
 import { nativeHost, nativeTransport, takeoverPage } from "../sdk/native";
-import { describeEvent, normalizeEvent } from "../sdk/events";
+import { describeEvent, normalizeEvent, parseImageAck } from "../sdk/events";
 import { hex } from "../sdk/proto";
 import {
   encodeImuControl,
@@ -24,6 +24,9 @@ import { zlibStored } from "../sdk/deflate";
 import { rasterToBmp } from "../sdk/bmp";
 
 type Log = (message: string) => void;
+
+/** Image sessions must differ between pushes; a reused id can read as a repeat of a finished one. */
+let rasterSession = 0;
 
 export class OsRuntime {
   private session: Session | null = null;
@@ -304,15 +307,39 @@ async function showRaster(log: Log, how: "mode2" | "bmp" = "mode2"): Promise<voi
   const FRAG = 4096;
   const total = payload.length;
   const n = Math.ceil(total / FRAG);
-  for (let i = 0; i < n; i++) {
-    const chunk = payload.subarray(i * FRAG, Math.min((i + 1) * FRAG, total));
-    await tx.sendEvenHub(encodeImageRawData({
-      containerId: CID, containerName: NAME,
-      sessionId: 1, totalSize: total, fragmentIndex: i,
-      data: chunk, magic: 241 + i,
-    }));
-    // Paced: back-to-back image writes are what the driver's own notes warn about.
-    await new Promise((res) => setTimeout(res, 120));
+
+  // ACK-GATE each fragment, exactly as the native driver does: arm BEFORE sending so a fast ACK
+  // cannot race us, then send the next only once this one is acknowledged. Firing them blind on
+  // a fixed delay gets every fragment ACKed and still renders nothing.
+  //
+  // A FRESH session id per push, too. Reusing one id across pushes lets the firmware treat a
+  // later push as a repeat of a session it has already completed.
+  const session = (rasterSession = (rasterSession + 1) & 0xff);
+  const acks = new Map<number, (ok: boolean) => void>();
+  const off = tx.onInbound((p) => {
+    const a = parseImageAck(p);
+    if (a && a.session === session) acks.get(a.fragment)?.(a.ok);
+  });
+
+  try {
+    for (let i = 0; i < n; i++) {
+      const chunk = payload.subarray(i * FRAG, Math.min((i + 1) * FRAG, total));
+      const acked = new Promise<boolean>((resolve) => {
+        acks.set(i, resolve);
+        // Never hang the OS on a lost ACK; press on and let the frame fail visibly instead.
+        setTimeout(() => resolve(false), 2500);
+      });
+      await tx.sendEvenHub(encodeImageRawData({
+        containerId: CID, containerName: NAME,
+        sessionId: session, totalSize: total, fragmentIndex: i,
+        data: chunk, magic: (241 + i) & 0xff,
+      }));
+      const ok = await acked;
+      acks.delete(i);
+      if (!ok) { log(`[raster] fragment ${i} not acked — aborting`); break; }
+    }
+  } finally {
+    off();
   }
-  log(`[raster] pushed ${total}B in ${n} fragments (${W}x${H}, ${how})`);
+  log(`[raster] pushed ${total}B in ${n} ack-gated fragments (${W}x${H}, ${how}, session ${session})`);
 }

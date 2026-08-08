@@ -161,3 +161,34 @@ export function describeEvent(e: GlassesEvent): string {
       return `private container='${e.containerName ?? e.containerId}' id=${e.eventId} data=${e.eventData}`;
   }
 }
+
+/** An image-fragment acknowledgement from the glasses. */
+export interface ImageAck {
+  session: number;
+  fragment: number;
+  ok: boolean;
+}
+
+/**
+ * Decode an inbound image-fragment ACK, or null if the payload is not one.
+ *
+ * ImgResCmd is response field 6: inner f3 = session, f6 = fragmentIndex, f8 = errorCode, where
+ * SUCCESS IS 4 — not 0. That is the kind of detail worth pinning in a test, because treating 0
+ * as success would make every fragment look failed and every success look like a timeout.
+ *
+ * This exists so the TypeScript image path can ACK-GATE its fragments the way the native driver
+ * does: arm on fragment N, send it, wait for its ACK, then send N+1. Firing fragments blind with
+ * a fixed delay ACKs fine and renders nothing.
+ */
+export function parseImageAck(payload: Uint8Array): ImageAck | null {
+  const f = parseFields(payload);
+  if (!f) return null;
+  const body = sub(f, 6);
+  if (!body) return null;
+  const r = parseFields(body);
+  if (!r) return null;
+  const session = u32(r, 3);
+  const fragment = u32(r, 6);
+  if (session === undefined && fragment === undefined) return null;
+  return { session: session ?? 0, fragment: fragment ?? 0, ok: (u32(r, 8) ?? 0) === 4 };
+}
