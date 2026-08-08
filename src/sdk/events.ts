@@ -192,3 +192,83 @@ export function parseImageAck(payload: Uint8Array): ImageAck | null {
   if (session === undefined && fragment === undefined) return null;
   return { session: session ?? 0, fragment: fragment ?? 0, ok: (u32(r, 8) ?? 0) === 4 };
 }
+
+/**
+ * EvenHub_ErrorCode_List — the firmware's verdict on what we just sent.
+ *
+ * ⚠️ It is ONE enum shared by every response, so the value's meaning depends on which response
+ * carried it. 4 means "image data accepted", 0 means "page created" — a decoder that treats a
+ * single number as universally good or bad will be wrong half the time.
+ */
+export const EvenHubError = {
+  CREATE_PAGE_SUCCESS: 0,
+  CREATE_INVALID_CONTAINER: 1,
+  CREATE_OVERSIZE_CONTAINER: 2,
+  CREATE_OUT_OF_MEMORY: 3,
+  IMAGE_DATA_SUCCESS: 4,
+  IMAGE_DATA_FAILED: 5,
+  REBUILD_SUCCESS: 6,
+  REBUILD_FAILED: 7,
+  TEXT_UPDATE_SUCCESS: 8,
+  TEXT_UPDATE_FAILED: 9,
+  SHUTDOWN_SUCCESS: 10,
+  SHUTDOWN_FAILED: 11,
+  HEARTBEAT_SUCCESS: 12,
+  AUDIO_SUCCESS: 13,
+} as const;
+
+const ERROR_NAMES: Record<number, string> = {
+  0: "CREATE_PAGE_SUCCESS",
+  1: "CREATE_INVALID_CONTAINER",
+  2: "CREATE_OVERSIZE_CONTAINER",
+  3: "CREATE_OUT_OF_MEMORY",
+  4: "IMAGE_DATA_SUCCESS",
+  5: "IMAGE_DATA_FAILED",
+  6: "REBUILD_SUCCESS",
+  7: "REBUILD_FAILED",
+  8: "TEXT_UPDATE_SUCCESS",
+  9: "TEXT_UPDATE_FAILED",
+  10: "SHUTDOWN_SUCCESS",
+  11: "SHUTDOWN_FAILED",
+  12: "HEARTBEAT_SUCCESS",
+  13: "AUDIO_SUCCESS",
+};
+
+export interface PageResponse {
+  /** Which request this answers. */
+  kind: "create" | "rebuild" | "text" | "shutdown";
+  code: number;
+  name: string;
+  ok: boolean;
+}
+
+/**
+ * Decode the firmware's verdict on a page request, or null if this frame is not one.
+ *
+ * THIS IS THE DIAGNOSTIC THAT WAS MISSING ALL NIGHT. Every page we sent that produced a black
+ * HUD — the 5-list page, the image page — was almost certainly answered with a reason, and we
+ * were not listening. `CREATE_INVALID_CONTAINER` / `OVERSIZE` / `OUT_OF_MEMORY` distinguish
+ * "the page was malformed" from "the page was fine but nothing drew", which are otherwise
+ * indistinguishable and cost several hardware cycles to tell apart by elimination.
+ *
+ * Envelope response fields: f4 create, f8 rebuild, f10 text update, f12 shutdown. Each carries
+ * ResCmdMsg in its own field 1.
+ */
+export function parsePageResponse(payload: Uint8Array): PageResponse | null {
+  const f = parseFields(payload);
+  if (!f) return null;
+  const slots: Array<[number, PageResponse["kind"], number]> = [
+    [4, "create", EvenHubError.CREATE_PAGE_SUCCESS],
+    [8, "rebuild", EvenHubError.REBUILD_SUCCESS],
+    [10, "text", EvenHubError.TEXT_UPDATE_SUCCESS],
+    [12, "shutdown", EvenHubError.SHUTDOWN_SUCCESS],
+  ];
+  for (const [field, kind, okCode] of slots) {
+    const body = sub(f, field);
+    if (!body) continue;
+    // ResCmdMsg is field 1, and proto3 omits a zero — which for a CREATE is SUCCESS.
+    const code = u32(parseFields(body), 1) ?? 0;
+    return { kind, code, name: ERROR_NAMES[code] ?? `code(${code})`, ok: code === okCode };
+  }
+  return null;
+}

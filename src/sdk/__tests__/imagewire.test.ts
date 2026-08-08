@@ -20,6 +20,7 @@ import {
   encodeImageRawData,
 } from "../wire";
 import { parseFields, str, sub, u32 } from "../proto";
+import { parsePageResponse } from "../events";
 
 describe("image container", () => {
   it("uses the native field numbering", () => {
@@ -111,5 +112,47 @@ describe("image raw data", () => {
     const u = parseFields(sub(parseFields(big)!, 5)!)!;
     expect(u32(u, 7)).toBe(4096);
     expect(u32(u, 4)).toBe(9999);
+  });
+});
+
+/**
+ * The firmware's verdict on a page request.
+ *
+ * This decoder is the answer to a whole class of wasted hardware cycles: a page that renders
+ * nothing and a page the firmware REJECTED look identical from the phone, and the difference is
+ * sitting in a response we were not reading.
+ */
+describe("parsePageResponse", () => {
+  /** envelope { f<slot>: { f1 = code } } */
+  const res = (slot: number, code: number) => {
+    const inner = code === 0 ? [] : [0x08, code]; // proto3 omits a zero
+    const body = [((slot << 3) | 2) & 0xff, inner.length, ...inner];
+    return Uint8Array.from([0x08, 0x01, ...body]);
+  };
+
+  it("reads a successful create — where SUCCESS is 0 and therefore absent", () => {
+    expect(parsePageResponse(res(4, 0))).toMatchObject({
+      kind: "create", code: 0, name: "CREATE_PAGE_SUCCESS", ok: true,
+    });
+  });
+
+  it("names the three create failures, which is the whole point", () => {
+    expect(parsePageResponse(res(4, 1))).toMatchObject({ name: "CREATE_INVALID_CONTAINER", ok: false });
+    expect(parsePageResponse(res(4, 2))).toMatchObject({ name: "CREATE_OVERSIZE_CONTAINER", ok: false });
+    expect(parsePageResponse(res(4, 3))).toMatchObject({ name: "CREATE_OUT_OF_MEMORY", ok: false });
+  });
+
+  /** The enum is SHARED, so success means a different number per response kind. */
+  it("rebuild success is 6, not 0", () => {
+    expect(parsePageResponse(res(8, 6))).toMatchObject({ kind: "rebuild", ok: true });
+    expect(parsePageResponse(res(8, 7))).toMatchObject({ name: "REBUILD_FAILED", ok: false });
+  });
+
+  it("text update success is 8", () => {
+    expect(parsePageResponse(res(10, 8))).toMatchObject({ kind: "text", ok: true });
+  });
+
+  it("returns null for a frame that is not a page response", () => {
+    expect(parsePageResponse(Uint8Array.from([0x08, 0x02]))).toBeNull();
   });
 });

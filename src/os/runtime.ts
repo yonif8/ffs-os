@@ -9,7 +9,7 @@ import FfsBle from "../../modules/ffs-ble";
 import { FfsOs } from "../sdk/os";
 import { Session } from "../sdk/session";
 import { nativeHost, nativeTransport, takeoverPage } from "../sdk/native";
-import { describeEvent, normalizeEvent, parseImageAck } from "../sdk/events";
+import { describeEvent, normalizeEvent, parseImageAck, parsePageResponse } from "../sdk/events";
 import { hex } from "../sdk/proto";
 import {
   encodeImuControl,
@@ -129,6 +129,17 @@ export class OsRuntime {
  */
 export function attachOsCommandListener(log: Log = () => {}): () => void {
   const runtime = new OsRuntime(log);
+
+  // THE DIAGNOSTIC THAT WAS MISSING ALL NIGHT. The firmware answers every page request with a
+  // verdict — CREATE_INVALID_CONTAINER, OVERSIZE, OUT_OF_MEMORY, REBUILD_FAILED — and we were
+  // not listening, so a rejected page and a page that simply drew nothing looked identical from
+  // here. Logging every one turns "the HUD is black" into a reason, for free and always on.
+  const verdicts = nativeTransport().onInbound((p) => {
+    const r = parsePageResponse(p);
+    if (r && !r.ok) log(`[page] ${r.kind} REJECTED by firmware: ${r.name}`);
+    else if (r) log(`[page] ${r.kind} ok`);
+  });
+
   const sub = FfsBle.addListener("onOsCommand", ({ cmd }) => {
     if (cmd === "stop") runtime.stop();
     else if (cmd === "imu") void probeImu(log);
@@ -146,6 +157,7 @@ export function attachOsCommandListener(log: Log = () => {}): () => void {
   });
   return () => {
     sub.remove();
+    verdicts();
     runtime.stop();
   };
 }
