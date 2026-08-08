@@ -60,7 +60,15 @@ export class OsRuntime {
     );
     this.subs.push(
       FfsBle.addListener("onPairReady", () => {
-        this.log("[os] link back — restoring");
+        // RE-SEED from the driver rather than trusting our own bookkeeping. `onDisconnected`
+        // fires per LENS, and only the right lens holds the page, so inferring "the firmware
+        // lost its page" from any drop is a guess — and guessing wrong here is silent either
+        // way: a stale CREATE is ignored and leaves the HUD frozen, a stale REBUILD targets a
+        // page that no longer exists and leaves it blank. The driver knows; ask it.
+        const held = takeoverPage();
+        if (held) session.pageSlot.markCreated();
+        else session.pageSlot.reset();
+        this.log(`[os] link back — firmware page ${held ? "held" : "gone"}, restoring`);
         void session.onReconnected().catch((e) => this.log(`[os] restore failed: ${e}`));
       })
     );
