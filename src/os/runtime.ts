@@ -18,6 +18,10 @@ import {
   encodeTileProbePage,
 } from "../sdk/wire";
 import { encodeLauncherPage, spaceOut } from "../sdk/launcher";
+import { encodeImagePage, encodeImageRawData } from "../sdk/wire";
+import { Raster } from "../sdk/raster";
+import { zlibStored } from "../sdk/deflate";
+import { rasterToBmp } from "../sdk/bmp";
 
 type Log = (message: string) => void;
 
@@ -122,6 +126,8 @@ export function attachOsCommandListener(log: Log = () => {}): () => void {
     else if (cmd === "tiles") void probeTiles(log);
     else if (cmd === "p3") void probe3(log);
     else if (cmd === "launcher") void showLauncher(log);
+    else if (cmd === "raster") void showRaster(log, "mode2");
+    else if (cmd === "rasterbmp") void showRaster(log, "bmp");
     else void runtime.boot();
   });
   return () => {
@@ -243,4 +249,70 @@ async function showLauncher(log: Log): Promise<void> {
   });
   await tx.sendEvenHub(bytes);
   log(`[launcher] sent ${bytes.length}B (${held ? "rebuild" : "create"}) — rail + dashboard`);
+}
+
+/**
+ * THE RASTER PROOF — arbitrary pixels drawn natively, with no LVGL, no resident loader and no
+ * flash.
+ *
+ * The CFW's image channel has a mode the phone had never used: mode 2 inflates a zlib stream
+ * straight into the display buffer at 8bpp and presents it. That escapes every EvenHub limit at
+ * once — no more single rounded rect, one font and no shapes. The firmware owns and redraws the
+ * result; the phone composes it once.
+ *
+ * The frame deliberately shows things EvenHub CANNOT express: several filled rounded tiles at
+ * the same time, an antialiased arc gauge, circles, and a grey ramp proving all 256 levels are
+ * live rather than the 16 a 4-bit BMP would give.
+ */
+async function showRaster(log: Log, how: "mode2" | "bmp" = "mode2"): Promise<void> {
+  const tx = nativeTransport();
+  const W = 200, H = 100;
+  const CID = 2, NAME = "ffs-rast";
+
+  // 1. Declare the surface. Its width/height are what the firmware expects the frame to be.
+  const held = takeoverPage();
+  await tx.sendEvenHub(encodeImagePage({
+    x: 188, y: 94, width: W, height: H,
+    containerId: CID, containerName: NAME,
+    rebuild: held, magic: 240,
+  }));
+  log(`[raster] container ${W}x${H} declared (${held ? "rebuild" : "create"}) — 700ms settle`);
+  // The firmware needs ~700ms after a container create/rebuild before it accepts pixels.
+  await new Promise((r) => setTimeout(r, 800));
+
+  // 2. Draw. Everything below is impossible through EvenHub containers.
+  const r = new Raster(W, H).clear(0);
+  // three filled tiles — EvenHub can show exactly one rounded rect, and only as a selection
+  for (let i = 0; i < 3; i++) r.fillRoundRect(6 + i * 34, 8, 28, 28, 8, 210);
+  // an outlined tile beside them, to show fill and stroke are both available
+  r.roundRect(108, 8, 28, 28, 8, 255, 2);
+  // an arc gauge — the shape the stock dashboard has and EvenHub has no message for
+  r.arc(168, 24, 20, Math.PI * 0.75, Math.PI * 2.25, 255, 3);
+  r.disc(168, 24, 4, 255);
+  // a hairline that is actually continuous, unlike a row of underscores
+  r.line(6, 46, 194, 46, 160);
+  // a 256-level ramp: proof this is 8bpp, not the 16 levels a 4-bit BMP allows
+  for (let x = 0; x < 188; x++) r.fillRect(6 + x, 54, 1, 10, Math.round((x / 187) * 255));
+  // circles at descending brightness
+  for (let i = 0; i < 5; i++) r.circle(20 + i * 40, 82, 10, 60 + i * 48, 2);
+
+  // 3. Push it. The BMP variant is the CONTROL: it uses the already-proven decode path and no
+  //    compression, so if it renders and mode 2 does not, the fault is isolated to zlib rather
+  //    than to the container, the fragmenting or the page — which all look identical from here
+  //    (a black HUD).
+  const payload = how === "bmp" ? rasterToBmp(r) : r.toMode2(zlibStored);
+  const FRAG = 4096;
+  const total = payload.length;
+  const n = Math.ceil(total / FRAG);
+  for (let i = 0; i < n; i++) {
+    const chunk = payload.subarray(i * FRAG, Math.min((i + 1) * FRAG, total));
+    await tx.sendEvenHub(encodeImageRawData({
+      containerId: CID, containerName: NAME,
+      sessionId: 1, totalSize: total, fragmentIndex: i,
+      data: chunk, magic: 241 + i,
+    }));
+    // Paced: back-to-back image writes are what the driver's own notes warn about.
+    await new Promise((res) => setTimeout(res, 120));
+  }
+  log(`[raster] pushed ${total}B in ${n} fragments (${W}x${H}, ${how})`);
 }

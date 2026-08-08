@@ -328,6 +328,28 @@ export const PROVENANCE: Readonly<Record<string, ProvenanceEntry>> = {
       "⛔ 2 lists render (docs/proof/two-lists-and-decorative-tile.png); 5 lists blanked the HUD " +
       "and killed the page slot until a fresh link + CREATE",
   },
+  /**
+   * THE CFW IMAGE CHANNEL HAS A DIRECT-FRAMEBUFFER MODE, and it is the way past every EvenHub
+   * visual limit: mode 2 inflates a zlib stream STRAIGHT INTO THE DISPLAY BUFFER at 8bpp and
+   * presents it. Container-sized arbitrary pixels, 256 grey levels, no LVGL, no resident loader
+   * and no flash. Found by reading zlib_glue.c image_dispatch, which also carries modes 1/3/4/6
+   * (BMP-over-zlib, RLE shadow ops, a stereo pair) and mode 8 (atomic multi-segment updates).
+   *
+   * ⚠️ DISCOVERED, NOT PROVEN ON-GLASS. The encoders exist and are unit-tested (the zlib stream
+   * round-trips through Node's real inflater), the fragments are ACKed by the firmware — and
+   * nothing renders. A plain BMP pushed through the SAME TypeScript container/page/fragment
+   * plumbing also fails, while the NATIVE BMP path renders fine, so the fault is in our TS
+   * encoding rather than in mode 2. Adding the evt-0 capture container (which the native page
+   * builder always prepends) did NOT fix it. Prime remaining suspects: the ACK-gated fragment
+   * handshake the native path performs and we do not, and the ImageRawDataUpdate field
+   * semantics (sessionId reuse, fragmentPacketSize).
+   */
+  "cfw.directFramebuffer": {
+    status: "unproven",
+    evidence:
+      "mode 2 exists in zlib_glue.c image_dispatch; TS encoders + 96 unit tests pass and " +
+      "fragments ACK, but no frame has rendered. Native BMP path renders, ours does not.",
+  },
   "font.hebrewGlyphs": {
     status: "proven",
     evidence:

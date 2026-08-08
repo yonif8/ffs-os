@@ -9,6 +9,8 @@ import { ProtoWriter } from "./proto";
 /** EvenHub command ids (field 1 of evenhub_main_msg_ctx). */
 export const Cmd = {
   CREATE_STARTUP_PAGE: 0,
+  /** ImageRawDataUpdate — stream pixels into an image container. */
+  UPDATE_IMAGE_RAW_DATA: 3,
   /** TextContainerUpgrade — change a live container's text WITHOUT rebuilding the page. */
   UPDATE_TEXT_DATA: 5,
   /** APP_REQUEST_OPEN_IMU_PACKET — start/stop the head-motion stream. */
@@ -500,3 +502,89 @@ export function encodeProbe3Page(opts: { rebuild: boolean; magic: number }): Uin
     : encodeEnvelope(Cmd.CREATE_STARTUP_PAGE, 3, page, opts.magic);
 }
 
+
+/**
+ * ImageObject: f1..f4 geometry, f5 containerID, f6 containerName.
+ *
+ * Note the field numbering is NOT the same as list/text containers — image containers have no
+ * border/padding/capture fields at all. They also cannot capture events, which is convenient:
+ * an image page never competes with a list for the one event binding.
+ */
+export function encodeImageContainer(s: {
+  x?: number; y?: number; width: number; height: number;
+  containerId?: number; containerName?: string;
+}): Uint8Array {
+  const w = new ProtoWriter();
+  w.int32(1, s.x ?? 0);
+  w.int32(2, s.y ?? 0);
+  w.int32(3, s.width);
+  w.int32(4, s.height);
+  w.int32(5, s.containerId ?? CONTAINER_IDS.raster);
+  if (s.containerName != null) w.string(6, s.containerName);
+  return w.data;
+}
+
+/**
+ * ImageRawDataUpdate (Cmd 3, sub-field 5):
+ *   f1 containerID, f2 name, f3 sessionId, f4 totalSize,
+ *   f5 compressMode, f6 fragmentIndex, f7 fragmentPacketSize, f8 rawData
+ *
+ * The firmware reassembles fragments by index and, once totalSize bytes have arrived, hands the
+ * whole buffer to the image decoder — which is where our mode byte is read. So the MODE lives in
+ * the reassembled payload, not in this envelope; `compressMode` stays 0.
+ */
+export function encodeImageRawData(s: {
+  containerId: number;
+  containerName?: string;
+  sessionId: number;
+  totalSize: number;
+  fragmentIndex: number;
+  data: Uint8Array;
+  magic: number;
+}): Uint8Array {
+  const u = new ProtoWriter();
+  u.int32(1, s.containerId);
+  if (s.containerName != null) u.string(2, s.containerName);
+  u.int32(3, s.sessionId);
+  u.int32(4, s.totalSize);
+  u.int32(5, 0);
+  u.int32(6, s.fragmentIndex);
+  u.int32(7, s.data.length);
+  u.bytes(8, s.data);
+  return encodeEnvelope(Cmd.UPDATE_IMAGE_RAW_DATA, 5, u.data, s.magic);
+}
+
+/**
+ * The full-canvas gesture-capture container the firmware expects on any page that has no
+ * capturing LIST.
+ *
+ * Every native page carries this, and an image page built WITHOUT it did not render at all —
+ * not even through the already-proven BMP decode path. A page missing it appears to be rejected
+ * silently, which is indistinguishable from a dark HUD.
+ *
+ * ⚠️ Never add this to a page that already has a capturing list: the firmware binds events to
+ * exactly ONE container, so evt-0 would starve the list of the swipes it needs and leave it
+ * rendered but frozen.
+ */
+export function encodeEventCaptureContainer(): Uint8Array {
+  return encodeTextContainer({
+    x: 0, y: 0, width: CANVAS.width, height: CANVAS.height,
+    containerId: CONTAINER_IDS.event, containerName: "evt-0",
+    content: "", isEventCapture: true,
+  });
+}
+
+/** A page whose only content is one image container — the surface a raster frame is drawn into. */
+export function encodeImagePage(o: {
+  x?: number; y?: number; width: number; height: number;
+  containerId?: number; containerName?: string;
+  rebuild: boolean; magic: number;
+}): Uint8Array {
+  const ic = encodeImageContainer(o);
+  // evt-0 FIRST, exactly as the native page builder does — an image container cannot capture,
+  // so without it the page has no event binding at all and does not render.
+  const page = encodePageContainer({ texts: [encodeEventCaptureContainer()], images: [ic] });
+  return o.rebuild
+    ? encodeEnvelope(Cmd.REBUILD_PAGE, 7, page, o.magic)
+    : encodeEnvelope(Cmd.CREATE_STARTUP_PAGE, 3, page, o.magic);
+}
