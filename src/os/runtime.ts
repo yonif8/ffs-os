@@ -134,10 +134,24 @@ export function attachOsCommandListener(log: Log = () => {}): () => void {
   // verdict — CREATE_INVALID_CONTAINER, OVERSIZE, OUT_OF_MEMORY, REBUILD_FAILED — and we were
   // not listening, so a rejected page and a page that simply drew nothing looked identical from
   // here. Logging every one turns "the HUD is black" into a reason, for free and always on.
+  //
+  // FAILURES ALWAYS; successes only when the verdict for that kind CHANGES. The dashboard sends
+  // up to five in-place text updates per tick and each is answered, so logging every success
+  // would emit ~15 lines a minute of "text ok" and bury the rejections this exists to surface —
+  // a diagnostic that drowns its own signal is worse than not having one.
+  const lastVerdict = new Map<string, string>();
   const verdicts = nativeTransport().onInbound((p) => {
     const r = parsePageResponse(p);
-    if (r && !r.ok) log(`[page] ${r.kind} REJECTED by firmware: ${r.name}`);
-    else if (r) log(`[page] ${r.kind} ok`);
+    if (!r) return;
+    if (!r.ok) {
+      log(`[page] ${r.kind} REJECTED by firmware: ${r.name}`);
+      lastVerdict.set(r.kind, r.name);
+      return;
+    }
+    if (lastVerdict.get(r.kind) !== r.name) {
+      log(`[page] ${r.kind} ok`);
+      lastVerdict.set(r.kind, r.name);
+    }
   });
 
   const sub = FfsBle.addListener("onOsCommand", ({ cmd }) => {
