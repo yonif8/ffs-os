@@ -14,6 +14,8 @@ import { Session } from "./session";
 import type { Row, Selection } from "./types";
 import { LIMITS } from "./types";
 import { OS_DONE_PRESET } from "./sound";
+import { LAUNCHER_SLOTS, encodeLauncherPage, spaceOut } from "./launcher";
+import type { ListScreen } from "./screen";
 
 /** Everything the OS needs from the outside world. Injected so the whole OS is testable. */
 export interface OsHost {
@@ -45,6 +47,8 @@ export interface OsHost {
   playPreset(preset: number): Promise<void> | void;
   /** Wall clock, injected so screens are deterministic in tests. */
   now(): Date;
+  /** Optional diagnostics sink. The OS is otherwise silent, which makes it hard to observe. */
+  log?(message: string): void;
   /** Optional note source. The glasses cannot capture text, so this is read-only by nature. */
   readNotes?(): string[];
 }
@@ -70,6 +74,8 @@ const kv = (k: string, v: string) => `${k}  ${v}`;
 
 export class FfsOs {
   readonly state: OsState = { brightness: 15, silent: false, wearDetect: true, sound: false };
+  /** Last battery reading seen, so the panel shows a value rather than blanking on a failed read. */
+  private lastBattery: number | null = null;
 
   constructor(private readonly session: Session, private readonly host: OsHost) {}
 
@@ -80,28 +86,148 @@ export class FfsOs {
 
   // ---- home ---------------------------------------------------------------------------------
 
+  /**
+   * HOME — the RAIL launcher: an icon column plus a live dashboard.
+   *
+   * Home is a normal Session screen, deliberately. It supplies its own page encoder rather than
+   * sending bytes itself, so it keeps declare/suspend/restore and comes back automatically after
+   * a dropped link — a hand-rolled send would make the ONE screen the user always returns to the
+   * one screen that never recovers.
+   */
   private async home(): Promise<void> {
-    await this.session.menu<string>(
-      {
-        header: "FFS OS",
-        rows: rows([
-          ["Clock", "clock"],
-          ["Settings", "settings"],
-          ["Device", "device"],
-          ["Visuals", "visuals"],
-          ["Apps", "apps"],
-        ]),
+    const APPS: ReadonlyArray<readonly [string, string]> = [
+      ["CLK", "clock"],
+      ["TMR", "timer"],
+      ["NTE", "notes"],
+      ["DEV", "device"],
+      ["SET", "settings"],
+      ["APP", "apps"],
+    ];
+
+    // Read the battery BEFORE the first declare, so the page renders with a real value instead
+    // of rendering "BAT --" and immediately correcting itself with an in-place update.
+    await this.refreshBattery();
+
+    const screen = await this.session.push<string>({
+      rows: APPS.map(([mark, value]) => ({ label: mark, value })),
+      containerName: "ffs-rail",
+      slots: LAUNCHER_SLOTS,
+      layoutKey: "launcher",
+      // What the page is declared with — seeded into the update cache so the first refresh
+      // after every declare (including each return from an app) sends only real changes.
+      slotValues: () => {
+        const [w1, w2, w3] = this.widgetLines();
+        return {
+          clock: spaceOut(this.hhmm()),
+          status: spaceOut(this.statusLine()),
+          w1, w2, w3,
+        };
       },
-      async (sel: Selection<string>) => {
-        switch (sel.value) {
-          case "clock": return this.clock();
-          case "settings": return this.settings();
-          case "device": return this.device();
-          case "visuals": return this.visuals();
-          case "apps": return this.apps();
-        }
+      encodePage: (o) =>
+        encodeLauncherPage({
+          marks: o.items,
+          clock: spaceOut(this.hhmm()),
+          status: spaceOut(this.statusLine()),
+          widgets: this.widgetLines(),
+          rebuild: o.rebuild,
+          magic: o.magic,
+        }),
+    });
+
+    const stopTicker = this.startDashboard(screen);
+    try {
+      for (;;) {
+        const sel = await screen.nextSelection();
+        if (!sel) return;                       // double-tap on home = leave the OS
+        await this.openApp(sel.value ?? "");
+        // The app's page popped and Session re-declared home, which repaints the panel with
+        // fresh values — so the ticker has nothing to catch up on.
       }
-    );
+    } finally {
+      stopTicker();
+    }
+  }
+
+  /** Dispatch a rail mark to its app. */
+  private async openApp(value: string): Promise<void> {
+    switch (value) {
+      case "clock": return this.clock();
+      case "timer": return this.timer();
+      case "notes": return this.notes();
+      case "device": return this.device();
+      case "settings": return this.settings();
+      case "apps": return this.apps();
+    }
+  }
+
+  private hhmm(): string {
+    const t = this.host.now();
+    return `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
+  }
+
+  private statusLine(): string {
+    const b = this.lastBattery;
+    return b == null ? "BAT --" : `BAT ${b}%`;
+  }
+
+  private widgetLines(): readonly [string, string, string] {
+    const t = this.host.now();
+    const day = t.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+    return [
+      `TODAY   ${day}`,
+      `SOUND   ${this.state.sound ? "On" : "Off"}`,
+      `LIGHT   ${this.state.brightness}`,
+    ];
+  }
+
+  /**
+   * Keep the dashboard live WITHOUT rebuilding the page.
+   *
+   * A rebuild would reset the rail's focus to row 0 every tick, dragging the highlight out from
+   * under the user mid-scroll — so every value goes out as an in-place text update instead.
+   *
+   * The clock ticks on the MINUTE, never the second: Cmd 5 repaints the whole container, and a
+   * 1 Hz repaint of a 290px strip buys no information at a glyph size where seconds are not even
+   * legible through the rig. Identical values are coalesced to zero bytes by setSlotText.
+   */
+  private startDashboard(screen: ListScreen<string>): () => void {
+    const push = async () => {
+      const [w1, w2, w3] = this.widgetLines();
+      // Sequential, not parallel: back-to-back writes on this link are what the driver's own
+      // notes warn about, and an unchanged value costs zero bytes anyway.
+      try {
+        await screen.setSlotText("clock", spaceOut(this.hhmm()));
+        await screen.setSlotText("status", spaceOut(this.statusLine()));
+        await screen.setSlotText("w1", w1);
+        await screen.setSlotText("w2", w2);
+        await screen.setSlotText("w3", w3);
+      } catch (e) {
+        this.host.log?.(`[dash] push failed: ${e}`);
+      }
+    };
+    // 20s: fast enough that the clock is never more than a few seconds stale at a minute
+    // boundary, slow enough that the radio is essentially idle. Unchanged values cost nothing.
+    let ticks = 0;
+    const timer = setInterval(() => {
+      // AWAIT the refresh before pushing. Firing them side by side means push() always reads the
+      // value from BEFORE the refresh — the panel is permanently one tick stale, and on the very
+      // first tick the value is still null, so it renders "--" and coalesces to nothing.
+      void (async () => {
+        await this.refreshBattery();
+        await push();
+        this.host.log?.(`[dash] tick ${++ticks} batt=${this.lastBattery ?? "?"}`);
+      })();
+    }, 20000);
+    return () => clearInterval(timer);
+  }
+
+  private async refreshBattery(): Promise<void> {
+    try {
+      const s = await this.host.readSettings();
+      if (s.battery != null) this.lastBattery = s.battery;
+    } catch {
+      /* a failed read leaves the last known value on screen, which is better than blanking it */
+    }
   }
 
   // ---- clock --------------------------------------------------------------------------------

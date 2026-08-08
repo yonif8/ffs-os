@@ -40,6 +40,37 @@ export interface ListScreenOptions {
   header?: string;
   /** Bypass the provenance gate — only for the experiment that PROVES a capability. */
   allowUnproven?: boolean;
+  /**
+   * Override the page encoder (default `encodeListPage`).
+   *
+   * Lets a screen own a bespoke layout — the launcher's rail-plus-dashboard, say — while keeping
+   * declare()/next()/suspend()/forceRedeclare(), and therefore participating in Session restore.
+   * A hand-rolled send would silently miss that, and the home screen would be the one screen
+   * that comes back blank after a dropped link.
+   */
+  encodePage?: (o: {
+    items: readonly string[];
+    rebuild: boolean;
+    magic: number;
+    containerName: string;
+    header?: string;
+  }) => Uint8Array;
+  /** Named text containers this screen may update in place, by containerId. */
+  slots?: Readonly<Record<string, number>>;
+  /**
+   * The slot values this page was DECLARED with, seeded into the update cache after each
+   * declare so the first refresh does not re-send what the page already shows.
+   *
+   * Without it every declare is followed by one redundant Cmd 5 per slot — and home is
+   * re-declared every time an app closes, so that waste recurs for the whole session.
+   */
+  slotValues?: () => Readonly<Record<string, string>>;
+  /**
+   * Mixed into the declare fingerprint. A custom layout's content lives outside `rows`, so
+   * without this a panel whose widgets changed would look "identical" and the no-op would
+   * suppress the very redraw that was wanted.
+   */
+  layoutKey?: string;
 }
 
 /**
@@ -79,6 +110,8 @@ export class ListScreen<V = string> {
   private readonly _queue: ScreenEvent<V>[] = [];
   private readonly _waiters: Array<(e: ScreenEvent<V>) => void> = [];
   private _off: (() => void) | null = null;
+  /** Last text pushed per slot, so an unchanged value costs zero bytes. */
+  private readonly _slotCache = new Map<string, string>();
 
   constructor(
     private readonly tx: Transport,
@@ -128,6 +161,7 @@ export class ListScreen<V = string> {
     const fingerprint = JSON.stringify([
       name,
       this.opts.header ?? null,
+      this.opts.layoutKey ?? null,
       this._rows.map((r) => [r.label, r.disabled === true]),
     ]);
     if (fingerprint === this._lastWire) {
@@ -139,7 +173,8 @@ export class ListScreen<V = string> {
     // Asking the shared slot rather than this screen's own generation is what makes a pushed
     // submenu render at all — see PageSlot.
     const rebuild = this.slot.created;
-    const bytes = encodeListPage({
+    const encode = this.opts.encodePage ?? encodeListPage;
+    const bytes = encode({
       items: this._rows.map((r) => r.label),
       rebuild,
       magic: this.magic(),
@@ -152,6 +187,9 @@ export class ListScreen<V = string> {
     }
     await this.tx.sendEvenHub(bytes);
     this.slot.markCreated();
+    // Seed the cache with what this page now shows, so the next refresh sends only real changes.
+    const seeded = this.opts.slotValues?.();
+    if (seeded) for (const [k, v] of Object.entries(seeded)) this._slotCache.set(k, v);
     this._lastWire = fingerprint;
     this._generation += 1;
     this.stats.declareCount += 1;
@@ -163,6 +201,25 @@ export class ListScreen<V = string> {
       reason,
       warnings,
     };
+  }
+
+  /**
+   * Change ONE named container's text in place — no rebuild, no loss of list focus.
+   *
+   * Proven on arbitrary container ids, not just id 1, so every widget on a dashboard can tick
+   * independently. Identical text is coalesced to zero bytes: a dashboard re-renders the same
+   * minute value many times and there is no reason to spend the radio on it.
+   */
+  async setSlotText(slot: string, text: string): Promise<void> {
+    if (this._state === "closed") throw new Error(`${this.id} is closed`);
+    const id = this.opts.slots?.[slot];
+    if (id === undefined) throw new Error(`${this.id} has no slot "${slot}"`);
+    if (this._slotCache.get(slot) === text) return;
+    const bytes = encodeUpdateText({ containerId: id, content: text, magic: this.magic() });
+    await this.tx.sendEvenHub(bytes);
+    this._slotCache.set(slot, text);
+    this.stats.bytesOut += bytes.length;
+    this.stats.textUpdates += 1;
   }
 
   /**
@@ -269,6 +326,9 @@ export class ListScreen<V = string> {
    */
   forceRedeclare(): void {
     this._lastWire = null;
+    // A rebuild repaints declared content, so every slot's cached value is now stale — keeping
+    // it would make the first post-restore update look like a no-op and leave the panel frozen.
+    this._slotCache.clear();
   }
 
   /**

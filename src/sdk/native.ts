@@ -113,6 +113,7 @@ export function nativeHost(): OsHost & { dispose(): void } {
       FfsBle.pushPayloadViaImage(toBase64(encodePreset(preset)));
     },
     now: () => new Date(),
+    log: (m: string) => console.log(m),
     dispose: () => sub.remove(),
   };
 }

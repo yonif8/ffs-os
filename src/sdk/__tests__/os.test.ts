@@ -78,7 +78,8 @@ function fakeHost(): OsHost {
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 describe("FfsOs", () => {
-  it("declares the home menu on boot", async () => {
+  /** Home is the RAIL launcher: 3-letter marks, 0=CLK 1=TMR 2=NTE 3=DEV 4=SET 5=APP. */
+  it("declares the launcher rail on boot", async () => {
     const { tx, sent } = harness();
     const os = new FfsOs(new Session({ transport: tx, magic: () => 100 }), fakeHost());
     void os.run();
@@ -86,8 +87,8 @@ describe("FfsOs", () => {
 
     expect(sent.length).toBe(1);
     const page = rowsOf(sent[0]).join("|");
-    for (const label of ["Clock", "Settings", "Device", "Apps"]) {
-      expect(page).toContain(label);
+    for (const mark of ["CLK", "TMR", "NTE", "DEV", "SET", "APP"]) {
+      expect(page).toContain(mark);
     }
   });
 
@@ -97,7 +98,7 @@ describe("FfsOs", () => {
     void os.run();
     await tick();
 
-    deliver(listTap(1)); // "Settings"
+    deliver(listTap(4)); // "SET"
     await tick();
     await tick();
 
@@ -123,13 +124,13 @@ describe("FfsOs", () => {
     expect(rowsOf(sent[sent.length - 1]).join("|")).toMatch(/\d\d:\d\d/);
   });
 
-  it("double-tap backs out of a submenu and restores the parent", async () => {
+  it("double-tap backs out of an app and restores the launcher", async () => {
     const { tx, sent, deliver } = harness();
     const os = new FfsOs(new Session({ transport: tx, magic: () => 100 }), fakeHost());
     void os.run();
     await tick();
 
-    deliver(listTap(1));            // into Settings
+    deliver(listTap(4));            // into SET
     await tick(); await tick();
     const afterPush = sent.length;
 
@@ -138,8 +139,8 @@ describe("FfsOs", () => {
 
     expect(sent.length).toBeGreaterThan(afterPush);
     const page = rowsOf(sent[sent.length - 1]).join("|");
-    for (const label of ["Clock", "Settings", "Device", "Apps"]) {
-      expect(page).toContain(label);
+    for (const mark of ["CLK", "TMR", "NTE", "DEV", "SET", "APP"]) {
+      expect(page).toContain(mark);
     }
   });
 
@@ -149,12 +150,13 @@ describe("FfsOs", () => {
     void os.run();
     await tick();
 
-    deliver(listTap(1));
+    deliver(listTap(4));
     await tick(); await tick();
     deliver(DOUBLE_TAP);
     await tick(); await tick();
 
-    const cmds = sent.map(cmdOf);
+    // Cmd 5 updates are not pages; only page commands are in question here.
+    const cmds = sent.map(cmdOf).filter((c) => c !== Cmd.UPDATE_TEXT_DATA);
     expect(cmds[0]).toBe(Cmd.CREATE_STARTUP_PAGE);
     expect(cmds.slice(1).every((c) => c === Cmd.REBUILD_PAGE)).toBe(true);
   });
@@ -165,14 +167,14 @@ describe("FfsOs", () => {
  * every OS screen names itself instead of spending a row on its own title.
  */
 describe("FfsOs headers", () => {
-  it("titles the home screen and each submenu", async () => {
+  it("titles each app screen (the launcher itself needs no title)", async () => {
     const { tx, sent, deliver } = harness();
     const os = new FfsOs(new Session({ transport: tx, magic: () => 100 }), fakeHost());
     void os.run();
     await tick();
-    expect(rowsOf(sent[0]).join("|")).toContain("FFS OS");
+    expect(rowsOf(sent[0]).join("|")).toContain("CLK");
 
-    deliver(listTap(1));
+    deliver(listTap(4));
     await tick(); await tick();
     expect(rowsOf(sent[sent.length - 1]).join("|")).toContain("Settings");
   });
@@ -235,7 +237,7 @@ describe("FfsOs apps", () => {
   }
 
   it("Apps lists Timer, Notes and About", async () => {
-    const { page } = await walk([4]);
+    const { page } = await walk([5]);
     expect(page).toContain("Timer");
     expect(page).toContain("Notes");
     expect(page).toContain("About");
@@ -248,8 +250,7 @@ describe("FfsOs apps", () => {
     void os.run();
     await tick();
 
-    deliver(listTap(4)); await tick(); await tick();   // Apps
-    deliver(listTap(0)); await tick(); await tick();   // Timer
+    deliver(listTap(1)); await tick(); await tick();   // TMR — a top-level rail entry now
     expect(rowsOf(sent[sent.length - 1]).join("|")).toContain("1 min");
 
     deliver(listTap(0)); await tick(); await tick();   // start the 1-minute timer
@@ -266,7 +267,7 @@ describe("FfsOs apps", () => {
   }, 10000);
 
   it("Notes says so when the host supplies none — rather than showing an empty list", async () => {
-    const { page } = await walk([4, 1]);
+    const { page } = await walk([2]);
     expect(page).toContain("(no notes)");
   });
 
@@ -276,8 +277,7 @@ describe("FfsOs apps", () => {
     const os = new FfsOs(new Session({ transport: tx, magic: () => 100 }), host);
     void os.run();
     await tick();
-    deliver(listTap(4)); await tick(); await tick();
-    deliver(listTap(1)); await tick(); await tick();
+    deliver(listTap(2)); await tick(); await tick();   // NTE
     const page = rowsOf(sent[sent.length - 1]).join("|");
     expect(page).toContain("milk");
     expect(page).toContain("call mum");
