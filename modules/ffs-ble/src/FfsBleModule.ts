@@ -296,13 +296,19 @@ export interface OnGlassesEvent {
 }
 
 /**
- * A raw, uninterpreted inbound EvenHub payload — the TypeScript SDK's inbound transport.
+ * A raw, uninterpreted inbound payload — the TypeScript SDK's inbound transport.
  *
- * Every reassembled 0xE0 frame arrives here regardless of what the native decoders made of it,
- * so the SDK's own decoder (unit-tested against captured byte vectors) runs against live
- * hardware bytes rather than trusting the Kotlin one.
+ * Every reassembled frame from EVERY service arrives here regardless of what the native decoders
+ * made of it, so the SDK's own decoders (unit-tested against captured byte vectors) run against
+ * live hardware bytes rather than trusting the Kotlin ones.
+ *
+ * ⚠️ Filter on `serviceId`. The SDK needs more than one: pages and events are EvenHub (0xE0)
+ * while settings snapshots are 0x09. Listening to everything and assuming EvenHub is how the
+ * settings reader silently starved and the Device screen showed "--" forever.
  */
-export interface OnEvenHubRawEvent {
+export interface OnServiceRawEvent {
+  /** 0xE0 EvenHub, 0x09 settings, … */
+  serviceId: number;
   /** base64, NO_WRAP. */
   payload: string;
 }
@@ -337,7 +343,7 @@ export interface FfsBleEvents {
   onSubscribe: OnSubscribeEvent;
   onImgAck: OnImgAckEvent;
   onGlassesEvent: OnGlassesEvent;
-  onEvenHubRaw: OnEvenHubRawEvent;
+  onServiceRaw: OnServiceRawEvent;
   onOsCommand: OnOsCommandEvent;
   onRingConnected: OnRingConnectedEvent;
   onRingDisconnected: OnRingDisconnectedEvent;

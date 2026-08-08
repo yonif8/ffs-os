@@ -208,15 +208,21 @@ class G2Central(
     var onGlassesEvent: ((String, Int?, String?, Int?, String?, Int?, Int?) -> Unit)? = null
 
     /**
-     * (base64) -- EVERY reassembled inbound EvenHub payload, before any interpretation.
+     * (serviceId, base64) -- EVERY reassembled inbound service payload, before any
+     * interpretation, for EVERY service.
      *
      * This is the channel the TypeScript SDK listens on. It is deliberately raw and deliberately
-     * unfiltered: the SDK carries its own decoder, unit-tested against captured byte vectors, and
-     * feeding it the real bytes is what makes those vectors evidence about the HARDWARE rather
-     * than evidence about the Kotlin decoder agreeing with itself. It also means a frame shape
-     * neither decoder recognises still reaches JS instead of vanishing into a log line.
+     * unfiltered: the SDK carries its own decoders, unit-tested against captured byte vectors,
+     * and feeding them the real bytes is what makes those vectors evidence about the HARDWARE
+     * rather than evidence about the Kotlin decoder agreeing with itself. A frame shape neither
+     * side recognises still reaches JS instead of vanishing into a log line.
+     *
+     * Carries the service id because the SDK needs more than one: pages and events arrive on
+     * EvenHub (0xE0) while settings snapshots arrive on 0x09. An EvenHub-only channel silently
+     * starved the settings reader — the OS's Device screen rendered "--" forever with nothing
+     * anywhere reporting a problem.
      */
-    var onEvenHubRaw: ((String) -> Unit)? = null
+    var onServiceRaw: ((Int, String) -> Unit)? = null
     /** (gesture, side, source?) -- a decoded touch gesture. */
     var onGesture: ((String, String, Int?) -> Unit)? = null
     /** (leftVersion?, rightVersion?, battery?, charging?) -- a device-info response. */
@@ -1776,11 +1782,11 @@ class G2Central(
      * handler so [simulateGesture] can drive the identical decode path with a synthetic frame.
      */
     private fun dispatchInboundLocked(svc: Int, payload: ByteArray, s: G2Side) {
+        // Hand the untouched payload to JS FIRST, for every service, so the SDK sees every frame
+        // regardless of what the Kotlin decoders below make of it.
+        onServiceRaw?.invoke(svc, encodeBase64(payload))
         when (svc) {
             G2ServiceID.EVEN_HUB -> {
-                // Hand the untouched payload to JS FIRST, so the SDK sees every frame regardless
-                // of what the Kotlin decoders below make of it.
-                onEvenHubRaw?.invoke(encodeBase64(payload))
                 val gesture = G2EvenHub.parseGesture(payload)
                 if (gesture != null) {
                     handleGestureLocked(gesture.name, s, gesture.source)

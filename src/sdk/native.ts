@@ -8,6 +8,9 @@
 import FfsBle from "../../modules/ffs-ble";
 import { fromBase64, toBase64 } from "./base64";
 import type { Transport } from "./screen";
+
+/** EvenHub service id — pages, containers and events. */
+export const SID_EVEN_HUB = 0xe0;
 import type { OsHost } from "./os";
 import {
   parseSettingsSnapshot,
@@ -32,7 +35,9 @@ export function nativeTransport(): Transport {
       FfsBle.sendEvenHub(toBase64(bytes));
     },
     onInbound(handler: (payload: Uint8Array) => void): () => void {
-      const sub = FfsBle.addListener("onEvenHubRaw", ({ payload }) => {
+      const sub = FfsBle.addListener("onServiceRaw", ({ serviceId, payload }) => {
+        // Pages and events only. Settings share this channel on a different service id.
+        if (serviceId !== SID_EVEN_HUB) return;
         handler(fromBase64(payload));
       });
       return () => sub.remove();
@@ -66,8 +71,10 @@ export function nativeHost(): OsHost & { dispose(): void } {
   const send = (bytes: Uint8Array) =>
     FfsBle.pushToService(SID_G2_SETTING, toBase64(bytes));
 
-  // Settings snapshots come back on the same raw channel; keep the freshest one.
-  const sub = FfsBle.addListener("onEvenHubRaw", ({ payload }) => {
+  // Settings snapshots arrive on sid 0x09, NOT on EvenHub — filtering on the service id is the
+  // whole point of the raw channel carrying one.
+  const sub = FfsBle.addListener("onServiceRaw", ({ serviceId, payload }) => {
+    if (serviceId !== SID_G2_SETTING) return;
     const snap = parseSettingsSnapshot(fromBase64(payload));
     if (snap) latest = snap;
   });

@@ -70,8 +70,8 @@ class FfsBleModule : Module() {
       "onNotify",
       "onGesture",
       "onGlassesEvent",
-      // Raw inbound EvenHub frames for the TypeScript SDK's own decoder.
-      "onEvenHubRaw",
+      // Raw inbound frames (any service) for the TypeScript SDK's own decoders.
+      "onServiceRaw",
       // Debug-only: boot/stop the TypeScript mini-OS from an adb broadcast.
       "onOsCommand",
       "onDeviceInfo",
@@ -613,8 +613,10 @@ class FfsBleModule : Module() {
         )
       )
     }
-    // The SDK's inbound half: raw, uninterpreted EvenHub payloads.
-    c.onEvenHubRaw = { base64 -> sendEvent("onEvenHubRaw", mapOf("payload" to base64)) }
+    // The SDK's inbound half: raw, uninterpreted payloads, tagged with their service id.
+    c.onServiceRaw = { serviceId, base64 ->
+      sendEvent("onServiceRaw", mapOf("serviceId" to serviceId, "payload" to base64))
+    }
     c.onDisconnected = { name, side, reason, code, domain ->
       sendEvent(
         "onDisconnected",
