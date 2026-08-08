@@ -3,7 +3,7 @@
 // Every field number here was read off a frame the glasses actually sent, and the awkward parts
 // below exist because the schema alone would have been wrong in ways that matter.
 
-import { parseFields, str, sub, u32 } from "./proto";
+import { f32, parseFields, str, sub, u32 } from "./proto";
 
 /**
  * What the firmware reports a user did. From the generated schema, cross-checked against
@@ -21,6 +21,8 @@ export const EventType = {
   FOREGROUND_EXIT: 5,
   ABNORMAL_EXIT: 6,
   SYSTEM_EXIT: 7,
+  /** A head-motion sample rather than anything the user deliberately did. */
+  IMU_DATA_REPORT: 8,
 } as const;
 export type EventTypeValue = (typeof EventType)[keyof typeof EventType];
 
@@ -41,6 +43,7 @@ export type GlassesEvent =
   | { kind: "select"; containerId: number; containerName?: string; index: number; itemName?: string; type: number; source?: number }
   | { kind: "text-click"; containerId: number; containerName?: string; type: number }
   | { kind: "sys"; type: number; source?: number }
+  | { kind: "imu"; x: number; y: number; z: number }
   | { kind: "private"; containerId: number; containerName?: string; eventId: number; eventData: number };
 
 /**
@@ -99,6 +102,21 @@ export function normalizeEvent(payload: Uint8Array): GlassesEvent | null {
     const sys = sub(d, 3);
     if (sys) {
       const e = parseFields(sys);
+      // IMU samples ride on a SysEvent (field 3 = IMU_Report_Data). They may arrive tagged
+      // EventType 8, but the reference implementations note the payload can ride on any sys
+      // event — so key off the presence of the data, not off the type.
+      const imu = sub(e, 3);
+      if (imu) {
+        const v = parseFields(imu);
+        // ⚠️ float32, NOT double. The generated schema says `double`; the firmware emits wire
+        // type 5. Reading it as the schema claims yields garbage or nothing at all.
+        const x = f32(v, 1);
+        const y = f32(v, 2);
+        const z = f32(v, 3);
+        if (x !== undefined && y !== undefined && z !== undefined) {
+          return { kind: "imu", x, y, z };
+        }
+      }
       return {
         kind: "sys",
         type: u32(e, 1) ?? EventType.CLICK,
@@ -137,6 +155,8 @@ export function describeEvent(e: GlassesEvent): string {
       return `text-click container='${e.containerName ?? e.containerId}' type=${t(e.type)}`;
     case "sys":
       return `sys type=${t(e.type)} src=${s(e.source)}`;
+    case "imu":
+      return `imu x=${e.x.toFixed(3)} y=${e.y.toFixed(3)} z=${e.z.toFixed(3)}`;
     case "private":
       return `private container='${e.containerName ?? e.containerId}' id=${e.eventId} data=${e.eventData}`;
   }

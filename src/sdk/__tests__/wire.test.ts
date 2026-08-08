@@ -4,7 +4,7 @@
 // Runs on Windows with no glasses in the room. That is deliberate — it is what lets the on-glass
 // run confirm ONE thing instead of debugging a whole stack.
 
-import { encodeListPage, encodeListContainer, encodePageContainer, encodeEnvelope, Cmd } from "../wire";
+import { encodeListPage, encodeListContainer, encodePageContainer, encodeEnvelope, encodeImuControl, Cmd } from "../wire";
 import { normalizeEvent, EventType, EventSource } from "../events";
 import { ProtoWriter, fromHex, hex, parseFields, u32, sub, str } from "../proto";
 
@@ -187,5 +187,52 @@ describe("normalizeEvent — GOLDEN VECTORS captured off the glasses 2026-08-07"
   it("garbage decodes to null instead of throwing", () => {
     expect(normalizeEvent(fromHex("ffffffff"))).toBeNull();
     expect(normalizeEvent(new Uint8Array(0))).toBeNull();
+  });
+});
+
+/**
+ * IMU control + sample decoding.
+ *
+ * Two traps are pinned here, both of which fail as SILENCE rather than as an error:
+ *  - the wrapper is field 22 (generated schema + faceclaw), not 20 (MentraOS's prose);
+ *  - samples are wire-type-5 FLOAT32 even though the schema declares them `double`.
+ * A parser that steps over wire type 5 reports a permanently empty IMU stream, which is
+ * indistinguishable from hardware that simply never sends anything.
+ */
+describe("IMU", () => {
+  it("enables with a pace in wrapper field 22", () => {
+    const b = encodeImuControl({ enable: true, magic: 77, pace: 500 });
+    const f = parseFields(b)!;
+    expect(u32(f, 1)).toBe(Cmd.IMU_CONTROL);
+    expect(u32(f, 2)).toBe(77);
+    const ctrl = parseFields(sub(f, 22)!)!;
+    expect(u32(ctrl, 1)).toBe(1);
+    expect(u32(ctrl, 2)).toBe(500);
+  });
+
+  it("omits the pace when disabling", () => {
+    const ctrl = parseFields(sub(parseFields(encodeImuControl({ enable: false, magic: 1 }))!, 22)!)!;
+    expect(u32(ctrl, 1)).toBe(0);
+    expect(sub(ctrl, 2)).toBeUndefined();
+  });
+
+  it("decodes a float32 sample — reading it as the schema's `double` would yield nothing", () => {
+    // Build SysEvent{1: type=8, 3: IMU_Report_Data{1:x, 2:y, 3:z}} with wire-type-5 floats.
+    const f32le = (v: number) => {
+      const b = new Uint8Array(4);
+      new DataView(b.buffer).setFloat32(0, v, true);
+      return b;
+    };
+    const imu: number[] = [];
+    [0.25, -1.5, 9.75].forEach((v, i) => {
+      imu.push(((i + 1) << 3) | 5, ...Array.from(f32le(v)));
+    });
+    const sys = [0x08, 0x08, 0x1a, imu.length, ...imu];
+    const dev = [0x1a, sys.length, ...sys];
+    const frame = Uint8Array.from([0x08, 0x02, 0x6a, dev.length, ...dev]);
+
+    const e = normalizeEvent(frame);
+    expect(e?.kind).toBe("imu");
+    expect(e).toMatchObject({ x: 0.25, y: -1.5, z: 9.75 });
   });
 });

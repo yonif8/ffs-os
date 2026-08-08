@@ -100,10 +100,16 @@ export function parseFields(data: Uint8Array): ProtoFields | null {
       out.set(field, data.subarray(start, end));
       i = end;
     } else if (wire === 5) {
+      // fixed32 — KEEP the bytes. Skipping them silently drops real data: the firmware emits IMU
+      // x/y/z as wire-type-5 FLOATS even though the published schema calls them `double`, so a
+      // parser that steps over wire 5 reports an IMU stream that is permanently empty and looks
+      // exactly like hardware that never sends anything.
       if (i + 4 > data.length) return null;
+      out.set(field, data.subarray(i, i + 4));
       i += 4;
     } else if (wire === 1) {
       if (i + 8 > data.length) return null;
+      out.set(field, data.subarray(i, i + 8));
       i += 8;
     } else {
       return null; // groups / unknown wire type
@@ -124,6 +130,19 @@ function readVarint(data: Uint8Array, at: number): { value: number; next: number
     if (shift > 2 ** 56) return null;
   }
   return null;
+}
+
+/**
+ * Read a fixed32 field as a little-endian float32.
+ *
+ * Needed because the firmware emits IMU samples as wire-type-5 floats while the generated schema
+ * declares them `double`. Trusting the schema and reading a double yields garbage; this reads
+ * what the hardware actually sends.
+ */
+export function f32(f: ProtoFields | null, field: number): number | undefined {
+  const v = f?.get(field);
+  if (!(v instanceof Uint8Array) || v.length !== 4) return undefined;
+  return new DataView(v.buffer, v.byteOffset, 4).getFloat32(0, true);
 }
 
 export function u32(f: ProtoFields | null, field: number): number | undefined {

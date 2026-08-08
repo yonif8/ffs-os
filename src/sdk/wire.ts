@@ -11,6 +11,8 @@ export const Cmd = {
   CREATE_STARTUP_PAGE: 0,
   /** TextContainerUpgrade — change a live container's text WITHOUT rebuilding the page. */
   UPDATE_TEXT_DATA: 5,
+  /** APP_REQUEST_OPEN_IMU_PACKET — start/stop the head-motion stream. */
+  IMU_CONTROL: 19,
   REBUILD_PAGE: 7,
 } as const;
 
@@ -262,4 +264,33 @@ export function encodeUpdateText(opts: {
   u.int32(4, bytes.length);
   u.string(5, opts.content);
   return encodeEnvelope(Cmd.UPDATE_TEXT_DATA, 9, u.data, opts.magic);
+}
+
+/**
+ * Valid IMU report paces. NOT literal Hz — the firmware takes an ImuReportPace CODE, and the
+ * documented range is 100..1000 in steps of 100.
+ */
+export const IMU_PACES = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000] as const;
+
+/**
+ * Start or stop the IMU (head-motion) stream.
+ *
+ * Wrapper field 22, per g2-kit's GENERATED schema and faceclaw's independent implementation.
+ * MentraOS's notes say field 20; two independent sources beat one, and the generated schema is
+ * evidence where prose is not.
+ *
+ * `pace` is omitted entirely when disabling — the reference implementations only encode it when
+ * turning the stream ON.
+ */
+export function encodeImuControl(opts: {
+  enable: boolean;
+  magic: number;
+  pace?: number;
+  /** Override the wrapper field. Only for resolving the 22-vs-20 disagreement empirically. */
+  field?: number;
+}): Uint8Array {
+  const c = new ProtoWriter();
+  c.int32(1, opts.enable ? 1 : 0);
+  if (opts.enable) c.int32(2, opts.pace ?? 100);
+  return encodeEnvelope(Cmd.IMU_CONTROL, opts.field ?? 22, c.data, opts.magic);
 }

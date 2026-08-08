@@ -9,6 +9,9 @@ import FfsBle from "../../modules/ffs-ble";
 import { FfsOs } from "../sdk/os";
 import { Session } from "../sdk/session";
 import { nativeHost, nativeTransport, takeoverPage } from "../sdk/native";
+import { describeEvent, normalizeEvent } from "../sdk/events";
+import { hex } from "../sdk/proto";
+import { encodeImuControl } from "../sdk/wire";
 
 type Log = (message: string) => void;
 
@@ -108,10 +111,64 @@ export function attachOsCommandListener(log: Log = () => {}): () => void {
   const runtime = new OsRuntime(log);
   const sub = FfsBle.addListener("onOsCommand", ({ cmd }) => {
     if (cmd === "stop") runtime.stop();
+    else if (cmd === "imu") void probeImu(log);
     else void runtime.boot();
   });
   return () => {
     sub.remove();
     runtime.stop();
   };
+}
+
+/**
+ * Turn the IMU stream on, report what comes back, and turn it off again.
+ *
+ * Worth noting what this probe does NOT need: any native code. The head-motion stream is a plain
+ * EvenHub command in and plain EvenHub frames out, so `sendEvenHub` + `onServiceRaw` carry it
+ * end to end. A new capability on this service costs a TypeScript function and nothing else —
+ * which is the actual test of whether the two-call transport was drawn in the right place.
+ *
+ * ⚠️ The reference kit's author records never once observing IMU data from this firmware, so an
+ * empty result here is a real possible outcome and not necessarily a bug in this code.
+ */
+async function probeImu(log: Log): Promise<void> {
+  const tx = nativeTransport();
+  let samples = 0;
+  let decoded = 0;
+  let rawFrames = 0;
+
+  // Count RAW frames, not just decoded ones. "no IMU samples" and "the glasses sent nothing at
+  // all" are different findings, and only the raw count separates them.
+  const off = tx.onInbound((payload) => {
+    rawFrames += 1;
+    const e = normalizeEvent(payload);
+    if (e?.kind === "imu") {
+      samples += 1;
+      if (samples <= 5) log(`[imu] ${describeEvent(e)}`);
+    } else if (e) {
+      decoded += 1;
+    } else if (rawFrames <= 6) {
+      // Anything the decoder does not recognise, verbatim — an IMU frame in an unexpected shape
+      // would otherwise be indistinguishable from silence.
+      log(`[imu] undecoded frame: ${hex(payload)}`);
+    }
+  });
+
+  // The wrapper field is the one real disagreement between sources: g2-kit's GENERATED schema and
+  // faceclaw both say 22, MentraOS's notes say 20. Try both rather than argue — a wrong field
+  // number is silent, because protobuf ignores fields it does not know.
+  for (const field of [22, 20]) {
+    const before = samples;
+    log(`[imu] enabling via wrapper field ${field} (pace 100)`);
+    await tx.sendEvenHub(encodeImuControl({ enable: true, magic: 210, pace: 100, field }));
+    await new Promise((r) => setTimeout(r, 5000));
+    await tx.sendEvenHub(encodeImuControl({ enable: false, magic: 211, field }));
+    log(`[imu] field ${field}: ${samples - before} sample(s)`);
+    await new Promise((r) => setTimeout(r, 500));
+  }
+
+  off();
+  log(`[imu] RESULT samples=${samples} decoded-non-imu=${decoded} raw-frames=${rawFrames}`);
+  log("[imu] NOTE the glasses were STATIONARY — this cannot distinguish 'no IMU stream' from");
+  log("[imu]      'IMU reports only on motion'. Retest by moving them.");
 }

@@ -190,6 +190,27 @@ export const PROVENANCE: Readonly<Record<string, ProvenanceEntry>> = {
     status: "unproven",
     evidence: "⛔ FAULTS THE LENS. select_inject_probe rebooted a lens; do not call.",
   },
+  /**
+   * Head-motion stream. The CONTROL command encodes and transmits cleanly and the firmware does
+   * not fault — but nothing comes back.
+   *
+   * What this test DID settle, so nobody re-derives it:
+   *  - not a decode failure: raw-frames=0, i.e. the glasses sent no inbound frame at all, not an
+   *    unrecognised one;
+   *  - not the wrapper field: 22 (generated schema + faceclaw) and 20 (MentraOS) were BOTH tried
+   *    in the same run, and both were silent. A wrong field number is invisible, since protobuf
+   *    ignores fields it does not know — which is exactly why it had to be tested, not argued.
+   *
+   * What it did NOT settle: the glasses were STATIONARY on a desk, so "this firmware does not
+   * stream IMU" and "IMU reports only on motion" are still indistinguishable. Retest by moving
+   * them. Note the reference kit's author also records never once observing IMU data.
+   */
+  "imu.stream": {
+    status: "unproven",
+    evidence:
+      "control sent on fields 22 AND 20, pace 100, 5s each: raw-frames=0 both times " +
+      "(2026-08-08). Glasses stationary — motion-gating not ruled out.",
+  },
   "font.hebrewNative": {
     status: "unproven",
     evidence: "FUT-178: stock font has no Hebrew glyphs; lv_bidi/lv_txt_ap absent. Tier 2.",

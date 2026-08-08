@@ -719,7 +719,12 @@ function AppInner() {
 
   // The mini-OS. Listens for the debug `OS` broadcast (`--es cmd boot|stop`) and runs FfsOs
   // against the SDK. Nothing here drives the glasses directly — the OS owns the HUD once booted.
-  useEffect(() => attachOsCommandListener((m) => glog.emit("os", "log", { m })), []);
+  // console.log as well as glog: the collector is remote, and an unattended on-glass run needs
+  // these visible in logcat right next to the driver's own lines.
+  useEffect(
+    () => attachOsCommandListener((m) => { console.log(m); glog.emit("os", "log", { m }); }),
+    []
+  );
 
   // FUT-167 soft precheck: a real flash arms ONLY when the warranty phrase is typed
   // AND every readiness item is acknowledged. Single source of truth — both the FLASH
