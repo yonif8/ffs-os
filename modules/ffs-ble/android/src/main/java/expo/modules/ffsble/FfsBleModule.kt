@@ -366,6 +366,8 @@ class FfsBleModule : Module() {
                 else -> c?.showTextAt("FULL CANVAS", 0, 0, 576, 288, 2)
               }
               "header" -> c?.showListWithHeader(listOf("ONE", "TWO", "THREE", "FOUR"), "HEADER")
+              // The firmware's OWN swirl animation (even_ai service, not EvenHub). value!=0 = on.
+              "swirl" -> c?.aiSwirl(value != 0)
               "silent" -> c?.setSilentMode(value != 0)
               "wear" -> c?.setWearDetection(value != 0)
               "lensx" -> c?.setLensOffset(value, null)

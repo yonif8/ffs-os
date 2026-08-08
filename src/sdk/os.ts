@@ -28,6 +28,15 @@ export interface OsHost {
     leftFirmware?: string;
     rightFirmware?: string;
   }>;
+  /**
+   * The firmware's OWN swirl animation — a real firmware-level visual, rendered by the glasses
+   * with no pixels from the phone. It runs on the even_ai service rather than EvenHub, which is
+   * why it is a host capability rather than something the Session can express.
+   *
+   * ⚠️ It OWNS the display while it runs: it replaces whatever page is declared, and turning it
+   * off leaves the HUD empty until something re-declares. Callers must restore their own screen.
+   */
+  setSwirl(on: boolean): Promise<void> | void;
   /** Wall clock, injected so screens are deterministic in tests. */
   now(): Date;
 }
@@ -61,13 +70,20 @@ export class FfsOs {
     await this.session.menu<string>(
       {
         header: "FFS OS",
-        rows: rows([["Clock", "clock"], ["Settings", "settings"], ["Device", "device"], ["Apps", "apps"]]),
+        rows: rows([
+          ["Clock", "clock"],
+          ["Settings", "settings"],
+          ["Device", "device"],
+          ["Visuals", "visuals"],
+          ["Apps", "apps"],
+        ]),
       },
       async (sel: Selection<string>) => {
         switch (sel.value) {
           case "clock": return this.clock();
           case "settings": return this.settings();
           case "device": return this.device();
+          case "visuals": return this.visuals();
           case "apps": return this.apps();
         }
       }
@@ -166,6 +182,20 @@ export class FfsOs {
         ]),
       },
       async () => { /* read-only screen */ }
+    );
+  }
+
+  // ---- visuals — firmware-level animation, no pixels from the phone -------------------------
+
+  private async visuals(): Promise<void> {
+    await this.session.menu<string>(
+      { header: "Visuals", rows: rows([["Swirl", "swirl"], ["Stop", "stop"]]) },
+      async (sel) => {
+        await this.host.setSwirl(sel.value === "swirl");
+        // The swirl takes the display over, so coming back means re-declaring this screen.
+        // menu() already restores after a handler returns — that shared restore path is exactly
+        // what makes this a one-liner instead of a special case.
+      }
     );
   }
 

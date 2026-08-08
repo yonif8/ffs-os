@@ -94,6 +94,10 @@ export function nativeHost(): OsHost & { dispose(): void } {
         rightFirmware: latest.rightFirmware,
       };
     },
+    setSwirl(on: boolean) {
+      // even_ai service, driven by the native module — not an EvenHub page.
+      FfsBle.showAiSwirl(on);
+    },
     now: () => new Date(),
     dispose: () => sub.remove(),
   };

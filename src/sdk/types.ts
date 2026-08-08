@@ -65,6 +65,26 @@ export const PROVENANCE: Readonly<Record<string, ProvenanceEntry>> = {
     evidence:
       "home -> row1 -> Settings(97B REBUILD) photographed 2026-08-08; input injected, render real",
   },
+  /**
+   * A FIRMWARE-RENDERED animation: one command from the phone, and the glasses animate on their
+   * own with no per-frame data. Captured as a 4-frame burst in which a marker inside a rounded
+   * frame visibly moves — a single still could not have told an animation from a static graphic.
+   *
+   * Runs on the even_ai service, NOT EvenHub, and it OWNS the display while active: it replaces
+   * the declared page, and exiting leaves the HUD blank until something re-declares.
+   */
+  "firmware.animation": {
+    status: "proven",
+    evidence: "even_ai CTRL ENTER; docs/proof/firmware-animation-filmstrip.png (2026-08-08)",
+  },
+  /**
+   * Even's own head-up dashboard — a live clock plus widgets, rendered entirely by the firmware.
+   * Observed when the AI session released our EvenHub page.
+   */
+  "firmware.dashboard": {
+    status: "proven",
+    evidence: "native dashboard with live clock '03:08' photographed 2026-08-08",
+  },
   "sys.doubleClick": {
     status: "proven",
     evidence: "captured SysEvent{EventType=3 DOUBLE_CLICK, EventSource=1 GLASSES_R}",
