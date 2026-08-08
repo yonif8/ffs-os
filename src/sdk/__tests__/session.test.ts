@@ -192,3 +192,49 @@ describe("the page slot is per-LINK, not per-screen", () => {
     expect(cmdOf(sent[sent.length - 1])).toBe(Cmd.CREATE_STARTUP_PAGE);
   });
 });
+
+/**
+ * REGRESSION — a parent menu must not act on a tap that happened inside its CHILD.
+ *
+ * Every ListScreen subscribes to the inbound stream and only unsubscribes on close(), so while a
+ * submenu is on the glasses the parent is still listening. A tap inside the child therefore also
+ * reaches the parent, which has no waiter (it is parked inside its handler) and so QUEUES it.
+ * The moment the child backs out, the parent's loop reads that stale event and navigates again —
+ * from the user's point of view, backing out of Settings instantly re-enters a random screen.
+ *
+ * Only the screen actually ON the glasses can be the subject of an event.
+ */
+describe("event routing follows the top of the stack", () => {
+  it("a tap inside a child is not replayed by the parent after back", async () => {
+    const { tx, deliver } = harness();
+    const s = new Session({ transport: tx, magic: () => 100 });
+    const settle = () => new Promise((r) => setTimeout(r, 0));
+
+    const picked: string[] = [];
+    // NOT awaited here — menu() only resolves once the user backs out, so awaiting it before
+    // delivering any events would deadlock the test.
+    const done = s.menu<string>(
+      { rows: rows("home-0", "home-1") },
+      async (sel) => {
+        picked.push(`home:${sel.row.label}`);
+        await s.menu<string>({ rows: rows("child-0", "child-1") }, async (c) => {
+          picked.push(`child:${c.row.label}`);
+        });
+      }
+    );
+
+    await settle();
+    deliver(TAP_ROW0);      // enter the child from home row 0
+    await settle(); await settle();
+    deliver(TAP_ROW1);      // tap row 1 INSIDE the child
+    await settle(); await settle();
+    deliver(DOUBLE_TAP);    // back out of the child
+    await settle(); await settle();
+    deliver(DOUBLE_TAP);    // back out of home
+    await done;
+
+    // The child's tap belongs to the child alone. A stale replay would append a second
+    // "home:..." entry here.
+    expect(picked).toEqual(["home:home-0", "child:child-1"]);
+  });
+});

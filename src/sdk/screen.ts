@@ -271,6 +271,26 @@ export class ListScreen<V = string> {
     this._lastWire = null;
   }
 
+  /**
+   * Stop accepting events because another screen is now on the glasses.
+   *
+   * The firmware shows ONE page, so at most one screen can be the subject of an event. A screen
+   * that stays subscribed while a child is on top will queue the CHILD's taps — and replay them
+   * the moment it comes back, which reads to the user as backing out of a submenu and instantly
+   * re-entering a random screen. Suspension is what makes "only the top screen hears anything"
+   * true rather than merely intended.
+   *
+   * Already-queued events survive: those genuinely happened while this screen WAS on-glass.
+   */
+  suspend(): void {
+    if (this._state === "live") this._state = "suspended";
+  }
+
+  /** Back on the glasses; accept events again. */
+  resume(): void {
+    if (this._state === "suspended") this._state = "live";
+  }
+
   close(): void {
     this._state = "closed";
     this._off?.();
@@ -279,6 +299,8 @@ export class ListScreen<V = string> {
 
   /** Feed a raw inbound payload in. Exposed for tests; the transport calls it in production. */
   _ingest(payload: Uint8Array): void {
+    // Only the screen actually ON the glasses can be the subject of an event — see suspend().
+    if (this._state !== "live") return;
     const evt = normalizeEvent(payload);
     if (!evt) return;
     this.stats.eventsIn += 1;

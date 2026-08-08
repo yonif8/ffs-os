@@ -61,6 +61,9 @@ export class Session {
 
   /** Push a new list screen and declare it. */
   async push<V = string>(opts: ListScreenOptions): Promise<ListScreen<V>> {
+    // The screen being covered is no longer on the glasses, so it must stop hearing events —
+    // otherwise it queues the CHILD's taps and replays them on the way back out.
+    this.top?.suspend();
     const s = new ListScreen<V>(this.tx, this.stats, opts, this.magic, this.pageSlot);
     this.stack.push(s);
     await s.declare();
@@ -89,6 +92,8 @@ export class Session {
   async declareTop(cause: RestoreCause): Promise<void> {
     const t = this.top;
     if (!t) return;
+    // It is about to be on the glasses again, so it may hear events again.
+    t.resume();
     t.forceRedeclare();
     await t.declare("restore");
     if (cause === "pop") this.stats.restores.pop += 1;
