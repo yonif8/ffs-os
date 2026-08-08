@@ -230,9 +230,39 @@ export const PROVENANCE: Readonly<Record<string, ProvenanceEntry>> = {
       "control sent on fields 22 AND 20, pace 100, 5s each: raw-frames=0 both times " +
       "(2026-08-08). Glasses stationary — motion-gating not ruled out.",
   },
-  "font.hebrewNative": {
+  /**
+   * Hebrew GLYPHS render on the glasses as they are configured today (2.2.7.14 CFW).
+   *
+   * This contradicts the older FUT-178 note that "the stock font has no Hebrew glyphs", and it
+   * was found by simply TRYING it before planning a flash — Yoni's suggestion, and it saved the
+   * whole build/CI/upload/flash cycle.
+   *
+   * Two independent lines of evidence, because the rig cannot resolve individual small glyphs:
+   *  - QUANTITATIVE. Seven DIFFERENT Hebrew letters vs seven IDENTICAL ones differ by 9.21 mean
+   *    abs green, against a 3.08 floor measured by capturing the SAME text twice. Tofu fallback
+   *    would draw seven identical boxes either way and sit at the floor.
+   *  - VISUAL. Rows of distinct Hebrew words render as varied shapes of differing widths, with a
+   *    Latin "ABC" row alongside as a control (docs/proof/hebrew-glyphs-render.png).
+   *
+   * ⚠️ CAUSE UNDETERMINED. The CFW on these glasses is built from patches_main.c, which
+   * #includes hebrew_font_patch.c — so this may be OUR font patch already being live. But stock
+   * 2.2.7.14 may simply carry Hebrew. Distinguishing them needs a stock flash, and the practical
+   * fact (Hebrew renders now) does not depend on the answer.
+   */
+  "font.hebrewGlyphs": {
+    status: "proven",
+    evidence:
+      "varied-vs-identical letters 9.21 vs 3.08 noise floor + photographed rows " +
+      "(docs/proof/hebrew-glyphs-render.png), 2026-08-08 on 2.2.7.14 CFW",
+  },
+  /**
+   * RTL ORDERING is a separate question from glyphs and is NOT settled. The camera rig cannot
+   * resolve letter order at this glyph size, so whether "שלום" draws right-to-left correctly is
+   * still open. Needs better optics or a human reading the HUD directly.
+   */
+  "font.hebrewRtlOrder": {
     status: "unproven",
-    evidence: "FUT-178: stock font has no Hebrew glyphs; lv_bidi/lv_txt_ap absent. Tier 2.",
+    evidence: "glyphs confirmed, but the rig cannot resolve letter ORDER; bidi_patch unverified",
   },
 };
 
