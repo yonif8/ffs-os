@@ -222,6 +222,13 @@ export function encodeListPage(opts: {
     items: opts.items,
     isEventCapture: true,
   });
+  // A titled page gets the launcher's visual language: the title LETTERSPACED (the only
+  // hierarchy lever this device has — there is no font size or weight field) and a hairline
+  // under it. The rule is literal underscores because text containers ignore every border
+  // field, proven on-glass.
+  //
+  // Only when a header is present: a header-less page must stay byte-identical to the native
+  // list page, which a golden test pins.
   const texts = opts.header
     ? [
         encodeTextContainer({
@@ -231,8 +238,18 @@ export function encodeListPage(opts: {
           height: HEADER_HEIGHT,
           containerId: CONTAINER_IDS.text,
           containerName: "ffs-hdr",
-          content: opts.header,
+          content: opts.header.split("").join(" "),
           // NEVER capturing — see the evt-0 trap above; the list must keep the gestures.
+          isEventCapture: false,
+        }),
+        encodeTextContainer({
+          x: 8,
+          y: HEADER_HEIGHT - 6,
+          width: CANVAS.width - 16,
+          height: 22,
+          containerId: 11,
+          containerName: "ffs-hrule",
+          content: "_".repeat(44),
           isEventCapture: false,
         }),
       ]

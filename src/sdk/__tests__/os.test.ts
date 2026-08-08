@@ -120,8 +120,12 @@ describe("FfsOs", () => {
     await tick();
     await tick();
 
-    // Local time, so assert the SHAPE rather than a timezone-dependent value.
-    expect(rowsOf(sent[sent.length - 1]).join("|")).toMatch(/\d\d:\d\d/);
+    // Headers are LETTERSPACED — the only typographic hierarchy this device offers, since the
+    // text container schema has no font size or weight. So the clock reads "0 9 : 4 1", not
+    // "09:41". Assert the shape after collapsing the spacing, and pin the spacing separately.
+    const page = rowsOf(sent[sent.length - 1]).join("|");
+    expect(page.replace(/ /g, "")).toMatch(/\d\d:\d\d/);
+    expect(page).toContain(" : ");
   });
 
   it("double-tap backs out of an app and restores the launcher", async () => {
@@ -176,7 +180,10 @@ describe("FfsOs headers", () => {
 
     deliver(listTap(4));
     await tick(); await tick();
-    expect(rowsOf(sent[sent.length - 1]).join("|")).toContain("Settings");
+    // Letterspaced, and carrying the hairline the launcher established.
+    const titled = rowsOf(sent[sent.length - 1]).join("|");
+    expect(titled).toContain("S e t t i n g s");
+    expect(titled).toContain("____");
   });
 
   it("the header participates in the no-op fingerprint", async () => {

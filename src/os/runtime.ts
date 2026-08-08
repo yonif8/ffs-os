@@ -25,8 +25,15 @@ import { rasterToBmp } from "../sdk/bmp";
 
 type Log = (message: string) => void;
 
-/** Image sessions must differ between pushes; a reused id can read as a repeat of a finished one. */
-let rasterSession = 0;
+/**
+ * Image sessions must differ between pushes; a reused id can read as a repeat of a session the
+ * firmware has already completed.
+ *
+ * Starts at 128 rather than 0 ON PURPOSE: the NATIVE driver has its own counter that begins at 1
+ * and has already used low ids this session. Sharing the low range means our first push can
+ * collide with one the firmware considers finished — so the two counters are kept apart.
+ */
+let rasterSession = 128;
 
 export class OsRuntime {
   private session: Session | null = null;
