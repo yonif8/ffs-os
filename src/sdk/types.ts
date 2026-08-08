@@ -85,6 +85,25 @@ export const PROVENANCE: Readonly<Record<string, ProvenanceEntry>> = {
     status: "proven",
     evidence: "native dashboard with live clock '03:08' photographed 2026-08-08",
   },
+  /**
+   * Recovery from a real dropped link, on hardware.
+   *
+   * The SDK's central design claim is that popping a submenu and recovering from a reconnect are
+   * the SAME function, so ordinary navigation exercises the recovery path. This is that claim
+   * checked against an actual drop rather than a unit test: Disconnect, reconnect, and the OS
+   * re-declared the exact screen it was on — a running timer at stack DEPTH 4, not merely the
+   * home screen.
+   *
+   * It also exercised the page-slot re-seed: the driver reported the firmware's page was gone,
+   * so the restore went out as a fresh CREATE. Had the SDK assumed otherwise it would have sent
+   * a REBUILD of a page that no longer existed and left the HUD blank.
+   */
+  "sdk.reconnectRestore": {
+    status: "proven",
+    evidence:
+      "link dropped + reconnected 2026-08-08: 'firmware page gone, restoring', " +
+      "restore(reconnect) depth=4, 112B re-declare; docs/proof/os-reconnect-restore.png",
+  },
   "sys.doubleClick": {
     status: "proven",
     evidence: "captured SysEvent{EventType=3 DOUBLE_CLICK, EventSource=1 GLASSES_R}",
