@@ -39,6 +39,8 @@ export interface OsHost {
   setSwirl(on: boolean): Promise<void> | void;
   /** Wall clock, injected so screens are deterministic in tests. */
   now(): Date;
+  /** Optional note source. The glasses cannot capture text, so this is read-only by nature. */
+  readNotes?(): string[];
 }
 
 /** In-memory OS state. Persisted by the host if it wants to. */
@@ -227,25 +229,99 @@ export class FfsOs {
 
   private async apps(): Promise<void> {
     await this.session.menu<string>(
-      { header: "Apps", rows: rows([["Notes", "notes"], ["Timer", "timer"], ["About", "about"]]) },
+      { header: "Apps", rows: rows([["Timer", "timer"], ["Notes", "notes"], ["About", "about"]]) },
       async (sel) => {
-        if (sel.value === "about") {
-          await this.session.menu<string>(
-            {
-              header: "About",
-              rows: rows([["Version 0.1", "a"], ["Built on the FFS SDK", "b"], ["Even Realities G2", "c"]]),
-            },
-            async () => {}
-          );
-        } else {
-          // Placeholder apps, deliberately: the goal asks for apps to exist, and a stub that
-          // navigates correctly proves more about the OS than a half-built feature would.
-          await this.session.menu<string>(
-            { header: sel.row.label, rows: rows([["(not implemented)", "y"]]) },
-            async () => {}
-          );
+        switch (sel.value) {
+          case "timer": return this.timer();
+          case "notes": return this.notes();
+          case "about": return this.about();
         }
       }
+    );
+  }
+
+  /**
+   * A countdown timer.
+   *
+   * Built on the same in-place header update as the clock, for the same reason: a page rebuild
+   * every second would drag the list's focus back to row 0 and make the running screen unusable.
+   * The timer therefore counts down in the header while the rows stay live and selectable.
+   *
+   * No audible alert — the buzzer is Tier 2 and has never been sounded. The timer says DONE and
+   * stops, which is honest about what the hardware has been proven to do.
+   */
+  private async timer(): Promise<void> {
+    const durations: Array<[string, number]> = [
+      ["1 min", 60],
+      ["3 min", 180],
+      ["5 min", 300],
+      ["10 min", 600],
+    ];
+    await this.session.menu<number>(
+      { header: "Timer", rows: durations.map(([label, value]) => ({ label, value })) },
+      async (sel) => this.runTimer(sel.value ?? 60)
+    );
+  }
+
+  private async runTimer(seconds: number): Promise<void> {
+    const started = this.host.now().getTime();
+    const fmt = (left: number) => {
+      const m = Math.floor(Math.max(0, left) / 60);
+      const s = Math.max(0, left) % 60;
+      return `${m}:${String(s).padStart(2, "0")}`;
+    };
+
+    const screen = await this.session.push<string>({
+      header: fmt(seconds),
+      rows: rows([["Running", "r"], ["Back to stop", "back"]]),
+    });
+
+    const timer = setInterval(() => {
+      const elapsed = Math.floor((this.host.now().getTime() - started) / 1000);
+      const left = seconds - elapsed;
+      void screen.setHeaderText(left <= 0 ? "DONE" : fmt(left)).catch(() => {});
+      if (left <= 0) clearInterval(timer);
+    }, 1000);
+
+    try {
+      await screen.nextSelection();
+    } finally {
+      clearInterval(timer);
+      await this.session.pop();
+    }
+  }
+
+  /**
+   * Notes — read-only for now, and deliberately so.
+   *
+   * The glasses have no text entry: the whole input vocabulary is scroll, tap and double-tap.
+   * Anything that claimed to CAPTURE a note would have to invent an input method that does not
+   * exist, so this shows notes the host supplies and nothing more.
+   */
+  private async notes(): Promise<void> {
+    const notes = this.host.readNotes?.() ?? [];
+    await this.session.menu<string>(
+      {
+        header: "Notes",
+        rows: notes.length
+          ? notes.map((n) => ({ label: n, value: n }))
+          : rows([["(no notes)", "none"]]),
+      },
+      async () => { /* read-only */ }
+    );
+  }
+
+  private async about(): Promise<void> {
+    await this.session.menu<string>(
+      {
+        header: "About",
+        rows: rows([
+          ["FFS OS 0.1", "a"],
+          ["Built on the FFS SDK", "b"],
+          ["Even Realities G2", "c"],
+        ]),
+      },
+      async () => {}
     );
   }
 }

@@ -218,3 +218,67 @@ describe("FfsOs live clock", () => {
     expect(rowsOf(updates[updates.length - 1]).join("|")).toMatch(/\d\d:\d\d:\d\d/);
   }, 10000);
 });
+
+describe("FfsOs apps", () => {
+  /** Walk home -> Apps -> a row, returning every page the OS put on the wire. */
+  async function walk(path: number[]) {
+    const { tx, sent, deliver } = harness();
+    const os = new FfsOs(new Session({ transport: tx, magic: () => 100 }), fakeHost());
+    void os.run();
+    await tick();
+    for (const idx of path) {
+      deliver(listTap(idx));
+      await tick(); await tick();
+    }
+    return { sent, page: rowsOf(sent[sent.length - 1]).join("|") };
+  }
+
+  it("Apps lists Timer, Notes and About", async () => {
+    const { page } = await walk([4]);
+    expect(page).toContain("Timer");
+    expect(page).toContain("Notes");
+    expect(page).toContain("About");
+  });
+
+  it("Timer counts down in the header, without rebuilding the page", async () => {
+    const { tx, sent, deliver } = harness();
+    const session = new Session({ transport: tx, magic: () => 100 });
+    const os = new FfsOs(session, fakeHost());
+    void os.run();
+    await tick();
+
+    deliver(listTap(4)); await tick(); await tick();   // Apps
+    deliver(listTap(0)); await tick(); await tick();   // Timer
+    expect(rowsOf(sent[sent.length - 1]).join("|")).toContain("1 min");
+
+    deliver(listTap(0)); await tick(); await tick();   // start the 1-minute timer
+    const declaresWhileRunning = session.stats.declareCount;
+
+    await new Promise((r) => setTimeout(r, 2100));
+
+    // The countdown goes out as in-place text updates...
+    const updates = sent.filter((b) => cmdOf(b) === Cmd.UPDATE_TEXT_DATA);
+    expect(updates.length).toBeGreaterThanOrEqual(1);
+    expect(rowsOf(updates[updates.length - 1]).join("|")).toMatch(/\d+:\d\d/);
+    // ...and NOT as page rebuilds, which would drag the list's focus back to row 0 every second.
+    expect(session.stats.declareCount).toBe(declaresWhileRunning);
+  }, 10000);
+
+  it("Notes says so when the host supplies none — rather than showing an empty list", async () => {
+    const { page } = await walk([4, 1]);
+    expect(page).toContain("(no notes)");
+  });
+
+  it("Notes renders what the host supplies", async () => {
+    const { tx, sent, deliver } = harness();
+    const host = { ...fakeHost(), readNotes: () => ["milk", "call mum"] };
+    const os = new FfsOs(new Session({ transport: tx, magic: () => 100 }), host);
+    void os.run();
+    await tick();
+    deliver(listTap(4)); await tick(); await tick();
+    deliver(listTap(1)); await tick(); await tick();
+    const page = rowsOf(sent[sent.length - 1]).join("|");
+    expect(page).toContain("milk");
+    expect(page).toContain("call mum");
+  });
+});

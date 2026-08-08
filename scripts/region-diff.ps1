@@ -15,6 +15,21 @@
   Regions are in SCREENSHOT pixels (the ~351x700 downscaled frame), matching hud-probe's crop
   space — NOT device pixels.
 
+  ⚠️ TWO LIMITATIONS, both learned the hard way; do not read a result without checking them.
+
+  1. BRIGHT REGIONS DOMINATE. Sensor shot noise scales with intensity, so a region containing the
+     selected row's highlight bar shows a large absolute difference between two IDENTICAL frames.
+     Comparing a dim header against a region that includes the highlight will always make the
+     header look like the quieter one. Choose regions of comparable brightness, or the number is
+     meaningless.
+  2. REGIONS ARE PER-SCREEN. The defaults are calibrated for a titled list at ~1.9X zoom. A
+     different layout puts the bar somewhere else and the windows silently measure the wrong
+     thing — they do not fail, they just report confidently about empty space.
+
+  Both mean this tool CORROBORATES; it does not settle. When a claim needs settling, make the
+  visual change large enough to be unambiguous instead (replacing short text with twenty W's is
+  what actually proved the in-place text update) and read the frames directly.
+
 .EXAMPLE
   .\scripts\region-diff.ps1 -A clock_a.png -B clock_b.png
 #>
