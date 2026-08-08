@@ -11,7 +11,13 @@ import { Session } from "../sdk/session";
 import { nativeHost, nativeTransport, takeoverPage } from "../sdk/native";
 import { describeEvent, normalizeEvent } from "../sdk/events";
 import { hex } from "../sdk/proto";
-import { encodeImuControl } from "../sdk/wire";
+import {
+  encodeImuControl,
+  encodeProbe3Page,
+  encodeStyleProbePage,
+  encodeTileProbePage,
+} from "../sdk/wire";
+import { encodeLauncherPage, spaceOut } from "../sdk/launcher";
 
 type Log = (message: string) => void;
 
@@ -112,6 +118,10 @@ export function attachOsCommandListener(log: Log = () => {}): () => void {
   const sub = FfsBle.addListener("onOsCommand", ({ cmd }) => {
     if (cmd === "stop") runtime.stop();
     else if (cmd === "imu") void probeImu(log);
+    else if (cmd === "styles") void probeStyles(log);
+    else if (cmd === "tiles") void probeTiles(log);
+    else if (cmd === "p3") void probe3(log);
+    else if (cmd === "launcher") void showLauncher(log);
     else void runtime.boot();
   });
   return () => {
@@ -171,4 +181,66 @@ async function probeImu(log: Log): Promise<void> {
   log(`[imu] RESULT samples=${samples} decoded-non-imu=${decoded} raw-frames=${rawFrames}`);
   log("[imu] NOTE the glasses were STATIONARY — this cannot distinguish 'no IMU stream' from");
   log("[imu]      'IMU reports only on motion'. Retest by moving them.");
+}
+
+/**
+ * Render the border/radius style probe and report what went out.
+ *
+ * Uses takeoverPage() for the CREATE-vs-REBUILD decision for the same reason every other page
+ * does: the firmware ignores a second CREATE silently, so guessing leaves the HUD unchanged with
+ * no error anywhere.
+ */
+async function probeStyles(log: Log): Promise<void> {
+  const tx = nativeTransport();
+  const held = takeoverPage();
+  const bytes = encodeStyleProbePage({ rebuild: held, magic: 233 });
+  await tx.sendEvenHub(bytes);
+  log(`[styles] sent ${bytes.length}B (${held ? "rebuild" : "create"}) — narrow list + radius sweep`);
+}
+
+/** Render the multi-list tile probe — see encodeTileProbePage for what it settles. */
+async function probeTiles(log: Log): Promise<void> {
+  const tx = nativeTransport();
+  const held = takeoverPage();
+  const bytes = encodeTileProbePage({ rebuild: held, magic: 234 });
+  await tx.sendEvenHub(bytes);
+  log(`[tiles] sent ${bytes.length}B (${held ? "rebuild" : "create"}) — 4 decorative lists + 1 capturing`);
+}
+
+/** Probe 3: two lists, and whether a list container's own border draws. */
+async function probe3(log: Log): Promise<void> {
+  const tx = nativeTransport();
+  const held = takeoverPage();
+  const bytes = encodeProbe3Page({ rebuild: held, magic: 235 });
+  await tx.sendEvenHub(bytes);
+  log(`[p3] sent ${bytes.length}B (${held ? "rebuild" : "create"}) — 2 lists + list border/radius`);
+}
+
+/**
+ * Render the RAIL launcher.
+ *
+ * The widget lines are placeholders for now: the point of this first frame is to confirm the
+ * geometry on-glass — that the 3-letter marks fit a 64px tile, the underscores join into a
+ * hairline, all six rows are visible, and an 8-container page is accepted.
+ */
+async function showLauncher(log: Log): Promise<void> {
+  const tx = nativeTransport();
+  const held = takeoverPage();
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2, "0");
+  const mm = String(now.getMinutes()).padStart(2, "0");
+  const bytes = encodeLauncherPage({
+    marks: ["CLK", "TMR", "NTE", "DEV", "SET", "APP"],
+    clock: spaceOut(`${hh}:${mm}`),
+    status: spaceOut("BAT 39%"),
+    widgets: [
+      "NEXT    10:30   Standup",
+      "STEPS   8,240   4.1 KM",
+      "MSG     Dana - see you at 6",
+    ],
+    rebuild: held,
+    magic: 236,
+  });
+  await tx.sendEvenHub(bytes);
+  log(`[launcher] sent ${bytes.length}B (${held ? "rebuild" : "create"}) — rail + dashboard`);
 }

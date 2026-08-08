@@ -279,6 +279,55 @@ export const PROVENANCE: Readonly<Record<string, ProvenanceEntry>> = {
       "⛔ OBSERVED FALSE 2026-08-08: raw tone ran until an explicit STOP. " +
       "G2FW_BUZZ_TIMER_HANDLE_PTR is [M] and appears to read 0.",
   },
+  /**
+   * A NARROW list draws its focused row as a rounded TILE — the iPhone-style app icon, rendered
+   * by the firmware with no bitmap from the phone. This is the whole basis of the launcher rail.
+   */
+  "list.narrowTile": {
+    status: "proven",
+    evidence: "w=56/64 itemWidth=same: ~60x41 tile, radius ~13; docs/proof/launcher-rail-dashboard.png",
+  },
+  /** 1 LIST + 7 TEXT containers on one page renders, with arbitrary container ids. */
+  "page.eightContainers": {
+    status: "proven",
+    evidence: "launcher page: rail + 6 text + rule, 493B, photographed 2026-08-08",
+  },
+  /**
+   * Update-in-place works on ANY container id, not just id 1.
+   *
+   * This was the launcher's only real blocker: if Cmd 5 had been id-1-only, every widget would
+   * have frozen at declare-time values and the dashboard would have been static between
+   * navigations.
+   */
+  "text.updateAnyContainerId": {
+    status: "proven",
+    evidence:
+      "Cmd 5 on containerId 6 replaced widget 1; rail, tile, clock and all other containers " +
+      "unchanged; docs/proof/launcher-cmd5-any-container-id.png",
+  },
+  /**
+   * ⛔ OBSERVED FALSE — TEXT containers ignore borderWidth / borderColor / borderRadius.
+   * A sweep of bw{1,2,3} x r{0,6,14,28} rendered as bare text with no stroke at any setting.
+   * All panel structure must therefore come from type, position and whitespace.
+   */
+  "text.border": {
+    status: "unproven",
+    evidence: "⛔ OBSERVED FALSE 2026-08-08: docs/proof/style-probe-borders-inert.png",
+  },
+  /**
+   * ⛔ OBSERVED FATAL — a 5-LIST page is REJECTED and takes the display with it: nothing renders
+   * AND the page slot is left dead, so every later REBUILD also draws nothing. Recovery needed a
+   * fresh link plus a CREATE. Two lists are fine; the cap is somewhere between.
+   *
+   * The failure mode is the point: an over-ambitious page does not degrade, it blanks the HUD.
+   * encodeCompositePage therefore THROWS above the proven 1 list / 7 text.
+   */
+  "page.multiList": {
+    status: "unproven",
+    evidence:
+      "⛔ 2 lists render (docs/proof/two-lists-and-decorative-tile.png); 5 lists blanked the HUD " +
+      "and killed the page slot until a fresh link + CREATE",
+  },
   "font.hebrewGlyphs": {
     status: "proven",
     evidence:
