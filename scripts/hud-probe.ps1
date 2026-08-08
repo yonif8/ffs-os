@@ -56,6 +56,12 @@ param(
   [int]$SettleSec = 4,
   # Skip the crop and keep the full frame — use when the rig has moved and the window is wrong.
   [switch]$Full,
+  # FULL SENSOR RESOLUTION (2448x3264) instead of the low-res screen-state screenshot.
+  # Presses the camera app's OWN shutter and pulls the JPEG it writes, so the app's focus, zoom
+  # and exposure are all preserved. Use this whenever the answer depends on READING glyphs — it
+  # is what finally made Hebrew letterforms legible. ~7x the linear resolution and ~2.4MB, so it
+  # is slower; the default screen-state capture is fine for "did the screen change".
+  [switch]$HiRes,
   # Bring the camera app back to the foreground first (it hibernates).
   [switch]$Wake,
   # Crop window in SCREENSHOT pixels (~351x700), tuned for ~1.9X zoom.
@@ -94,6 +100,22 @@ Start-Sleep -Seconds 3
 
 $png = "$Out.png"
 if (Test-Path $png) { Remove-Item $png -Force }
+
+if ($HiRes) {
+  # Press the camera app's shutter and pull the file it writes. NOT android_save_camera_photo:
+  # that grabs the camera itself, losing the app's focus/zoom/exposure, and returns an
+  # unusable blurred, blown-out frame. The app's own capture keeps every manual adjustment.
+  & $phone -Tool android_tap -Arguments '{"x":360,"y":1327}' > $null 2>&1
+  Start-Sleep -Seconds 4
+  $env:MSYS_NO_PATHCONV = "1"   # or Git Bash rewrites /sdcard/... into a Windows path
+  $latest = (& $adb shell "ls -t /sdcard/DCIM/Camera/*.jpg 2>/dev/null | head -1").Trim()
+  if (-not $latest) { throw "no photo appeared in /sdcard/DCIM/Camera (did the shutter fire?)" }
+  & $adb pull $latest $png > $null 2>&1
+  if (-not (Test-Path $png)) { throw "pull failed for $latest" }
+  "captured (hi-res) -> $png  [$([int]((Get-Item $png).Length/1024)) KB]"
+  return
+}
+
 # The screenshot call fails intermittently; one retry has always been enough.
 foreach ($try in 1..3) {
   & $phone -Tool android_get_screen_state -Arguments '{"include_screenshot":true}' -OutFile $png > $null 2>&1

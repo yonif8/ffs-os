@@ -260,9 +260,22 @@ export const PROVENANCE: Readonly<Record<string, ProvenanceEntry>> = {
    * resolve letter order at this glyph size, so whether "שלום" draws right-to-left correctly is
    * still open. Needs better optics or a human reading the HUD directly.
    */
+  /**
+   * RTL REORDERING works: Hebrew is laid out right-to-left, not in logical order.
+   *
+   * Proven by which END the distinctive letters land on, which survives blur far better than
+   * reading individual glyphs. "שלום" begins with ש (wide, three-pronged) and ends with ם
+   * (a closed box). Rendered WITHOUT reordering, the shin would be leftmost. Photographed, the
+   * shin is RIGHTMOST and the final mem is LEFTMOST — the string is reversed, i.e. shaped.
+   *
+   * ⚠️ What is NOT claimed: the exact placement of the two middle letters (ו vs ל) is at the
+   * limit of the rig's resolution. The reordering is certain; per-letter order is not.
+   */
   "font.hebrewRtlOrder": {
-    status: "unproven",
-    evidence: "glyphs confirmed, but the rig cannot resolve letter ORDER; bidi_patch unverified",
+    status: "proven",
+    evidence:
+      "שלום photographed at 2448x3264 via the camera app's own shutter: ש rightmost, ם leftmost " +
+      "(docs/proof/hebrew-rtl-word-closeup.png), 2026-08-08",
   },
 };
 
