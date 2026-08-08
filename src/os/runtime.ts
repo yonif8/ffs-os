@@ -138,6 +138,10 @@ export function attachOsCommandListener(log: Log = () => {}): () => void {
     else if (cmd === "launcher") void showLauncher(log);
     else if (cmd === "raster") void showRaster(log, "mode2");
     else if (cmd === "rasterbmp") void showRaster(log, "bmp");
+    // Single-fragment variants: small enough that the whole frame fits one message, which
+    // removes fragmenting and ACK ordering from the experiment entirely.
+    else if (cmd === "rastertiny") void showRaster(log, "mode2", 48, 32);
+    else if (cmd === "rastertinybmp") void showRaster(log, "bmp", 48, 32);
     else void runtime.boot();
   });
   return () => {
@@ -274,9 +278,14 @@ async function showLauncher(log: Log): Promise<void> {
  * the same time, an antialiased arc gauge, circles, and a grey ramp proving all 256 levels are
  * live rather than the 16 a 4-bit BMP would give.
  */
-async function showRaster(log: Log, how: "mode2" | "bmp" = "mode2"): Promise<void> {
+async function showRaster(
+  log: Log,
+  how: "mode2" | "bmp" = "mode2",
+  w = 200,
+  h = 100
+): Promise<void> {
   const tx = nativeTransport();
-  const W = 200, H = 100;
+  const W = w, H = h;
   const CID = 2, NAME = "ffs-rast";
 
   // 1. Declare the surface. Its width/height are what the firmware expects the frame to be.
@@ -292,6 +301,14 @@ async function showRaster(log: Log, how: "mode2" | "bmp" = "mode2"): Promise<voi
 
   // 2. Draw. Everything below is impossible through EvenHub containers.
   const r = new Raster(W, H).clear(0);
+  if (W < 120) {
+    // TINY VARIANT — one unmistakable shape, small enough to fit a SINGLE fragment. That takes
+    // fragmenting and ACK ordering out of the experiment entirely: if anything at all appears,
+    // the container, the page and the decode path are all fine and only content is in question,
+    // which is a far better place to be than a uniformly black HUD.
+    r.fillRoundRect(2, 2, W - 4, H - 4, 8, 200);
+    r.disc(W / 2, H / 2, Math.min(W, H) / 4, 0);
+  } else {
   // three filled tiles — EvenHub can show exactly one rounded rect, and only as a selection
   for (let i = 0; i < 3; i++) r.fillRoundRect(6 + i * 34, 8, 28, 28, 8, 210);
   // an outlined tile beside them, to show fill and stroke are both available
@@ -305,6 +322,7 @@ async function showRaster(log: Log, how: "mode2" | "bmp" = "mode2"): Promise<voi
   for (let x = 0; x < 188; x++) r.fillRect(6 + x, 54, 1, 10, Math.round((x / 187) * 255));
   // circles at descending brightness
   for (let i = 0; i < 5; i++) r.circle(20 + i * 40, 82, 10, 60 + i * 48, 2);
+  }
 
   // 3. Push it. The BMP variant is the CONTROL: it uses the already-proven decode path and no
   //    compression, so if it renders and mode 2 does not, the fault is isolated to zlib rather
