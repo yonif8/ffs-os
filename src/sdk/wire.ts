@@ -30,6 +30,12 @@ export const CONTAINER_IDS = {
 /** The declared canvas the firmware composites into. @proven */
 export const CANVAS = { width: 576, height: 288 } as const;
 
+/**
+ * Height of the header strip on a titled list page. 40px matches the proven Kotlin
+ * `listWithHeaderPage`, and leaves the list a 248px viewport.
+ */
+export const HEADER_HEIGHT = 40;
+
 export interface ListContainerSpec {
   x?: number;
   y?: number;
@@ -83,6 +89,51 @@ export function encodeListContainer(s: ListContainerSpec): Uint8Array {
   if (s.containerName != null) w.string(10, s.containerName);
   w.message(11, item.data);
   w.int32(12, (s.isEventCapture ?? true) ? 1 : 0);
+  return w.data;
+}
+
+export interface TextContainerSpec {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  containerId?: number;
+  containerName?: string;
+  content: string;
+  /**
+   * Whether this container captures gestures. Leave FALSE on any page that also carries a list:
+   * the firmware binds events to exactly ONE container per page, so a capturing text container
+   * would steal the swipes the list needs and freeze it.
+   */
+  isEventCapture?: boolean;
+  borderWidth?: number;
+  borderColor?: number;
+  borderRadius?: number;
+  paddingLength?: number;
+}
+
+/**
+ * TextObject:
+ *   f1..f4 geometry, f5 borderWidth, f6 borderColor, f7 borderRadius, f8 paddingLength,
+ *   f9 containerID, f10 containerName, f11 IsEventCapture, f12 content
+ *
+ * Field-for-field identical to the Kotlin `textContainer` that is proven on hardware, including
+ * writing zero-valued fields that proto3 would normally omit.
+ */
+export function encodeTextContainer(s: TextContainerSpec): Uint8Array {
+  const w = new ProtoWriter();
+  w.int32(1, s.x ?? 0);
+  w.int32(2, s.y ?? 0);
+  w.int32(3, s.width ?? CANVAS.width);
+  w.int32(4, s.height ?? CANVAS.height);
+  w.int32(5, s.borderWidth ?? 0);
+  w.int32(6, s.borderColor ?? 0);
+  w.int32(7, s.borderRadius ?? 0);
+  w.int32(8, s.paddingLength ?? 0);
+  w.int32(9, s.containerId ?? CONTAINER_IDS.text);
+  if (s.containerName != null) w.string(10, s.containerName);
+  w.int32(11, (s.isEventCapture ?? false) ? 1 : 0);
+  w.string(12, s.content);
   return w.data;
 }
 
@@ -143,18 +194,44 @@ export function encodeListPage(opts: {
   containerId?: number;
   containerName?: string;
   images?: readonly Uint8Array[];
+  /**
+   * Optional title drawn above the list in its own text container.
+   *
+   * Free, because a page CAN carry a capturing list AND a text container at once — proven
+   * on-glass 2026-08-08 (docs/proof/page-mixed-list-and-text.png). Had that been false, every
+   * screen would have had to spend row 0 on its own title.
+   */
+  header?: string;
 }): Uint8Array {
+  // The header takes a strip off the top and the list keeps the rest; with no header the list
+  // owns the whole canvas exactly as before.
+  const headerHeight = opts.header ? HEADER_HEIGHT : 0;
   const lc = encodeListContainer({
     x: 0,
-    y: 0,
+    y: headerHeight,
     width: CANVAS.width,
-    height: CANVAS.height,
+    height: CANVAS.height - headerHeight,
     containerId: opts.containerId ?? CONTAINER_IDS.list,
     containerName: opts.containerName ?? "ffs-list",
     items: opts.items,
     isEventCapture: true,
   });
-  const page = encodePageContainer({ lists: [lc], images: opts.images });
+  const texts = opts.header
+    ? [
+        encodeTextContainer({
+          x: 0,
+          y: 0,
+          width: CANVAS.width,
+          height: HEADER_HEIGHT,
+          containerId: CONTAINER_IDS.text,
+          containerName: "ffs-hdr",
+          content: opts.header,
+          // NEVER capturing — see the evt-0 trap above; the list must keep the gestures.
+          isEventCapture: false,
+        }),
+      ]
+    : undefined;
+  const page = encodePageContainer({ lists: [lc], texts, images: opts.images });
   return opts.rebuild
     ? encodeEnvelope(Cmd.REBUILD_PAGE, 7, page, opts.magic)
     : encodeEnvelope(Cmd.CREATE_STARTUP_PAGE, 3, page, opts.magic);

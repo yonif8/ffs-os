@@ -157,3 +157,33 @@ describe("FfsOs", () => {
     expect(cmds.slice(1).every((c) => c === Cmd.REBUILD_PAGE)).toBe(true);
   });
 });
+
+/**
+ * Headers. A page can carry a capturing list AND a text container at once (proven on-glass), so
+ * every OS screen names itself instead of spending a row on its own title.
+ */
+describe("FfsOs headers", () => {
+  it("titles the home screen and each submenu", async () => {
+    const { tx, sent, deliver } = harness();
+    const os = new FfsOs(new Session({ transport: tx, magic: () => 100 }), fakeHost());
+    void os.run();
+    await tick();
+    expect(rowsOf(sent[0]).join("|")).toContain("FFS OS");
+
+    deliver(listTap(1));
+    await tick(); await tick();
+    expect(rowsOf(sent[sent.length - 1]).join("|")).toContain("Settings");
+  });
+
+  it("the header participates in the no-op fingerprint", async () => {
+    // Same rows, different title, must still redraw — otherwise a screen would keep the previous
+    // screen's name and the identical-content optimisation would be actively wrong.
+    const { tx, sent } = harness();
+    const session = new Session({ transport: tx, magic: () => 100 });
+    const screen = await session.push({ header: "One", rows: [{ label: "A" }] });
+    const before = sent.length;
+    await screen.declare();                       // identical -> genuine no-op
+    expect(sent.length).toBe(before);
+    expect((await screen.declare()).ops[0].op).toBe("noop");
+  });
+});

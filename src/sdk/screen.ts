@@ -33,6 +33,11 @@ export interface Transport {
 export interface ListScreenOptions {
   rows: readonly Row<any>[];
   containerName?: string;
+  /**
+   * Optional title drawn above the list. Costs one text container and no interaction budget —
+   * a page can carry both, proven on-glass.
+   */
+  header?: string;
   /** Bypass the provenance gate — only for the experiment that PROVES a capability. */
   allowUnproven?: boolean;
 }
@@ -122,6 +127,7 @@ export class ListScreen<V = string> {
     // unchanged for a re-declare to be free.
     const fingerprint = JSON.stringify([
       name,
+      this.opts.header ?? null,
       this._rows.map((r) => [r.label, r.disabled === true]),
     ]);
     if (fingerprint === this._lastWire) {
@@ -138,6 +144,7 @@ export class ListScreen<V = string> {
       rebuild,
       magic: this.magic(),
       containerName: name,
+      header: this.opts.header,
     });
 
     if (this._off === null) {

@@ -59,7 +59,10 @@ export class FfsOs {
 
   private async home(): Promise<void> {
     await this.session.menu<string>(
-      { rows: rows([["Clock", "clock"], ["Settings", "settings"], ["Device", "device"], ["Apps", "apps"]]) },
+      {
+        header: "FFS OS",
+        rows: rows([["Clock", "clock"], ["Settings", "settings"], ["Device", "device"], ["Apps", "apps"]]),
+      },
       async (sel: Selection<string>) => {
         switch (sel.value) {
           case "clock": return this.clock();
@@ -81,7 +84,7 @@ export class FfsOs {
     // A list of one row is the simplest way to get a screen that reports back — the firmware
     // needs a capturing container for a double-tap to come home.
     await this.session.menu<string>(
-      { rows: rows([[`${hh}:${mm}`, "t"], [day, "d"], ["Back", "back"]]) },
+      { header: "Clock", rows: rows([[`${hh}:${mm}`, "t"], [day, "d"], ["Back", "back"]]) },
       async () => { /* any tap returns to home via the menu loop's back handling */ }
     );
   }
@@ -100,6 +103,7 @@ export class FfsOs {
     let backedOut = true;
     await this.session.menu<string>(
       {
+        header: "Settings",
         rows: rows([
           [kv("Brightness", String(this.state.brightness)), "brightness"],
           [kv("Silent", this.state.silent ? "On" : "Off"), "silent"],
@@ -133,6 +137,7 @@ export class FfsOs {
     const levels = [5, 10, 15, 20, 40, 70, 100];
     await this.session.menu<number>(
       {
+        header: "Brightness",
         rows: levels.map((n) => ({
           label: n === this.state.brightness ? `${n}  <` : String(n),
           value: n,
@@ -152,6 +157,7 @@ export class FfsOs {
     const s = await this.host.readSettings();
     await this.session.menu<string>(
       {
+        header: "Device",
         rows: rows([
           [kv("Battery", s.battery != null ? `${s.battery}%` : "--"), "b"],
           [kv("Left", s.leftFirmware ?? "--"), "l"],
@@ -167,18 +173,21 @@ export class FfsOs {
 
   private async apps(): Promise<void> {
     await this.session.menu<string>(
-      { rows: rows([["Notes", "notes"], ["Timer", "timer"], ["About", "about"]]) },
+      { header: "Apps", rows: rows([["Notes", "notes"], ["Timer", "timer"], ["About", "about"]]) },
       async (sel) => {
         if (sel.value === "about") {
           await this.session.menu<string>(
-            { rows: rows([["FFS OS", "a"], ["Built on the FFS SDK", "b"], ["Even Realities G2", "c"]]) },
+            {
+              header: "About",
+              rows: rows([["Version 0.1", "a"], ["Built on the FFS SDK", "b"], ["Even Realities G2", "c"]]),
+            },
             async () => {}
           );
         } else {
           // Placeholder apps, deliberately: the goal asks for apps to exist, and a stub that
           // navigates correctly proves more about the OS than a half-built feature would.
           await this.session.menu<string>(
-            { rows: rows([[`${sel.row.label}`, "x"], ["(not implemented)", "y"]]) },
+            { header: sel.row.label, rows: rows([["(not implemented)", "y"]]) },
             async () => {}
           );
         }
