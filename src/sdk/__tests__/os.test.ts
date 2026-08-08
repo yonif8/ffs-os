@@ -188,3 +188,33 @@ describe("FfsOs headers", () => {
     expect((await screen.declare()).ops[0].op).toBe("noop");
   });
 });
+
+/**
+ * The live clock. The interesting property is not that the time appears — it is that ticking
+ * costs NO page rebuild, because a rebuild would send the list's focus back to row 0 every
+ * second and make the screen unusable while scrolling.
+ */
+describe("FfsOs live clock", () => {
+  it("ticks via in-place text updates, not page rebuilds", async () => {
+    const { tx, sent, deliver } = harness();
+    const session = new Session({ transport: tx, magic: () => 100 });
+    const os = new FfsOs(session, fakeHost());
+    void os.run();
+    await tick();
+
+    deliver(listTap(0));                 // "Clock"
+    await tick(); await tick();
+    const declaresAfterEntering = session.stats.declareCount;
+
+    // Two seconds of ticking.
+    await new Promise((r) => setTimeout(r, 2100));
+
+    expect(session.stats.textUpdates).toBeGreaterThanOrEqual(1);
+    // THE ASSERTION THAT MATTERS: no page was rebuilt while the clock ran.
+    expect(session.stats.declareCount).toBe(declaresAfterEntering);
+    // ...and the updates went out as Cmd 5, not as pages.
+    const updates = sent.filter((b) => cmdOf(b) === Cmd.UPDATE_TEXT_DATA);
+    expect(updates.length).toBeGreaterThanOrEqual(1);
+    expect(rowsOf(updates[updates.length - 1]).join("|")).toMatch(/\d\d:\d\d:\d\d/);
+  }, 10000);
+});

@@ -9,6 +9,8 @@ import { ProtoWriter } from "./proto";
 /** EvenHub command ids (field 1 of evenhub_main_msg_ctx). */
 export const Cmd = {
   CREATE_STARTUP_PAGE: 0,
+  /** TextContainerUpgrade — change a live container's text WITHOUT rebuilding the page. */
+  UPDATE_TEXT_DATA: 5,
   REBUILD_PAGE: 7,
 } as const;
 
@@ -235,4 +237,29 @@ export function encodeListPage(opts: {
   return opts.rebuild
     ? encodeEnvelope(Cmd.REBUILD_PAGE, 7, page, opts.magic)
     : encodeEnvelope(Cmd.CREATE_STARTUP_PAGE, 3, page, opts.magic);
+}
+
+/**
+ * Change the text of a container that is ALREADY on screen, without rebuilding the page.
+ *
+ * Why this matters beyond saving bytes: a REBUILD re-declares the whole page, which resets the
+ * list's focus back to row 0. So anything that ticks — a clock, a timer, a battery readout —
+ * cannot be done with a rebuild without yanking the user's selection out from under them. This
+ * is the only way to have a live value on a screen the user is also navigating.
+ *
+ * `contentOffset` is 0 and `contentLength` is the UTF-8 byte length, matching the Kotlin
+ * encoder exactly.
+ */
+export function encodeUpdateText(opts: {
+  containerId: number;
+  content: string;
+  magic: number;
+}): Uint8Array {
+  const bytes = new TextEncoder().encode(opts.content);
+  const u = new ProtoWriter();
+  u.int32(1, opts.containerId);
+  u.int32(3, 0);
+  u.int32(4, bytes.length);
+  u.string(5, opts.content);
+  return encodeEnvelope(Cmd.UPDATE_TEXT_DATA, 9, u.data, opts.magic);
 }

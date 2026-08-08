@@ -8,7 +8,7 @@
 // eliminate. Measured on hardware: a native list scrolled row 0 -> row 1 with ZERO wire traffic;
 // the phone heard nothing until the user tapped. Preserving that is the whole design.
 
-import { encodeListPage } from "./wire";
+import { CONTAINER_IDS, encodeListPage, encodeUpdateText } from "./wire";
 import { normalizeEvent, EventType, type GlassesEvent } from "./events";
 import {
   assertProven,
@@ -166,6 +166,32 @@ export class ListScreen<V = string> {
   }
 
   /**
+   * Change the header text IN PLACE — no page rebuild, and crucially no loss of list focus.
+   *
+   * A REBUILD re-declares the page and sends the list's selection back to row 0, so anything
+   * that ticks (a clock, a timer, a battery readout) cannot use `update()` without yanking the
+   * user's selection out from under them mid-scroll. This is the only way to have a live value
+   * on a screen the user is also navigating.
+   *
+   * Does NOT touch the declare fingerprint or the generation: the page structure is unchanged,
+   * only the bytes inside one container.
+   */
+  async setHeaderText(text: string): Promise<void> {
+    if (this._state === "closed") throw new Error(`${this.id} is closed`);
+    if (this.opts.header === undefined) {
+      throw new Error(`${this.id} has no header container to update`);
+    }
+    const bytes = encodeUpdateText({
+      containerId: CONTAINER_IDS.text,
+      content: text,
+      magic: this.magic(),
+    });
+    await this.tx.sendEvenHub(bytes);
+    this.stats.bytesOut += bytes.length;
+    this.stats.textUpdates += 1;
+  }
+
+  /**
    * Re-declare with new rows. ONE page rebuild, same screen identity and event queue.
    *
    * Identical rows are a genuine no-op — that is what lets a test scroll 20 rows on-glass and
@@ -289,5 +315,8 @@ export class ListScreen<V = string> {
 }
 
 export function newStats(): SessionStats {
-  return { declareCount: 0, bytesOut: 0, eventsIn: 0, restores: { pop: 0, reconnect: 0 }, scrollRoundTrips: 0 };
+  return {
+    declareCount: 0, bytesOut: 0, eventsIn: 0,
+    restores: { pop: 0, reconnect: 0 }, scrollRoundTrips: 0, textUpdates: 0,
+  };
 }

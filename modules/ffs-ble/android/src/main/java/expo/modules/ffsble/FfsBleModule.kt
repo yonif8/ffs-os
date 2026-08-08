@@ -368,6 +368,12 @@ class FfsBleModule : Module() {
               "header" -> c?.showListWithHeader(listOf("ONE", "TWO", "THREE", "FOUR"), "HEADER")
               // The firmware's OWN swirl animation (even_ai service, not EvenHub). value!=0 = on.
               "swirl" -> c?.aiSwirl(value != 0)
+              // In-place text update (Cmd 5). `text` is the new content; `value` the container id
+              // (default 1 = the SDK's header container).
+              "uptext" -> c?.updateTextContainer(
+                if (value == 0) 1 else value,
+                intent.getStringExtra("text") ?: "UPDATED"
+              )
               "silent" -> c?.setSilentMode(value != 0)
               "wear" -> c?.setWearDetection(value != 0)
               "lensx" -> c?.setLensOffset(value, null)

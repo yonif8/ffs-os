@@ -92,17 +92,41 @@ export class FfsOs {
 
   // ---- clock --------------------------------------------------------------------------------
 
+  /**
+   * A LIVE clock: the time sits in the header and is updated in place once a second.
+   *
+   * Deliberately not done with a page rebuild. A rebuild re-declares the list and sends its
+   * focus back to row 0, so a ticking rebuild would fight the user every second they tried to
+   * scroll. `setHeaderText` changes one container's bytes and leaves the list untouched, which
+   * is the whole reason text.updateInPlace was worth proving.
+   */
   private async clock(): Promise<void> {
+    const stamp = () => {
+      const t = this.host.now();
+      const hh = String(t.getHours()).padStart(2, "0");
+      const mm = String(t.getMinutes()).padStart(2, "0");
+      const ss = String(t.getSeconds()).padStart(2, "0");
+      return `${hh}:${mm}:${ss}`;
+    };
     const t = this.host.now();
-    const hh = String(t.getHours()).padStart(2, "0");
-    const mm = String(t.getMinutes()).padStart(2, "0");
     const day = t.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
-    // A list of one row is the simplest way to get a screen that reports back — the firmware
-    // needs a capturing container for a double-tap to come home.
-    await this.session.menu<string>(
-      { header: "Clock", rows: rows([[`${hh}:${mm}`, "t"], [day, "d"], ["Back", "back"]]) },
-      async () => { /* any tap returns to home via the menu loop's back handling */ }
-    );
+
+    const screen = await this.session.push<string>({
+      header: stamp(),
+      rows: rows([[day, "d"], ["Back", "back"]]),
+    });
+
+    // Tick until the user leaves. Errors are swallowed on purpose: a dropped link mid-tick must
+    // not take the whole OS down, and the reconnect path will re-declare the screen anyway.
+    const timer = setInterval(() => {
+      void screen.setHeaderText(stamp()).catch(() => {});
+    }, 1000);
+    try {
+      await screen.nextSelection();
+    } finally {
+      clearInterval(timer);
+      await this.session.pop();
+    }
   }
 
   // ---- settings — REAL settings, not placeholders --------------------------------------------

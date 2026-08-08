@@ -1864,6 +1864,26 @@ class G2Central(
      * hardware over the real link. The log line says so explicitly, so a future reader scrolling
      * past cannot mistake it for a hardware capture.
      */
+    /**
+     * Change one already-declared text container's content IN PLACE (EvenHub Cmd 5), without
+     * rebuilding the page.
+     *
+     * The distinction is not about saving bytes: a REBUILD re-declares the list and sends its
+     * focus back to row 0, so any live value (clock, timer, battery) is only possible this way.
+     */
+    fun updateTextContainer(containerId: Int, text: String) = post {
+        if (!pairReadyLocked()) {
+            log("updateText ignored -- pair not ready (connect both lenses first)")
+            return@post
+        }
+        withSessionLocked {
+            sendEvenHubLocked(
+                G2EvenHub.updateText(containerId, text, counters.nextMagic()), G2Target.RIGHT
+            )
+            log("updateText: container=$containerId '$text' (in place, no rebuild)")
+        }
+    }
+
     fun injectInboundEvenHub(base64: String) = post {
         val data = decodeBase64(base64)
         if (data == null || data.isEmpty()) {

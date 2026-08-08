@@ -153,9 +153,22 @@ export const PROVENANCE: Readonly<Record<string, ProvenanceEntry>> = {
       "showListWithHeader photographed 2026-08-08: 'HEADER' text container above a live " +
       "ONE/TWO/THREE/FOUR list, selected row still drawn as the rounded-rect highlight",
   },
+  /**
+   * Change a live container's text WITHOUT rebuilding the page.
+   *
+   * The value is not the saved bytes — it is that a REBUILD resets the list's focus to row 0, so
+   * this is the ONLY way to have a ticking value on a screen the user is also navigating.
+   *
+   * Proven by a change too large to be an artefact: the header went from "HEADER" to twenty W's
+   * while the list and its selection stayed put. Ticking a clock's seconds was NOT sufficient
+   * evidence — at this glyph size the rig blooms six digits into one smear, and a per-region
+   * pixel diff could not separate the change from the camera's own exposure drift.
+   */
   "text.updateInPlace": {
-    status: "unproven",
-    evidence: "Cmd 5 updateText is built but has never been sent",
+    status: "proven",
+    evidence:
+      "Cmd 5 -> header replaced, list + selection unchanged; " +
+      "docs/proof/text-update-in-place.png (2026-08-08)",
   },
   "settings.silent": {
     status: "proven",
@@ -288,4 +301,6 @@ export interface SessionStats {
   restores: { pop: number; reconnect: number };
   /** Scrolls that cost a round trip. Should stay 0 for native lists. */
   scrollRoundTrips: number;
+  /** In-place text updates — live values that cost no page rebuild and no loss of focus. */
+  textUpdates: number;
 }
