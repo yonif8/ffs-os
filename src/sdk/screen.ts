@@ -292,14 +292,22 @@ export class ListScreen<V = string> {
           }, opts.timeoutMs)
         : (undefined as unknown as ReturnType<typeof setTimeout>);
 
-      opts.signal?.addEventListener("abort", () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        const i = this._waiters.indexOf(done);
-        if (i >= 0) this._waiters.splice(i, 1);
-        reject(new DOMException("aborted", "AbortError"));
-      });
+      // `once` matters: a caller that passes ONE long-lived AbortSignal to every next() call —
+      // the natural way to make a whole screen cancellable — would otherwise add a listener per
+      // call and never remove one, so a screen that has served a few hundred events carries a
+      // few hundred dead listeners.
+      opts.signal?.addEventListener(
+        "abort",
+        () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          const i = this._waiters.indexOf(done);
+          if (i >= 0) this._waiters.splice(i, 1);
+          reject(new DOMException("aborted", "AbortError"));
+        },
+        { once: true }
+      );
     });
   }
 

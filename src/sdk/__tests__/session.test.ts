@@ -238,3 +238,78 @@ describe("event routing follows the top of the stack", () => {
     expect(picked).toEqual(["home:home-0", "child:child-1"]);
   });
 });
+
+/**
+ * REGRESSION — a push that FAILS must not leave the OS deaf.
+ *
+ * push() suspends the parent before declaring the child, so if declare() throws (a transport
+ * error, a page the firmware rejects, the provenance gate) the parent would stay suspended
+ * forever and the half-born screen would stay on the stack. The glasses would keep rendering
+ * the parent while every tap went nowhere — which looks exactly like a frozen list, and is the
+ * hardest possible symptom to trace back to a failed push.
+ */
+describe("a failed push unwinds cleanly", () => {
+  function flakyHarness(failOn: number) {
+    const sent: Uint8Array[] = [];
+    const handlers: Array<(p: Uint8Array) => void> = [];
+    let n = 0;
+    const tx: Transport = {
+      async sendEvenHub(b) {
+        if (++n === failOn) throw new Error("link went away mid-declare");
+        sent.push(b);
+      },
+      onInbound(h) {
+        handlers.push(h);
+        return () => { const i = handlers.indexOf(h); if (i >= 0) handlers.splice(i, 1); };
+      },
+    };
+    return { tx, sent, deliver: (p: Uint8Array) => handlers.slice().forEach((h) => h(p)) };
+  }
+
+  it("restores the parent's ability to hear events, and leaves the stack intact", async () => {
+    const { tx, deliver } = flakyHarness(2); // first declare succeeds, the child's fails
+    const s = new Session({ transport: tx, magic: () => 100 });
+    const parent = await s.push({ rows: rows("home-0", "home-1") });
+
+    await expect(s.push({ rows: rows("child") })).rejects.toThrow("link went away");
+
+    // The half-born screen must not be left on the stack.
+    expect(s.depth).toBe(1);
+    expect(s.top).toBe(parent);
+
+    // ...and the parent must still be listening, or the OS is deaf from here on.
+    const got = parent.next();
+    deliver(TAP_ROW1);
+    await expect(got).resolves.toMatchObject({ kind: "select", index: 1 });
+  });
+});
+
+/**
+ * REGRESSION — a menu that ABORTS must not leave screens it opened alive.
+ *
+ * If a handler pushes a screen and then throws, menu()'s own screen ends up BURIED under the
+ * child. The old unwind only fired when the menu's screen was on TOP, so a buried one was never
+ * closed: its inbound subscription leaked and it stayed suspended, i.e. deaf, forever.
+ *
+ * Note the handler must THROW rather than simply not pop: with a child on top the menu's screen
+ * is suspended and cannot receive the back event at all, so a menu whose handler leaves a child
+ * up never returns in the first place. The throwing path is the reachable one.
+ */
+describe("menu unwinds everything it opened", () => {
+  it("closes buried screens when a handler pushes and then throws", async () => {
+    const { tx, deliver } = harness();
+    const s = new Session({ transport: tx, magic: () => 100 });
+
+    const done = s.menu<string>({ rows: rows("a", "b") }, async () => {
+      await s.push({ rows: rows("child") });   // pushed, then abandoned by the throw
+      throw new Error("handler blew up");
+    });
+
+    await new Promise((r) => setTimeout(r, 0));
+    deliver(TAP_ROW0);
+    await expect(done).rejects.toThrow("handler blew up");
+
+    // Both the menu's screen and the child it opened are gone.
+    expect(s.depth).toBe(0);
+  });
+});

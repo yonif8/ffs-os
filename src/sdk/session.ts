@@ -59,14 +59,32 @@ export class Session {
   get depth(): number { return this.stack.length; }
   get top(): ListScreen<any> | undefined { return this.stack[this.stack.length - 1]; }
 
-  /** Push a new list screen and declare it. */
+  /**
+   * Push a new list screen and declare it.
+   *
+   * If the declare FAILS the push unwinds completely: the half-born screen is removed and the
+   * parent is resumed. Without that, a failed push leaves the parent suspended forever and a
+   * dead screen on the stack — the glasses keep rendering the parent while every tap goes
+   * nowhere, which is indistinguishable from a frozen list and nearly impossible to trace back
+   * to the push that failed. A declare can fail for entirely ordinary reasons (the link drops
+   * mid-write, the firmware rejects the page), so this is not a theoretical path.
+   */
   async push<V = string>(opts: ListScreenOptions): Promise<ListScreen<V>> {
+    const parent = this.top;
     // The screen being covered is no longer on the glasses, so it must stop hearing events —
     // otherwise it queues the CHILD's taps and replays them on the way back out.
-    this.top?.suspend();
+    parent?.suspend();
     const s = new ListScreen<V>(this.tx, this.stats, opts, this.magic, this.pageSlot);
     this.stack.push(s);
-    await s.declare();
+    try {
+      await s.declare();
+    } catch (e) {
+      const i = this.stack.indexOf(s);
+      if (i >= 0) this.stack.splice(i, 1);
+      s.close();
+      parent?.resume();
+      throw e;
+    }
     return s;
   }
 
@@ -137,9 +155,15 @@ export class Session {
         }
       }
     } finally {
-      if (this.top === screen) {
-        this.stack.pop();
-        screen.close();
+      // Unwind to AND INCLUDING this screen, not just the top.
+      //
+      // A handler that pushed without popping would otherwise leave this menu's screen BURIED:
+      // never closed, so its inbound subscription is never released, and permanently suspended,
+      // so it is deaf if anything ever surfaces it again. menu() returning means the menu is
+      // finished, so nothing it opened should outlive it.
+      const i = this.stack.indexOf(screen);
+      if (i >= 0) {
+        for (const dead of this.stack.splice(i)) dead.close();
         if (this.stack.length) await this.declareTop("pop");
       }
     }
