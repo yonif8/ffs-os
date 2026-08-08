@@ -68,6 +68,7 @@ function fakeHost(): OsHost {
       return { battery: 57, brightness: 15, leftFirmware: "2.2.7.14", rightFirmware: "2.2.7.14" };
     },
     setSwirl() {},
+    playPreset() {},
     // Fixed clock: a screen that renders the wall time is otherwise untestable.
     now: () => new Date("2026-08-08T09:41:00Z"),
   };

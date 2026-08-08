@@ -7,6 +7,7 @@
 
 import FfsBle from "../../modules/ffs-ble";
 import { fromBase64, toBase64 } from "./base64";
+import { encodePreset } from "./sound";
 import type { Transport } from "./screen";
 
 /** EvenHub service id — pages, containers and events. */
@@ -104,6 +105,12 @@ export function nativeHost(): OsHost & { dispose(): void } {
     setSwirl(on: boolean) {
       // even_ai service, driven by the native module — not an EvenHub page.
       FfsBle.showAiSwirl(on);
+    },
+    playPreset(preset: number) {
+      // Buzzer commands ride the IMAGE channel, not EvenHub: the CFW reads a leading byte 5 as
+      // a sound rather than pixels. Presets only — they self-terminate inside the driver, so a
+      // dropped link cannot strand the piezo sounding (which raw tones demonstrably can).
+      FfsBle.pushPayloadViaImage(toBase64(encodePreset(preset)));
     },
     now: () => new Date(),
     dispose: () => sub.remove(),

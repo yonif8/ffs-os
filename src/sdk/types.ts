@@ -249,6 +249,36 @@ export const PROVENANCE: Readonly<Record<string, ProvenanceEntry>> = {
    * 2.2.7.14 may simply carry Hebrew. Distinguishing them needs a stock flash, and the practical
    * fact (Hebrew renders now) does not depend on the answer.
    */
+  /**
+   * THE PIEZO SOUNDS. Yoni heard it, 2026-08-08 ~04:31 — the last untouched Tier 2 capability.
+   *
+   * It needs NO CFW payload and no resident loader: the flashed CFW already reads an
+   * image-channel message beginning with byte 5 as a buzzer command. Three bytes over a channel
+   * that already worked. A payload probe had been written for this first, and the loader was
+   * wedged that night, so the payload route would not have worked at all — check what the CFW
+   * already exposes before writing code to run on the glasses.
+   */
+  "buzzer.preset": {
+    status: "proven",
+    evidence: "image-channel [5][0][preset]; audible confirmation from Yoni 2026-08-08",
+  },
+  /**
+   * ⛔ RAW TONES DO NOT SELF-TERMINATE ON 2.2.7.14. The `ms` argument is silently discarded.
+   *
+   * The CFW starts the PWM, then arms a stop-timer ONLY if G2FW_BUZZ_TIMER_HANDLE_PTR reads
+   * non-zero — and that address is [M], never verified on this build. It read zero: the tone
+   * played indefinitely, next to a sleeping person, until an explicit STOP was sent. No error,
+   * no telemetry, no way to notice except the sound.
+   *
+   * Use presets (driver-terminated) or `playToneSafely`, which arms a phone-side stop. Proving
+   * the firmware timer would mean fixing that address first — until then this stays unproven.
+   */
+  "buzzer.rawToneSelfTerminates": {
+    status: "unproven",
+    evidence:
+      "⛔ OBSERVED FALSE 2026-08-08: raw tone ran until an explicit STOP. " +
+      "G2FW_BUZZ_TIMER_HANDLE_PTR is [M] and appears to read 0.",
+  },
   "font.hebrewGlyphs": {
     status: "proven",
     evidence:

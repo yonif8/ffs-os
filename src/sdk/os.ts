@@ -13,6 +13,7 @@
 import { Session } from "./session";
 import type { Row, Selection } from "./types";
 import { LIMITS } from "./types";
+import { OS_DONE_PRESET } from "./sound";
 
 /** Everything the OS needs from the outside world. Injected so the whole OS is testable. */
 export interface OsHost {
@@ -37,6 +38,11 @@ export interface OsHost {
    * off leaves the HUD empty until something re-declares. Callers must restore their own screen.
    */
   setSwirl(on: boolean): Promise<void> | void;
+  /**
+   * Play one of the firmware's canned sounds. Presets only, by design: they self-terminate in
+   * the driver, so a dropped link cannot leave the piezo sounding.
+   */
+  playPreset(preset: number): Promise<void> | void;
   /** Wall clock, injected so screens are deterministic in tests. */
   now(): Date;
   /** Optional note source. The glasses cannot capture text, so this is read-only by nature. */
@@ -48,6 +54,12 @@ export interface OsState {
   brightness: number;
   silent: boolean;
   wearDetect: boolean;
+  /**
+   * Whether the OS may make a sound. OFF by default, and deliberately so: the glasses live on
+   * someone's face or beside their bed, and a timer that chimes unasked is worse than one that
+   * does not. The user turns this on in Settings.
+   */
+  sound: boolean;
 }
 
 const rows = <V>(items: Array<[string, V]>): Row<V>[] =>
@@ -57,7 +69,7 @@ const rows = <V>(items: Array<[string, V]>): Row<V>[] =>
 const kv = (k: string, v: string) => `${k}  ${v}`;
 
 export class FfsOs {
-  readonly state: OsState = { brightness: 15, silent: false, wearDetect: true };
+  readonly state: OsState = { brightness: 15, silent: false, wearDetect: true, sound: false };
 
   constructor(private readonly session: Session, private readonly host: OsHost) {}
 
@@ -150,6 +162,7 @@ export class FfsOs {
           [kv("Brightness", String(this.state.brightness)), "brightness"],
           [kv("Silent", this.state.silent ? "On" : "Off"), "silent"],
           [kv("Wear detect", this.state.wearDetect ? "On" : "Off"), "wear"],
+          [kv("Sound", this.state.sound ? "On" : "Off"), "sound"],
         ]),
       },
       async (sel) => {
@@ -163,6 +176,11 @@ export class FfsOs {
           case "wear":
             this.state.wearDetect = !this.state.wearDetect;
             await this.host.setWearDetection(this.state.wearDetect);
+            break;
+          case "sound":
+            this.state.sound = !this.state.sound;
+            // Confirm audibly ONLY when switching ON — turning sound off must be silent.
+            if (this.state.sound) await this.host.playPreset(OS_DONE_PRESET);
             break;
         }
       }
@@ -280,7 +298,10 @@ export class FfsOs {
       const elapsed = Math.floor((this.host.now().getTime() - started) / 1000);
       const left = seconds - elapsed;
       void screen.setHeaderText(left <= 0 ? "DONE" : fmt(left)).catch(() => {});
-      if (left <= 0) clearInterval(timer);
+      if (left <= 0) {
+        clearInterval(timer);
+        if (this.state.sound) void Promise.resolve(this.host.playPreset(OS_DONE_PRESET)).catch(() => {});
+      }
     }, 1000);
 
     try {
