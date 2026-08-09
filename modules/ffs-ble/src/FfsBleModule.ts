@@ -439,6 +439,23 @@ interface FfsBleNativeModule {
    */
   setBrightness(level: number, autoAdjust: boolean): void;
   /**
+   * Silent mode (sid 0x09). Suppresses the glasses' own notification behaviour.
+   */
+  setSilentMode(on: boolean): void;
+  /**
+   * Wear detection (sid 0x09) — whether the glasses react to being put on and taken off.
+   */
+  setWearDetection(on: boolean): void;
+  /**
+   * Nudge the rendered image within the lens (sid 0x09 `deviceReceiveXCoordinate` /
+   * `deviceReceiveYCoordinate`, roughly ±20 px, per-arm).
+   *
+   * Worth knowing for visual proofs: this is the ONLY way to change the camera rig's FRAMING
+   * without a human moving the phone, since focus, zoom and exposure are all software-adjustable
+   * but aim is not (docs/VERIFICATION-RIG.md).
+   */
+  setLensOffset(x: number, y: number): void;
+  /**
    * Read the sid-0x09 settings snapshot back off the glasses. Pass true to ask for
    * brightness only. The reply arrives as a log/settings event, not a return value —
    * this is how a setter is proven WITHOUT pointing a camera at the HUD.
