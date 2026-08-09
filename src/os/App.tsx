@@ -44,60 +44,73 @@ import { attachOsCommandListener } from "./runtime";
 // (FUT-233, 2026-07-28: a log said 0.11.1 while 0.11.4 was installed.)
 const APP_VERSION = (Constants.expoConfig?.version ?? "unknown") as string;
 
-// FUT-167 Stage 2 — CFW + stock-restore images (hosted on the private slsrc server, NOT
-// bundled: this repo is public and the firmware is Even's copyrighted image). Downloaded
-// + SHA-verified natively before any write.
-const CFW_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_cfw.bin";
+// FUT-167 Stage 2 — CFW + stock-restore images. NEVER bundled and NEVER public: these are
+// Even's copyrighted image plus our patch, and this repo is public.
+//
+// ⛔ They used to be fetched from a public bucket, whose URLs this file then published in
+// full. That bucket was open — a 4.4 MB firmware image answered HTTP 200 to anyone — so it
+// was taken down on 2026-08-09 and the R2 objects made private. Do not reintroduce a public
+// host here.
+//
+// The image is served from the DEV MACHINE at flash time instead, reached over the USB
+// tunnel (`scripts/fw-serve.ps1` starts the server and the `adb reverse`). That is not a
+// downgrade in safety: the URL was never trusted to begin with. Every flash runs the same
+// gate chain — SHA match, EVENOTA parse, MRAM brick-guard, known-golden lookup — so a wrong
+// or hostile file is refused whatever the URL. The SHA pins below are the real control.
+//
+// Point somewhere else by setting EXPO_PUBLIC_FW_BASE at build time.
+const FW_BASE = process.env.EXPO_PUBLIC_FW_BASE ?? "http://127.0.0.1:8799/fw";
+const CFW_URL = `${FW_BASE}/g2_2.2.6.10_cfw.bin`;
 const CFW_SHA = "5c1539fd39c599e6035f6a8ec0779ba687c250d342a24c21a39952fed6c56aa0";
-const STOCK_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_stock.bin";
+const STOCK_URL = `${FW_BASE}/g2_2.2.6.10_stock.bin`;
 const STOCK_SHA = "f4dfb0b49ad3de3c2daf17f8a27a157c3dc98411d6a0d3ab2cfd0918f41b9afa";
 // FUT-167 canary — Even's EXACT stock 2.2.6.10 with ONLY the reported firmware-version
 // string changed 2.2.6.10 → 2.2.6.77 (10 rodata literals, length-preserving, checksums
 // recomputed; bootloader byte-identical, validate PASS). The safe FIRST real flash: if it
 // boots, "Read battery + firmware version" shows 2.2.6.77 → the write→commit→reboot→readback
 // loop is proven on-hardware, with a payload that is behaviorally stock. Restore Stock reverts.
-const CANARY_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_canary.bin";
+const CANARY_URL = `${FW_BASE}/g2_2.2.6.10_canary.bin`;
 const CANARY_SHA = "67759cd67ed7031d7b4c8a613b8b0fe9dc9bd51c11e82260c35f5bc807159b5e";
 // FUT-188 "fontpeek" — the shipped CFW + one injected READ that appends the XIP font-slot-0
 // header (127 B from 0x80100000) to the sid=0x09 device-info response. After flashing, tap
 // "Read battery + firmware version" and the font header shows on the firmware-L version line
 // as ⟨FONT0=…hex…⟩ → gives us the s200_font.bin format ground-truth for native Hebrew. Pure
 // read, no new flash-write behavior; Restore Stock reverts. Same golden-vector safety gate.
-const FONTPEEK_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_fontpeek.bin";
+const FONTPEEK_URL = `${FW_BASE}/g2_2.2.6.10_fontpeek.bin`;
 const FONTPEEK_SHA = "70332b9822806a546e028ffb1b88b49a44593fe88236a3daa70866185acbb4f0";
 // FUT-179 NATIVE HEBREW — staged flash (do these IN ORDER).
 // Stage 1 (BIDI-ONLY, FUT-190): RTL reorder only, NO glyph changes. Flash this first and
 // check normal English/Chinese text still renders correctly — it isolates the shared
 // label-draw hook's blast radius before Hebrew is added. Hebrew won't appear yet.
-const HEBREW_BIDI_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_bidi_only.bin";
+const HEBREW_BIDI_URL = `${FW_BASE}/g2_2.2.6.10_bidi_only.bin`;
 const HEBREW_BIDI_SHA = "33404e1977aa7d1abaeedfb34a64f1b81e470b6ea818a1d21f61a0187ca5be1c";
 // Stage 2 (FULL, FUT-189+190): bidi + Hebrew glyphs (embedded TTF via the FreeType-cache
 // requester hook). This is the one that renders Hebrew, correctly ordered, system-wide.
-const HEBREW_FULL_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_hebrew_full.bin";
+const HEBREW_FULL_URL = `${FW_BASE}/g2_2.2.6.10_hebrew_full.bin`;
 const HEBREW_FULL_SHA = "45a481fc13b3cb864a9c6b63a4c428c248ab1f3a8ab770715b71965bad09ed5f";
 // FUT-191 — Hebrew v2 + font probe: full-coverage Hebrew (gershayim/geresh/shekel/
 // presentation forms; no niqqud) + a diagnostic that logs the scalable font names the
 // firmware opens (read back via "Read battery + firmware version"). Supersedes the FULL
 // build above. Flash this, browse the UI, then do the firmware-version read.
-const HEBREW_PROBE_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_hebrew_probe.bin";
+const HEBREW_PROBE_URL = `${FW_BASE}/g2_2.2.6.10_hebrew_probe.bin`;
 const HEBREW_PROBE_SHA = "39ea04a2964c443a1434310d929d64cf22c24ef908255f0f8d07a4b01e72cbfd";
 // FUT-197 — FFS UI probe (ALWAYS-ON): Hebrew-full CFW + our OWN native-LVGL element via CFW.
 // A styled rounded box AUTO-SHOWS on the home HUD (no gesture) whose child label LIVE-TICKS
 // an MM:SS counter (1 Hz, driven by a firmware lv_timer armed at boot). First on-glass proof
 // that our own native UI renders + live-updates firmware-side with zero phone — the de-risk
 // step before owning the idle screen (FUT-195 Phase B).
-const FFSUI_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_ffsui.bin";
+const FFSUI_URL = `${FW_BASE}/g2_2.2.6.10_ffsui.bin`;
 const FFSUI_SHA = "3a673c966658216ecbb9397d65682e8131ea4465f8915c941250985f8368d8ce";
 // FUT-214 — RAM-exec probe: the "flash-once, push-forever" de-risk build. After flashing,
 // tap "Read battery + firmware version": the CFW runs a RAM-exec test and returns the result
 // on the firmware-L line as ⟨RAMEXEC RX01 EXEC_OK ret=0x2A …⟩ (ret==0x2A => pushing native
 // code into RAM and running it WORKS — green light for the resident OTA loader).
-const RAMEXEC_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_ramexec.bin";
+const RAMEXEC_URL = `${FW_BASE}/g2_2.2.6.10_ramexec.bin`;
 const RAMEXEC_SHA = "913a7f28cc79957ed8a5991c7434d993583070fc3d369b6c6a9e1683fd6f3f86";
 // FUT-216 — resident OTA loader ("flash-once, push-forever"). Flash ONCE (inert, no seize —
 // glasses behave normally) then tap Push Payload A / B to change on-glass UI OVER THE AIR with
 // NO reflash. Loader status shows on the device-info read as ⟨LOADER LD01 gen=… ret=0x…⟩.
-const LOADER_URL = "https://slsrc.x36.site/fw/g2_2.2.6.10_loader.bin";
+const LOADER_URL = `${FW_BASE}/g2_2.2.6.10_loader.bin`;
 // FUT-217: no gesture hooks (left touchpad); FUT-216: dispatch probe (logs service keys → svc[]).
 const LOADER_SHA = "373bfe9aa3645f1cda5b0204df1db3516e16347f31dcc9a39846442022c43103";
 // FUT-246 — the SAME loader rebased onto stock 2.2.7.14, which is what Yoni's glasses now run.
@@ -106,10 +119,10 @@ const LOADER_SHA = "373bfe9aa3645f1cda5b0204df1db3516e16347f31dcc9a39846442022c4
 // loader body-CRC (a corrupt frame is refused as LD04 instead of being executed) and the
 // ffs_ui_patch prop-id migration. ⚠️ The payload frame gained an 8-byte CRC header, so app
 // and firmware MUST ship together — an old app against this loader is refused rej_code=4.
-const LOADER_2_2_7_14_URL = "https://slsrc.x36.site/fw/g2_2.2.7.14_loader.bin";
+const LOADER_2_2_7_14_URL = `${FW_BASE}/g2_2.2.7.14_loader.bin`;
 const LOADER_2_2_7_14_SHA = "7ecf5f4948e510469cc85cd77c1a291e67bf78800f93a40cb918cf5f326eb9a6";
 // Stock 2.2.7.14, kept as the restore-to-stock escape hatch for the current base.
-const STOCK_2_2_7_14_URL = "https://slsrc.x36.site/fw/g2_2.2.7.14_stock.bin";
+const STOCK_2_2_7_14_URL = `${FW_BASE}/g2_2.2.7.14_stock.bin`;
 const STOCK_2_2_7_14_SHA = "0fced0aebcc6c88db6f76dba34f91b805d842a5fc297bfd7fa6d6a34ec83cecb";
 const CFW_SERVICE = 0x90; // custom CFW loader BLE service id
 // FUT-238 — STYLE PROPS ORACLE (one tap, one answer). Runs the firmware's OWN

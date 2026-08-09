@@ -37,6 +37,14 @@ const ENDPOINT = "wss://g2app.x36.site/glog/ingest";
 // Injected at build time from a private GitHub Actions secret (EXPO_PUBLIC_GLOG_TOKEN);
 // never hardcoded in this public repo. Empty = telemetry ships without a token (the
 // collector may reject it) — the logger degrades silently, it never breaks the app.
+//
+// ⚠️ THIS TOKEN IS PUBLIC ONCE A BUILD SHIPS, and no amount of secret-handling changes that.
+// `EXPO_PUBLIC_*` means Expo INLINES the value into the JS bundle, and our IPA is published to
+// a public repo — so anyone who downloads the app can read it out. (Checked 2026-08-09: the
+// currently published IPA is clean only because it predates the glog work.) Treat it as a
+// throttling key, not a secret: rate-limit the collector, rotate on a schedule, and never
+// grant it anything beyond log ingest. Sending it as a query param below is deliberate for the
+// same reason — it lands in proxy logs, which costs nothing that is not already public.
 const TOKEN = process.env.EXPO_PUBLIC_GLOG_TOKEN ?? "";
 
 const BUFFER_CAP = 3000;          // pending records held while offline; oldest dropped past this
