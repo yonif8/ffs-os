@@ -154,20 +154,30 @@ export function attachOsCommandListener(log: Log = () => {}): () => void {
     }
   });
 
+  // EVERY probe is fired through here, never with a bare `void`.
+  //
+  // `void somePromise()` discards the rejection, and Hermes prints nothing for an unhandled one.
+  // Measured 2026-08-09: a raster push stopped between "container declared" and the first
+  // fragment and produced NO log line, NO error and NO red box — indistinguishable from the
+  // glasses ignoring us, which is the single most expensive thing a failure can look like here.
+  // It cost a hardware cycle to even establish that the throw was on the phone.
+  const fire = (name: string, p: Promise<void>) =>
+    void p.catch((e) => log(`[${name}] THREW: ${(e && (e.stack || e.message)) || String(e)}`));
+
   const sub = FfsBle.addListener("onOsCommand", ({ cmd }) => {
     if (cmd === "stop") runtime.stop();
-    else if (cmd === "imu") void probeImu(log);
-    else if (cmd === "styles") void probeStyles(log);
-    else if (cmd === "tiles") void probeTiles(log);
-    else if (cmd === "p3") void probe3(log);
-    else if (cmd === "launcher") void showLauncher(log);
-    else if (cmd === "raster") void showRaster(log, "mode2");
-    else if (cmd === "rasterbmp") void showRaster(log, "bmp");
+    else if (cmd === "imu") fire("imu", probeImu(log));
+    else if (cmd === "styles") fire("styles", probeStyles(log));
+    else if (cmd === "tiles") fire("tiles", probeTiles(log));
+    else if (cmd === "p3") fire("p3", probe3(log));
+    else if (cmd === "launcher") fire("launcher", showLauncher(log));
+    else if (cmd === "raster") fire("raster", showRaster(log, "mode2"));
+    else if (cmd === "rasterbmp") fire("raster", showRaster(log, "bmp"));
     // Single-fragment variants: small enough that the whole frame fits one message, which
     // removes fragmenting and ACK ordering from the experiment entirely.
-    else if (cmd === "rastertiny") void showRaster(log, "mode2", 48, 32);
-    else if (cmd === "rastertinybmp") void showRaster(log, "bmp", 48, 32);
-    else void runtime.boot();
+    else if (cmd === "rastertiny") fire("raster", showRaster(log, "mode2", 48, 32));
+    else if (cmd === "rastertinybmp") fire("raster", showRaster(log, "bmp", 48, 32));
+    else fire("boot", runtime.boot());
   });
   return () => {
     sub.remove();
