@@ -45,9 +45,26 @@ yarn-error.*
 android/app/src/main/assets/index.android.bundle
 android/app/src/main/assets/index.android.bundle.map
 
-# Transient camera-rig captures written to the repo root by scripts/hud-probe.ps1.
-# Anything worth keeping is copied into docs/proof/ with a descriptive name.
-/hud*.png
-/os[0-9]*.png
-/app_screen*.png
-/cam_focus*.png
+# ⛔ NO CAMERA-RIG CAPTURES IN THIS REPO. IT IS PUBLIC.
+#
+# Every rig photo shows the room behind the HUD, so they do not belong in a public repo at all --
+# not at the root, and not curated into docs/proof/ either. Keep them local and DESCRIBE what they
+# show in prose (STATUS.md, a commit message); the measurable evidence -- ret= masks, ACK codes,
+# the firmware's page verdict -- is text and belongs in the record anyway.
+#
+# The previous rule here named four filename patterns (/hud*.png, /os[0-9]*.png, ...), but
+# hud-probe.ps1 writes whatever `-Out` is given, so it could only ever catch captures that happened
+# to be called hud*. 120 photos (85MB) reached the public repo through that gap and had to be
+# purged from history on 2026-08-09. Hence a denylist of the whole file type, with explicit
+# exceptions, rather than a list of names nobody will remember to extend.
+#
+# To commit an image DELIBERATELY: put it under an excepted path, or add a `!` line -- and if it is
+# a photograph, put it in a PRIVATE repo instead.
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.webp
+!assets/**
+!tools/g2sim/**
