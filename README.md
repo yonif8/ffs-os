@@ -1,8 +1,14 @@
 # FFS Glasses OS
 
+> 🎯 **The goal:** an SDK that makes it easy to build our own screens, UX and animations that
+> **render natively on the glasses** (drawn and animated by the glasses themselves, not streamed
+> as phone-rendered pixels), and an on-glass OS built with it. The stock text-and-list surface is
+> the floor, not the ceiling. Full statement lives in the private workspace's `CLAUDE.md`.
+
 A clean-room operating layer for the **Even Realities G2** smart glasses, built on our
-own from-scratch CoreBluetooth BLE driver — **no `@mentra/bluetooth-sdk`**, no third-party
-pipes. Drives the G2 display, touchpad input, and (soon) microphone directly over BLE.
+own from-scratch BLE driver (Kotlin on Android — the primary dev platform; the Swift/CoreBluetooth
+driver is parked) — **no `@mentra/bluetooth-sdk`**, no third-party pipes. Drives the G2 display,
+touchpad input, and (soon) microphone directly over BLE.
 
 > Standalone, `@mentra`-free extraction of the OS from its original hybrid repo. This repo
 > contains **only the OS**: the native driver + the app shell that runs on it.

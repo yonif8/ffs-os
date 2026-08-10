@@ -1,5 +1,16 @@
 # The FFS SDK
 
+> 🎯 **What this SDK is FOR.** Making it easy to build our own screens, UX and animations that
+> **render natively on the glasses** — drawn and animated by the glasses' own display engine, not
+> by the phone. The phone declares or pushes once and gets out of the way.
+>
+> The stock surface (text lines + one list) is the **floor, not the ceiling**: the firmware's own
+> dashboard demonstrates animated scrolling, rubber-band, fades, layout geometry and more. Exposing
+> that class of capability is the point of this SDK.
+>
+> ⛔ Streaming phone-rendered pixels frame-by-frame is a **fallback**, never the destination.
+> (Workspace `CLAUDE.md` holds the full goal statement and current state.)
+
 A TypeScript SDK for the Even Realities G2. Everything here is written so an app can be built
 against it **without touching firmware internals** — no protobuf, no field numbers, no container
 ids, no BLE. [`os.ts`](os.ts) is the worked proof of that claim: a complete mini-OS that imports
@@ -122,6 +133,9 @@ parent while the phone believes it navigated. Pinned by *"a pushed submenu REBUI
   inbound frames). Untested in motion.
 - **The CFW image channel has a direct-framebuffer mode** (mode 2: zlib → display buffer at 8bpp).
   Encoders written and pinned; **not yet rendering** — see `cfw.directFramebuffer`.
+  ⛔ **This is a FALLBACK, not the goal.** It has the *phone* rendering every frame and streaming
+  pixels over BLE. This SDK exists to expose what the glasses can render **natively** — see 🎯 THE
+  GOAL at the top of the workspace `CLAUDE.md`. Do not treat mode 2 as the destination.
 
 ## Testing
 
