@@ -177,6 +177,11 @@ export function attachOsCommandListener(log: Log = () => {}): () => void {
     // removes fragmenting and ACK ordering from the experiment entirely.
     else if (cmd === "rastertiny") fire("raster", showRaster(log, "mode2", 48, 32));
     else if (cmd === "rastertinybmp") fire("raster", showRaster(log, "bmp", 48, 32));
+    // The two-frame experiment: same encoder, deliberately different pixels. See RasterVariant.
+    else if (cmd === "rastera") fire("raster", showRaster(log, "mode2", 48, 32, "A"));
+    else if (cmd === "rasterb") fire("raster", showRaster(log, "mode2", 48, 32, "B"));
+    else if (cmd === "rasterabmp") fire("raster", showRaster(log, "bmp", 48, 32, "A"));
+    else if (cmd === "rasterbbmp") fire("raster", showRaster(log, "bmp", 48, 32, "B"));
     else fire("boot", runtime.boot());
   });
   return () => {
@@ -314,11 +319,29 @@ async function showLauncher(log: Log): Promise<void> {
  * the same time, an antialiased arc gauge, circles, and a grey ramp proving all 256 levels are
  * live rather than the 16 a 4-bit BMP would give.
  */
+/**
+ * Frame content. "shape" is the original probe; A and B exist for ONE question.
+ *
+ * On 2026-08-09 an 886 B BMP and a 1548 B mode-2 stream rendered a byte-identical
+ * ring-and-tab glyph that is not the shape either encodes. That compared two ENCODERS of
+ * the same picture, so it could not distinguish "our encoders are both wrong" from "the
+ * image path never draws caller pixels at all". A and B are the same encoder carrying
+ * maximally different content: a fully-lit rectangle and a half-lit one. If the HUD is
+ * identical for both, caller pixels are not reaching the glass and no amount of encoder
+ * work would help — which is the finding, not a failure.
+ *
+ * Deliberately NOT all-white vs all-black: an all-black frame is indistinguishable from
+ * "nothing rendered", which is the one reading this experiment cannot afford to be
+ * ambiguous about. Both frames are bright; they differ in SHAPE.
+ */
+type RasterVariant = "shape" | "A" | "B";
+
 async function showRaster(
   log: Log,
   how: "mode2" | "bmp" = "mode2",
   w = 200,
-  h = 100
+  h = 100,
+  variant: RasterVariant = "shape"
 ): Promise<void> {
   const tx = nativeTransport();
   const W = w, H = h;
@@ -337,7 +360,15 @@ async function showRaster(
 
   // 2. Draw. Everything below is impossible through EvenHub containers.
   const r = new Raster(W, H).clear(0);
-  if (W < 120) {
+  if (variant === "A") {
+    // FRAME A — the whole container lit. Nothing the firmware draws on its own is a
+    // full-bleed rectangle, so this is distinguishable from the placeholder glyph too.
+    r.fillRect(0, 0, W, H, 255);
+  } else if (variant === "B") {
+    // FRAME B — left half lit, right half dark. Same encoder, same size, same session
+    // handling as A; only the pixels differ.
+    r.fillRect(0, 0, Math.floor(W / 2), H, 255);
+  } else if (W < 120) {
     // TINY VARIANT — one unmistakable shape, small enough to fit a SINGLE fragment. That takes
     // fragmenting and ACK ordering out of the experiment entirely: if anything at all appears,
     // the container, the page and the decode path are all fine and only content is in question,
@@ -402,5 +433,8 @@ async function showRaster(
   } finally {
     off();
   }
-  log(`[raster] pushed ${total}B in ${n} ack-gated fragments (${W}x${H}, ${how}, session ${session})`);
+  log(
+    `[raster] pushed ${total}B in ${n} ack-gated fragments ` +
+      `(${W}x${H}, ${how}, variant ${variant}, session ${session})`,
+  );
 }
