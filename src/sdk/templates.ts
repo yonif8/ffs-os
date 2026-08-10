@@ -279,7 +279,8 @@ export const SCREEN_PRESETS: { id: string; label: string; note: string; slots: S
   {
     id: "dash",
     label: "Mirror dash",
-    note: "our own containers mirroring Even's layout: clock RIGHT, widget column LEFT",
+    note: "SUPERSEDED by the NATIVE DASHBOARD panel above — this is OUR containers "
+      + "imitating Even's layout, not their real dashboard. Kept as the A/B.",
     slots: [
       { kind: "text", x: 300, y: 60, w: 250, h: 130, text: "14:32 MON 10", font: 1, borderW: 0, radius: 0, padding: 4 },
       {
