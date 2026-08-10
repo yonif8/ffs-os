@@ -34,6 +34,7 @@ import { screenOwner } from "./reclaim";
 import { PhoneNav, type PhoneCtx } from "./phone/nav";
 import { homeScreen, textTestScreen, setTextTestContent } from "./phone/screens";
 import { Chips, Group, Progress, Row, SectionLabel, Tabs, Tile, TileGrid } from "./ui";
+import { DashboardPanel } from "./dashboard";
 import { GENERATED_PAYLOADS } from "./payloads.generated";
 import { attachOsCommandListener } from "./runtime";
 
@@ -1258,6 +1259,12 @@ function AppInner() {
             menu (Home → Text test).
           </Text>
         </View>
+
+        {/* Build a native dashboard/screen descriptor on the phone and push it. Lives on
+            Drive, not Probes: the Probes grid is fifty FIXED blobs you tap to fire, this is
+            a configuration you compose. It shares guardedPush, so the OTA-loader gate and
+            the push status line are exactly the same ones the Probes tab shows. */}
+        <DashboardPanel disabled={!canAct} status={pushMsg} onPush={guardedPush} />
           </>
         )}
 
