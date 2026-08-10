@@ -1527,6 +1527,31 @@ object G2Setting {
                         )
                     )
                 }
+                // FUT-244 frame-validation block (LD04, bytes 52..68). The loader records a
+                // DISTINCT reason for every frame it refuses, and we were dropping it on the
+                // floor — the record is 68 bytes and this parser stopped at 52.
+                //
+                // That gap costs real time: a refused push and a dead BLE link look identical
+                // from the phone (nothing happens, no error), which is precisely the ambiguity
+                // ldr_rej_code exists to remove. See patches/loader.c LDR_REJ_*.
+                if (ld.size >= 68) {
+                    val rej = u32(ld, 52)
+                    val code = u32(ld, 56)
+                    val why = when (code) {
+                        0L -> "NONE(accepted)"
+                        1L -> "SHORT(no header)"
+                        2L -> "CAP(over max payload)"
+                        3L -> "NOMAGIC(no FXP1 — not ours)"
+                        4L -> "BADLEN(body_len 0 or > arrived)"
+                        5L -> "CRC(payload CORRUPT)"
+                        6L -> "OOM(malloc failed)"
+                        else -> "UNKNOWN($code)"
+                    }
+                    sb.append(String.format(" rej=%d/%s", rej, why))
+                    if (code == 5L) {
+                        sb.append(String.format(" crc want=0x%X got=0x%X", u32(ld, 60), u32(ld, 64)))
+                    }
+                }
                 out.leftVersion = (out.leftVersion ?: "") + sb.toString() + "⟩"
             }
         }

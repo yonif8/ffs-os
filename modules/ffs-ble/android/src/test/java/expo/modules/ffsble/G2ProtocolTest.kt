@@ -528,6 +528,49 @@ class G2ProtocolTest {
         assertEquals(null, R1Gesture.parse(bytes(0xFF, 0x03)))       // too short
     }
 
+    // ---- CFW resident-loader status (field 104, LD04) ----
+
+    /**
+     * The loader's frame-validation block sits at bytes 52..68 of a 68-byte LD04 record.
+     * The parser used to stop at 52, so every refusal reason was discarded — and a refused
+     * push is indistinguishable from a dead link without it.
+     */
+    @Test
+    fun `parseDeviceInfo decodes the loader's frame-rejection reason`() {
+        fun ld(vararg words: Int): ByteArray {
+            val b = ByteArray(4 + words.size * 4)
+            "LD04".toByteArray(Charsets.US_ASCII).copyInto(b)
+            words.forEachIndexed { i, w ->
+                for (k in 0 until 4) b[4 + i * 4 + k] = ((w shr (8 * k)) and 0xFF).toByte()
+            }
+            return b
+        }
+        // gen,ran,ret,len, calls,rxlen,first4, disp,svc0..3, rej,rej_code, crc_want,crc_got
+        val rec = ld(0, 0, 0, 0, 0, 0, 0, 65, 9, 0xE0, 0xE0, 0x103, 7, 3, 0, 0)
+        assertEquals(68, rec.size) // LD04 is 68 bytes; the old parser stopped at 52
+        val info = G2Setting.parseDeviceInfo(
+            deviceInfoPayload("2.2.7.14", bytes(0xC2, 0x06, rec.size) + rec)
+        )
+        assertEquals(true, info?.leftVersion?.contains("rej=7/NOMAGIC(no FXP1 — not ours)"))
+    }
+
+    /** A CRC refusal additionally reports both CRCs, so corruption is provable, not inferred. */
+    @Test
+    fun `parseDeviceInfo reports both CRCs when the loader rejects on CRC`() {
+        val b = ByteArray(4 + 16 * 4)
+        "LD04".toByteArray(Charsets.US_ASCII).copyInto(b)
+        fun put(i: Int, w: Int) { for (k in 0 until 4) b[4 + i * 4 + k] = ((w shr (8 * k)) and 0xFF).toByte() }
+        put(13, 5)          // rej_code = CRC
+        put(14, 0x1234)     // want
+        put(15, 0x5678)     // got
+        put(12, 1)          // rej count
+        val info = G2Setting.parseDeviceInfo(
+            deviceInfoPayload("2.2.7.14", bytes(0xC2, 0x06, b.size) + b)
+        )
+        assertEquals(true, info?.leftVersion?.contains("rej=1/CRC(payload CORRUPT)"))
+        assertEquals(true, info?.leftVersion?.contains("crc want=0x1234 got=0x5678"))
+    }
+
     // ---- CFW capability advertisement (field 100) ----
 
     /** A sid-0x09 device-info response: field 4 = inner{f5 = leftVersion}, plus optional extras. */
