@@ -33,7 +33,7 @@ import { useConnectionSupervisor, healthLabel, type ConnectionHealth } from "./c
 import { screenOwner } from "./reclaim";
 import { PhoneNav, type PhoneCtx } from "./phone/nav";
 import { homeScreen, textTestScreen, setTextTestContent } from "./phone/screens";
-import { Group, Progress, Row, SectionLabel } from "./ui";
+import { Chips, Group, Progress, Row, SectionLabel, Tabs, Tile, TileGrid } from "./ui";
 import { GENERATED_PAYLOADS } from "./payloads.generated";
 import { attachOsCommandListener } from "./runtime";
 
@@ -43,6 +43,76 @@ import { attachOsCommandListener } from "./runtime";
 // from a build it didn't come from sends every diagnosis in the wrong direction.
 // (FUT-233, 2026-07-28: a log said 0.11.1 while 0.11.4 was installed.)
 const APP_VERSION = (Constants.expoConfig?.version ?? "unknown") as string;
+
+type TabKey = "link" | "drive" | "probes" | "flash" | "log";
+
+/**
+ * Squeeze a generated payload's title down to something readable in a ~78 px tile.
+ *
+ * The generated titles carry shouty affordances that made sense in a flat list of fifty
+ * identical rows ("⭐ BMP PROBE DISPLAY — TAP THIS ONE"), where the only way to point at
+ * the row you wanted was to shout. In a grid the badge does that job, so the emoji, the
+ * SHOUTING and the "— TAP THIS ONE" tail are pure noise. Trailing dashes are dropped
+ * with them, otherwise trimming leaves labels ending in a stray "—".
+ */
+function tileLabel(title: string): string {
+  let t = title
+    // Strip leading emoji/symbols + any variation selectors and the space after them.
+    .replace(/^[^\p{L}\p{N}]+/u, "")
+    .replace(/\s*—?\s*TAP (THIS ONE|FIRST)\s*$/i, "");
+
+  // "Render ONLY 3 — menu" → "menu"; "SDK DEMO scene#1 — launcher only" → "launcher only".
+  // Only when the head carries a NUMBER, because that number is exactly what the badge
+  // (R3, Ds1) already shows — dropping a head without one would lose the only label there is.
+  const split = t.match(/^(.*?\d.*?)\s+—\s+(.+)$/);
+  if (split && split[2].trim().length >= 3) t = split[2];
+
+  return t.replace(/\s*—\s*$/, "").trim() || title;
+}
+
+/** Probe families, taken from the tag each generated payload already carries. */
+const PROBE_FAMILIES = ["render", "bisect", "select", "probe", "app", "safe"] as const;
+
+/**
+ * Pull the CFW diagnostic blocks out of the firmware version string.
+ *
+ * The CFW appends them to the sid-0x09 device-info response as extension fields, and
+ * `G2Protocol.parseDeviceInfo` folds them into `leftVersion` as `⟨NAME=…⟩` blocks so
+ * they ride a string the UI already displayed. That was fine when it was one probe; it
+ * is now four, and the composite is ~300 characters of hex in a row subtitle. Parsed
+ * here so the HEADER can carry the three facts that decide whether an experiment is
+ * even meaningful: is this CFW, which image extensions are live, and has the loader run.
+ *
+ * Every field is optional on purpose — stock firmware sends none of them, and a CFW
+ * image built without one probe sends the rest. Absent must read as "not advertised",
+ * never as a default that looks like a measurement.
+ */
+export function parseCfw(version: string | null | undefined): {
+  fw: string;
+  caps: string[];
+  ramexec: string | null;
+  loader: { gen: number; ran: number } | null;
+} {
+  const v = version ?? "";
+  const block = (name: string) => {
+    const m = v.match(new RegExp(`⟨${name}=?([^⟩]*)⟩`));
+    return m ? m[1].trim() : null;
+  };
+  const capsRaw = block("CAPS");
+  // "EVENCFW/1 img576 imgz …" — drop the magic+version, keep the feature tokens.
+  const caps = capsRaw ? capsRaw.split(/\s+/).filter((t) => t && !t.startsWith("EVENCFW/")) : [];
+
+  const rx = v.match(/⟨RAMEXEC \w+ (\w+)/);
+  const ld = v.match(/⟨LOADER gen=(\d+) ran=(\d+)/);
+
+  return {
+    // The bare version is whatever precedes the first extension block.
+    fw: v.split("⟨")[0].trim(),
+    caps,
+    ramexec: rx ? rx[1] : null,
+    loader: ld ? { gen: Number(ld[1]), ran: Number(ld[2]) } : null,
+  };
+}
 
 // FUT-167 Stage 2 — CFW + stock-restore images. NEVER bundled and NEVER public: these are
 // Even's copyrighted image plus our patch, and this repo is public.
@@ -471,6 +541,24 @@ function AppInner() {
     }
   });
 
+  const [tab, setTab] = useState<TabKey>("link");
+  /** Long-pressed probe tile — its full reference text, shown inline under the grid. */
+  const [tileInfo, setTileInfo] = useState<string>("");
+  /** Probe family filter — "all", or one of the tags the generated payloads carry. */
+  const [probeFilter, setProbeFilter] = useState<string>("all");
+  /**
+   * Last device-info response that actually CARRIED the CFW blocks, latched for the life
+   * of the link.
+   *
+   * Both lenses answer a device-info read and only one response carries the extension
+   * fields, so `deviceInfo` — which holds whichever arrived last — flips between "has
+   * blocks" and "has none" on every read. Rendering the newest response directly made
+   * the header announce "STOCK" at a pair whose CFW had just been read back as
+   * `RAMEXEC EXEC_OK`. A wrong negative here is worse than no readout: it invites
+   * exactly the "why is the firmware ignoring us" hunt that the line exists to prevent.
+   */
+  const [cfwSeen, setCfwSeen] = useState<ReturnType<typeof parseCfw> | null>(null);
+
   const bt = useFfsBluetooth({ autoScan: true });
   // FUT-253: feed every connection-health transition to the collector (the FUT-136
   // "drop → reconnect → home" sequence — the single highest-value miss). glog.conn was
@@ -608,6 +696,20 @@ function AppInner() {
       battery: bt.deviceInfo?.battery ?? null,
     });
   }, [bt.sides.L, bt.sides.R, bt.pairReady, bt.state, bt.deviceInfo?.battery]);
+
+  // Latch the CFW blocks from whichever lens carries them (see `cfwSeen`), and drop the
+  // latch when the link does — a stale "CFW EXEC_OK" surviving a reconnect onto stock
+  // firmware would be the same false readout in the opposite direction.
+  useEffect(() => {
+    const carrier = [bt.deviceInfo?.leftVersion, bt.deviceInfo?.rightVersion].find((v) =>
+      v?.includes("⟨"),
+    );
+    if (carrier) setCfwSeen(parseCfw(carrier));
+  }, [bt.deviceInfo?.leftVersion, bt.deviceInfo?.rightVersion]);
+
+  useEffect(() => {
+    if (!bt.pairReady) setCfwSeen(null);
+  }, [bt.pairReady]);
 
   // FUT-167 Stage 1: receive the zero-write flash-channel probe result.
   useEffect(() => {
@@ -852,6 +954,8 @@ function AppInner() {
   const hc = healthColor(health);
   const canAct = bt.pairReady && !flashBusy;
   const batt = bt.deviceInfo?.battery;
+  const fwVersion = parseCfw(bt.deviceInfo?.leftVersion ?? bt.deviceInfo?.rightVersion).fw;
+  const probeCount = GENERATED_PAYLOADS.filter((p) => p.id !== "wizard").length + 1;
 
   // Placed AFTER every hook above, so hook order stays identical whether or not the
   // harness is showing — an early return above any hook would break the rules of hooks.
@@ -889,9 +993,45 @@ function AppInner() {
         <Text style={styles.headerMeta}>
           L {bt.sides.L ? "●" : "○"}  R {bt.sides.R ? "●" : "○"}  ·  pair {bt.pairReady ? "ready" : "—"}
           {batt == null ? "" : `  ·  ${batt}%`}
-          {bt.deviceInfo?.charging ? " ⚡" : ""}  ·  v{APP_VERSION}
+          {bt.deviceInfo?.charging ? " ⚡" : ""}
+          {fwVersion ? `  ·  ${fwVersion}` : ""}  ·  v{APP_VERSION}
         </Text>
+
+        {/* The CFW line. Promoted out of a row subtitle because it decides whether an
+            experiment means anything: a raster push on stock firmware and the same push
+            on CFW fail in ways that look identical from here. `imgz` absent + a black
+            HUD is a firmware answer, not an encoder bug. */}
+        {bt.deviceInfo ? (
+          <Text style={styles.headerCfw} numberOfLines={1}>
+            {cfwSeen?.ramexec ? (
+              <Text
+                style={{ color: cfwSeen.ramexec === "EXEC_OK" ? theme.accent : theme.danger }}
+              >
+                CFW {cfwSeen.ramexec}
+              </Text>
+            ) : (
+              // NOT "stock" — absence of blocks so far only means the lens that carries
+              // them has not answered yet. Claiming stock on this evidence would be a
+              // measurement we did not make.
+              <Text style={{ color: theme.warn }}>CFW not advertised yet</Text>
+            )}
+            {cfwSeen?.caps.length ? `  ·  ${cfwSeen.caps.join(" ")}` : ""}
+            {cfwSeen?.loader ? `  ·  LD ${cfwSeen.loader.ran}/${cfwSeen.loader.gen}` : ""}
+          </Text>
+        ) : null}
       </View>
+
+      <Tabs
+        tabs={[
+          { key: "link", label: "Link" },
+          { key: "drive", label: "Drive" },
+          { key: "probes", label: "Probes", badge: probeCount },
+          { key: "flash", label: "Flash" },
+          { key: "log", label: "Log" },
+        ]}
+        active={tab}
+        onChange={(k) => setTab(k as TabKey)}
+      />
 
       {/* Pinned flash progress. A ~5-min brick-risk window deserves better than a text
           line buried in a scroll — bar + percent + the "don't walk away" reminder, held
@@ -927,6 +1067,49 @@ function AppInner() {
         {/* FUT-236 — re-runnable on demand, not just on a fresh install. Every run is
             a fresh labelled dataset, so re-running after a firmware or app change is
             the cheapest way to re-establish ground truth. */}
+        {tab === "link" && (
+          <>
+        {/* Link first: connecting is the most-used control on this tab, and it used to
+            sit third, below two sections that only matter once you already have a link. */}
+        <SectionLabel>Link</SectionLabel>
+        <Group>
+          <Row
+            badge="↯"
+            tint={theme.tint.green}
+            title="Connect"
+            subtitle="Scan + reclaim both lenses"
+            onPress={() => sup.reconnect()}
+          />
+          <Row
+            badge="✕"
+            tint={theme.tint.grey}
+            title="Disconnect"
+            subtitle="Drop the session"
+            divider
+            onPress={() => sup.disconnect()}
+          />
+          <Row
+            badge="i"
+            tint={theme.tint.blue}
+            title="Read battery + firmware version"
+            subtitle={
+              bt.deviceInfo
+                ? // The ⟨…⟩ diagnostic blocks are in the header now; repeating ~300 chars
+                  // of hex here made the row four lines tall and told you nothing extra.
+                  `L ${parseCfw(bt.deviceInfo.leftVersion).fw || "?"} · R ${
+                    parseCfw(bt.deviceInfo.rightVersion).fw || "?"
+                  }`
+                : bt.pairReady
+                  ? "not read yet — auto-reads ~2 s after connect"
+                  : "connect both lenses first"
+            }
+            trace="FUT-169"
+            divider
+            disabled={!canAct}
+            onPress={() => bt.requestDeviceInfo()}
+          />
+        </Group>
+
         <SectionLabel note="FUT-236 · ~5 min, guided">Calibration run</SectionLabel>
         <Group>
           <Row
@@ -997,7 +1180,11 @@ function AppInner() {
         {ringLog.length > 0 ? (
           <Text style={styles.mono}>{ringLog.join("\n")}</Text>
         ) : null}
+          </>
+        )}
 
+        {tab === "drive" && (
+          <>
         <SectionLabel note="swipe up/down · tap · double-tap">Drive on-glass</SectionLabel>
         <Group>
           <Row
@@ -1045,41 +1232,6 @@ function AppInner() {
           </Text>
         ) : null}
 
-        <SectionLabel>Link</SectionLabel>
-        <Group>
-          <Row
-            badge="↯"
-            tint={theme.tint.green}
-            title="Connect"
-            subtitle="Scan + reclaim both lenses"
-            onPress={() => sup.reconnect()}
-          />
-          <Row
-            badge="✕"
-            tint={theme.tint.grey}
-            title="Disconnect"
-            subtitle="Drop the session"
-            divider
-            onPress={() => sup.disconnect()}
-          />
-          <Row
-            badge="i"
-            tint={theme.tint.blue}
-            title="Read battery + firmware version"
-            subtitle={
-              bt.deviceInfo
-                ? `L ${bt.deviceInfo.leftVersion ?? "?"} · R ${bt.deviceInfo.rightVersion ?? "?"}`
-                : bt.pairReady
-                  ? "not read yet — auto-reads ~2 s after connect"
-                  : "connect both lenses first"
-            }
-            trace="FUT-169"
-            divider
-            disabled={!canAct}
-            onPress={() => bt.requestDeviceInfo()}
-          />
-        </Group>
-
         <SectionLabel note="FUT-191">Text test — Hebrew / English scroll</SectionLabel>
         <View style={styles.card}>
           <TextInput
@@ -1106,7 +1258,11 @@ function AppInner() {
             menu (Home → Text test).
           </Text>
         </View>
+          </>
+        )}
 
+        {tab === "flash" && (
+          <>
         <SectionLabel note="no writes — safe to spam">Firmware checks</SectionLabel>
         <Group>
           <Row
@@ -1206,6 +1362,11 @@ function AppInner() {
           ))}
         </Group>
 
+          </>
+        )}
+
+        {tab === "link" && (
+          <>
         <SectionLabel note="FUT-252 · one tap · fully on-glass · auto-saved to the log">
           Test wizard
         </SectionLabel>
@@ -1224,7 +1385,11 @@ function AppInner() {
             onPress={runWizard}
           />
         </Group>
+          </>
+        )}
 
+        {tab === "probes" && (
+          <>
         <SectionLabel
           note={
             loaderSeen || loaderPresent()
@@ -1237,43 +1402,67 @@ function AppInner() {
           Push over the air
         </SectionLabel>
         {pushMsg ? <Text style={styles.dim}>{pushMsg}</Text> : null}
-        <Group>
-          <Row
-            badge="★"
-            tint={theme.tint.red}
-            title="⭐ FUT238 STYLE PROBE — TAP THIS ONE"
-            subtitle="THE NEW ROW. One tap → read back ret=0x… from the firmware-L line, and look for a rounded outlined box with legible “FUT238 OK” mid-HUD."
-            tag="no flash"
-            trace="FUT-238"
-            divider
-            disabled={!bt.pairReady}
-            onPress={() => {
-              guardedPush("FUT238 STYLE PROBE", "push_style_props", PAYLOAD_STYLE_PROPS_B64);
-            }}
-          />
+
+        <Chips
+          options={[
+            { key: "all", label: "all", count: probeCount },
+            ...PROBE_FAMILIES.map((f) => ({
+              key: f,
+              label: f,
+              count: GENERATED_PAYLOADS.filter((p) => p.id !== "wizard" && p.tag === f).length,
+            })).filter((o) => o.count > 0),
+          ]}
+          active={probeFilter}
+          onChange={setProbeFilter}
+        />
+
+        {/* Long-press readout. The subtitles are reference text — needed when you are
+            deciding WHICH probe, never on the way to tapping one you already know. */}
+        <Text style={styles.tileHint} numberOfLines={4}>
+          {tileInfo || "tap to push · long-press for what a probe does"}
+        </Text>
+        <TileGrid>
+          {probeFilter === "all" ? (
+            <Tile
+              badge="★"
+              tint={theme.tint.red}
+              label="FUT238 style"
+              tag="no flash"
+              disabled={!bt.pairReady}
+              onLongPress={() =>
+                setTileInfo(
+                  "★ FUT238 STYLE PROBE — one tap → read back ret=0x… from the firmware-L line, and look for a rounded outlined box with legible “FUT238 OK” mid-HUD.",
+                )
+              }
+              onPress={() => {
+                guardedPush("FUT238 STYLE PROBE", "push_style_props", PAYLOAD_STYLE_PROPS_B64);
+              }}
+            />
+          ) : null}
           {GENERATED_PAYLOADS.map((p) =>
-            // The wizard has its own one-tap section above (push + poll + log); skip its
-            // bare-push row here so it isn't offered twice.
-            p.id === "wizard" ? null : (
-              <Row
+            // The wizard has its own one-tap section on the Link tab (push + poll + log);
+            // skip its bare-push tile here so it isn't offered twice.
+            p.id === "wizard" || (probeFilter !== "all" && p.tag !== probeFilter) ? null : (
+              <Tile
                 key={p.id}
                 badge={p.badge}
                 tint={p.tint}
-                title={p.title}
-                subtitle={p.subtitle}
+                label={tileLabel(p.title)}
                 tag={p.tag}
-                tagTint={p.tagTint}
-                trace={p.trace}
-                divider={p.divider}
                 disabled={!bt.pairReady}
+                onLongPress={() => setTileInfo(`${p.badge} ${p.title}\n${p.subtitle ?? ""}`)}
                 onPress={() => {
                   guardedPush(p.pushLabel, p.pushKey, p.b64);
                 }}
               />
             ),
           )}
-        </Group>
+        </TileGrid>
+          </>
+        )}
 
+        {tab === "log" && (
+          <>
         <SectionLabel note={session || "starting…"}>Connection log</SectionLabel>
         <View style={styles.logBox}>
           {sup.log.length === 0 ? (
@@ -1291,6 +1480,8 @@ function AppInner() {
               ))
           )}
         </View>
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -1321,6 +1512,15 @@ const styles = StyleSheet.create({
   dot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
   pillText: { fontSize: 12, fontWeight: "700" },
   headerMeta: { color: theme.textDim, fontSize: 11.5, fontFamily: "Menlo", marginTop: 6 },
+  headerCfw: { fontSize: 10.5, fontFamily: "Menlo", marginTop: 3, color: theme.textDim },
+
+  tileHint: {
+    color: theme.textDim,
+    fontSize: 11,
+    lineHeight: 15,
+    marginBottom: 10,
+    minHeight: 30,
+  },
 
   flashBar: {
     paddingHorizontal: 16,
