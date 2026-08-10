@@ -1418,7 +1418,14 @@ object G2Setting {
         var leftVersion: String? = null,
         var rightVersion: String? = null,
         var battery: Int? = null,
-        var charging: Boolean? = null
+        var charging: Boolean? = null,
+        /**
+         * The raw CFW capability string, e.g. "EVENCFW/1 img576 imgz xordelta stereo fontprobe",
+         * or null on stock firmware / a CFW build without `settings_ext.c`. Kept as its own field
+         * (not just appended to [leftVersion]) so callers can test for a token programmatically
+         * instead of substring-matching a display string.
+         */
+        var caps: String? = null
     )
 
     /** Read a little-endian u32 as a Long, so the value stays unsigned when formatted. */
@@ -1452,6 +1459,19 @@ object G2Setting {
         (inf[12] as? Int)?.let { if (it in 0..100) out.battery = it }
         (inf[13] as? Int)?.let { out.charging = it != 0 }
 
+        // The CFW capability advertisement: field 100 = "EVENCFW/<ver> <space-separated tokens>"
+        // (`g2flash/patches/settings_ext.c`). This is the ONLY way to know which CFW extensions
+        // are live in the image that is actually flashed, rather than which ones are in the
+        // source tree -- and it was the one extension field this parser never read, while 101-104
+        // below were all wired up. That gap is load-bearing: `imgz` is the zlib image dispatch
+        // that mode 2 rides on (`patches/zlib_glue.c`), so without this token an absent hook and
+        // a broken encoder look exactly the same from the phone -- both just draw whatever the
+        // stock BMP loader makes of the bytes. Read the token before blaming an encoder.
+        (f[100] as? ByteArray)?.let { cp ->
+            val caps = String(cp, Charsets.UTF_8).trim()
+            out.caps = caps
+            out.leftVersion = (out.leftVersion ?: "") + "  ⟨CAPS=" + caps + "⟩"
+        }
         // FUT-188 "fontpeek": field 101 = the first 127 bytes of the XIP font slot 0.
         (f[101] as? ByteArray)?.let { fp ->
             val hex = fp.joinToString("") { "%02x".format(it.toInt() and 0xFF) }

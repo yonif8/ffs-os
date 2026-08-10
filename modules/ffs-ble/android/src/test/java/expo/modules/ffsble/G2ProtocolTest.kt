@@ -527,4 +527,43 @@ class G2ProtocolTest {
         assertEquals(null, R1Gesture.parse(bytes(0xAA, 0x03, 0x00))) // wrong marker
         assertEquals(null, R1Gesture.parse(bytes(0xFF, 0x03)))       // too short
     }
+
+    // ---- CFW capability advertisement (field 100) ----
+
+    /** A sid-0x09 device-info response: field 4 = inner{f5 = leftVersion}, plus optional extras. */
+    private fun deviceInfoPayload(leftVersion: String, extras: ByteArray = ByteArray(0)): ByteArray {
+        val v = leftVersion.toByteArray(Charsets.UTF_8)
+        val inner = bytes(0x2A, v.size) + v          // inner field 5, wire type 2
+        return bytes(0x22, inner.size) + inner + extras // outer field 4, wire type 2
+    }
+
+    /**
+     * Field 100 is the CFW's capability string (`patches/settings_ext.c`). The tag is 0xA2 0x06 --
+     * a TWO-byte varint, because (100 shl 3) or 2 = 802 does not fit in one. Fields 1..19 are
+     * stock and single-byte, so this is the first place the reader's multi-byte tag path carries
+     * anything we depend on.
+     */
+    @Test
+    fun `parseDeviceInfo surfaces the CFW capability string from field 100`() {
+        val caps = "EVENCFW/1 img576 imgz xordelta stereo fontprobe"
+        val c = caps.toByteArray(Charsets.UTF_8)
+        val info = G2Setting.parseDeviceInfo(
+            deviceInfoPayload("2.2.7.14", bytes(0xA2, 0x06, c.size) + c)
+        )
+        assertEquals(caps, info?.caps)
+        assertEquals(true, info?.caps?.split(" ")?.contains("imgz"))
+        assertEquals(true, info?.leftVersion?.contains("⟨CAPS=$caps⟩"))
+    }
+
+    /**
+     * Stock firmware, or a CFW image built without `settings_ext.c`, sends no field 100 at all.
+     * `caps` must then be null rather than an empty string -- the difference between "this image
+     * does not advertise capabilities" and "it advertises none" is the whole diagnostic value.
+     */
+    @Test
+    fun `parseDeviceInfo reports null caps when the firmware advertises none`() {
+        val info = G2Setting.parseDeviceInfo(deviceInfoPayload("2.2.7.14"))
+        assertEquals("2.2.7.14", info?.leftVersion)
+        assertEquals(null, info?.caps)
+    }
 }
