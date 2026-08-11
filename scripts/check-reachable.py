@@ -60,6 +60,15 @@ ALLOWLIST: dict[str, str] = {
     "src/sdk/wire.ts": "SDK step 0, 2026-08-07 — consumer (App.tsx) not written yet",
     "src/sdk/proto.ts": "SDK step 0, 2026-08-07 — consumer (App.tsx) not written yet",
     "src/sdk/events.ts": "SDK step 0, 2026-08-07 — consumer (App.tsx) not written yet",
+    # SDK v2 (FFSP): the lowering compiler that turns a declarative screen into the
+    # opcode program `g2flash/payloads/ffs_prog.c` interprets on-glass. Same shape as the
+    # three above — encoder written and tested before its consumer exists — but note it
+    # is NOT untested: 100 tests, including byte goldens cross-checked against the Python
+    # assembler. Unreachable from index.ts, not unexercised.
+    # ⏳ DELETE THIS LINE when the Drive tab gets an FFSP panel (the equivalent of the
+    # NATIVE DASHBOARD panel that consumes templates.ts today). Until then a push goes
+    # out over adb from the dev box, which is why nothing in the app imports it yet.
+    "src/sdk/program.ts": "SDK v2 FFSP encoder, 2026-08-11 — on-glass side proven first; app panel not built yet",
 }
 
 # Matches: import ... from "X" / export ... from "X" / require("X") / import("X")
