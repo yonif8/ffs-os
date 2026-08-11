@@ -290,6 +290,14 @@ object G2Flash {
         "0fced0aebcc6c88db6f76dba34f91b805d842a5fc297bfd7fa6d6a34ec83cecb",
         3557884L, 0x0079C9DCL, true, "stock 2.2.7.14 (RESTORE)"
     )
+    /** v3 step 1: the 2.2.7.14 CFW loader + the resident page hook (ffs_page_hook.c). Built
+     * locally (patch_compress FFS_LOADER=1), MRAM end 0x007a71f6 = 291 KB under the ceiling.
+     * The hook is DORMANT until a payload installs its address into a page node's +0x18, so
+     * this image behaves exactly like the loader until then. Restore path = goldenStock27. */
+    val goldenV3 = GoldenVector(
+        "79f64a8d87ef5f5630fb3d72de562246aef3131c8625ecf97dbfd34f526dc1b8",
+        3600918L, 0x007A71F6L, true, "v3 resident hook (2.2.7.14)"
+    )
     /** FUT-167 canary: stock 2.2.6.10 with only a length-preserving version-string edit. */
     val goldenCanary = GoldenVector(
         "67759cd67ed7031d7b4c8a613b8b0fe9dc9bd51c11e82260c35f5bc807159b5e",
@@ -334,7 +342,7 @@ object G2Flash {
     val allGoldens: List<GoldenVector> = listOf(
         goldenCFW, goldenStock, goldenStock27, goldenCanary,
         goldenFontpeek, goldenBidiOnly, goldenHebrewFull, goldenHebrewProbe,
-        goldenFfsui, goldenRamexec, goldenLoader, goldenLoader27
+        goldenFfsui, goldenRamexec, goldenLoader, goldenLoader27, goldenV3
     )
 
     /** Look up a build by the SHA-256 of its bytes. Null means "not a known build". */
