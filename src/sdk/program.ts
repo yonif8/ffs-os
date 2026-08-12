@@ -270,8 +270,10 @@ export const FFSP_DEF_BORDER_COLOR = 15;
 export const FFSP_DEF_RADIUS = 10;
 export const FFSP_DEF_PAD_TEXT = 6;
 export const FFSP_DEF_PAD_LIST = 8;
-/** What Even's own filler always writes. */
-export const FFSP_DEF_FONT = 1;
+/** LV_TEXT_ALIGN_LEFT — what Even's own filler always writes into text cfg+0x10. */
+export const FFSP_DEF_ALIGN = 1;
+/** @deprecated pre-2026-08-13 spelling of {@link FFSP_DEF_ALIGN}; same byte. */
+export const FFSP_DEF_FONT = FFSP_DEF_ALIGN;
 
 /**
  * ── GEOMETRY, AND WHY IT IS CLAMPED WIDER THAN THE PANEL (ffs_prog.h §7) ──
@@ -890,11 +892,23 @@ export const Op = {
     return ins("FLAG", OP.FLAG, w.u8(slot, "slot").u32(flagBits, "flag").u8(onl, "on").done(), o.vmask);
   },
 
-  /** 0x20 TEXT dst:u8, x,y,w,h:i16, bw,bc,rad,pad,font:u8, str (NUL-terminated) */
+  /**
+   * 0x20 TEXT dst:u8, x,y,w,h:i16, bw,bc,rad,pad,align:u8, str (NUL-terminated)
+   *
+   * ★ `align` is LV_STYLE_TEXT_ALIGN (0=AUTO 1=LEFT 2=CENTER 3=RIGHT), NOT a font id.
+   * `common_text_create` @0x004e40ea reads cfg+0x10 and hands it to the prop-94 thunk
+   * 0x0044145a against the label at handle+0x08. The font is set two calls earlier from
+   * the chain head at 0x20074f5c and no cfg field reaches it. Wire format unchanged.
+   * `font` is accepted as the pre-2026-08-13 spelling of the same byte.
+   */
   text(a: {
     dst: number; x: Num; y: Num; w: Num; h: Num;
-    bw: number; bc: number; rad: number; pad: number; font: number; str: Uint8Array;
+    bw: number; bc: number; rad: number; pad: number;
+    align?: number; /** @deprecated legacy spelling of `align` */ font?: number;
+    str: Uint8Array;
   }): Ins {
+    const align = a.align ?? a.font ?? 1;
+    rangeField("TEXT", "align", align, 0, 3);
     if (TEXT_FIXED_ARGS + a.str.length > 255) {
       throw new Error(`TEXT: ${a.str.length} B of string needs len=${TEXT_FIXED_ARGS + a.str.length}; the instruction header's \`len\` is a u8`);
     }
@@ -904,7 +918,7 @@ export const Op = {
     const ww = o.n(a.w, VBIT.TEXT_W, "w"), hh = o.n(a.h, VBIT.TEXT_H, "h");
     return ins("TEXT", OP.TEXT, w
       .u8(a.dst, "dst").i16(x, "x").i16(y, "y").i16(ww, "w").i16(hh, "h")
-      .u8(a.bw, "bw").u8(a.bc, "bc").u8(a.rad, "rad").u8(a.pad, "pad").u8(a.font, "font")
+      .u8(a.bw, "bw").u8(a.bc, "bc").u8(a.rad, "rad").u8(a.pad, "pad").u8(align, "align")
       .raw(a.str).done(), o.vmask);
   },
 
@@ -1385,7 +1399,12 @@ export interface TextSpec extends BoxStyle {
   id?: string;
   x: Num; y: Num; w: Num; h: Num;
   text: string;
-  /** text cfg +0x10. Even always writes 1; whether it selects a font is still unproven. */
+  /**
+   * text cfg +0x10 = LV_STYLE_TEXT_ALIGN: 0=AUTO 1=LEFT 2=CENTER 3=RIGHT (default 1).
+   * Even always writes 1. This is NOT a font selector — see `text()` above.
+   */
+  align?: number;
+  /** @deprecated pre-2026-08-13 spelling of `align`; same byte, same offset. */
   font?: number;
 }
 
@@ -1397,16 +1416,17 @@ export interface TextSpec extends BoxStyle {
 export function text(s: TextSpec): Widget {
   const b = box("text()", s, FFSP_DEF_PAD_TEXT);
   const str = wireString(s.text, "text()");
-  const font = s.font ?? FFSP_DEF_FONT;
-  // ⚠️ NOT a §7 clamp — a tool-level guard, and it is 0..1, matching patch_prog.py. font_manager
-  // reports exactly TWO fonts (background/foreground) and Even always writes 1. Whether cfg+0x10
-  // actually selects between them is still open (the `fontab` A/B). This used to accept 0..255,
-  // i.e. it accepted 200 values with no evidence behind any of them and let the firmware index
-  // whatever that byte indexes.
-  rangeField("text()", "font", font, 0, 1);
+  const align = s.align ?? s.font ?? FFSP_DEF_ALIGN;
+  // ⚠️ NOT a §7 clamp — a tool-level guard, and it is 0..3, matching patch_prog.py.
+  // cfg+0x10 is LV_STYLE_TEXT_ALIGN (0=AUTO 1=LEFT 2=CENTER 3=RIGHT), applied to the label at
+  // handle+0x08 by the prop-94 thunk 0x0044145a that common_text_create calls at 0x004e40ea.
+  // It is NOT a font selector — the font comes from the chain head at 0x20074f5c two calls
+  // earlier and no cfg field reaches it. The old 0..1 bound cited "font_manager reports exactly
+  // two fonts": true of fonts, irrelevant to this byte, and it is what refused centred titles.
+  rangeField("text()", "align", align, 0, 3);
   return {
     __widget: "text", id: s.id, takesSlot: true,
-    build: (dst) => Op.text({ dst, x: s.x, y: s.y, w: s.w, h: s.h, ...b, font, str }),
+    build: (dst) => Op.text({ dst, x: s.x, y: s.y, w: s.w, h: s.h, ...b, align, str }),
   };
 }
 
