@@ -349,7 +349,7 @@ object G2Flash {
      * from the image, so a mis-transcribed digit here refuses the flash rather than passing
      * it. Restore path = goldenStock27. */
     val goldenArena27 = GoldenVector(
-        "bc374b8e774d6eaee85c6eb5821ee55e2c2c53979c7065fbe4d82ba72a266d1e",
+        "e206a0ec5449c865546e8f2885d50c66e118da5c502df97fcce82b4048de4eeb",
         3601454L, 0x007A740EL, true, "arena loader (2.2.7.14) [CURRENT]"
     )
 

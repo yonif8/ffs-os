@@ -1890,6 +1890,42 @@ class G2Central(
         }
     }
 
+    /**
+     * Start or stop the glasses' head-motion (IMU) stream -- EvenHub Cmd 19, the ONLY message
+     * that opens the sensor hub. Samples come back as SysEvents (OsEventTypeList.IMU_DATA_REPORT
+     * = 8) carrying IMU_Report_Data{x,y,z}, which the existing inbound decoder already handles;
+     * this is purely the missing OUTBOUND half.
+     *
+     * ⚠️ RIGHT LENS ONLY, and that is not the usual "EvenHub goes right" habit -- it is a
+     * firmware refusal. The on-glass sensor probe read the lens role register as 3 (RIGHT), and
+     * the firmware's own string table refuses role 2 with "IMU open role type is left, cannot
+     * open". Broadcasting to BOTH would spend a guaranteed rejection on the left lens and, worse,
+     * make a partial success look like a whole one -- see docs/gui-re/FINDINGS-per-lens-truth.md
+     * on how easily a per-lens answer is mistaken for the pair's.
+     *
+     * `pace` is an ImuReportPace CODE (100..1000 step 100), not literal Hz. It is ignored by the
+     * encoder when disabling.
+     *
+     * ⛔ SCOPE: this sends ONE EvenHub command and nothing else. It touches no firmware address
+     * and never goes near sid 0x80 (dev_config).
+     */
+    fun setImuStream(on: Boolean, pace: Int = 100) = post {
+        if (!pairReadyLocked()) {
+            log("setImuStream ignored -- pair not ready (connect both lenses first)")
+            return@post
+        }
+        // Surface every inbound frame while the stream is on. Without this a run that produces no
+        // decoded samples cannot be told apart from a run where the glasses sent nothing at all,
+        // which is the single most expensive ambiguity this experiment can have.
+        if (on) dumpInbound = true
+        withSessionLocked {
+            sendEvenHubLocked(
+                G2EvenHub.imuControl(on, pace, counters.nextMagic()), G2Target.RIGHT
+            )
+            log("setImuStream: ${if (on) "OPEN pace=$pace" else "CLOSE"} -> right (EvenHub Cmd 19, sub-field 22)")
+        }
+    }
+
     fun injectInboundEvenHub(base64: String) = post {
         val data = decodeBase64(base64)
         if (data == null || data.isEmpty()) {

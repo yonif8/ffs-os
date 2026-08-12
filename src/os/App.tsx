@@ -195,7 +195,7 @@ const LOADER_2_2_7_14_URL = `${FW_BASE}/g2_2.2.7.14_loader.bin`;
 // (7ecf5f49…) mallocs a fresh payload buffer per push while the old blob is still
 // resident, which is why every interaction push died on rej=1/OOM. This one reserves a
 // single LDR_MAX_PAYLOAD buffer once and memcpys into it forever after.
-const LOADER_2_2_7_14_SHA = "bc374b8e774d6eaee85c6eb5821ee55e2c2c53979c7065fbe4d82ba72a266d1e";
+const LOADER_2_2_7_14_SHA = "e206a0ec5449c865546e8f2885d50c66e118da5c502df97fcce82b4048de4eeb";
 // Stock 2.2.7.14, kept as the restore-to-stock escape hatch for the current base.
 const STOCK_2_2_7_14_URL = `${FW_BASE}/g2_2.2.7.14_stock.bin`;
 const STOCK_2_2_7_14_SHA = "0fced0aebcc6c88db6f76dba34f91b805d842a5fc297bfd7fa6d6a34ec83cecb";

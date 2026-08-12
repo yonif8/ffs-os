@@ -210,6 +210,25 @@ describe("IMU", () => {
     expect(u32(ctrl, 2)).toBe(500);
   });
 
+  /**
+   * A BYTE golden, not just a field read.
+   *
+   * Field 22 is the first wrapper field whose tag does not fit one byte (22<<3|2 = 178), so it
+   * encodes as the two-byte varint b2 01. A parse-then-assert test cannot catch a regression in
+   * that tag, because the same writer produces both sides of the comparison — it would agree with
+   * itself while the glasses saw a different field. These are the literal bytes that must leave
+   * the phone.
+   */
+  it("emits the exact bytes for an enable at pace 500", () => {
+    expect(Array.from(encodeImuControl({ enable: true, magic: 77, pace: 500 }))).toEqual([
+      0x08, 0x13,             // f1 Cmd = 19 (APP_REQUEST_OPEN_IMU_PACKET)
+      0x10, 0x4d,             // f2 MagicRandom = 77
+      0xb2, 0x01, 0x05,       // f22 ImuCtrl, len 5  <- the two-byte tag
+      0x08, 0x01,             //   f1 IMUReportEn = 1
+      0x10, 0xf4, 0x03,       //   f2 reportFrq = 500
+    ]);
+  });
+
   it("omits the pace when disabling", () => {
     const ctrl = parseFields(sub(parseFields(encodeImuControl({ enable: false, magic: 1 }))!, 22)!)!;
     expect(u32(ctrl, 1)).toBe(0);

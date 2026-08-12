@@ -499,6 +499,37 @@ object G2EvenHub {
         message(G2EvenHubCmd.HEARTBEAT, 14, G2ProtobufWriter().data, magicRandom)
 
     /**
+     * IMU_CtrlCmd (APP_REQUEST_OPEN_IMU_PACKET, Cmd 19, sub-field 22) -- start or stop the
+     * head-motion stream. This is the ONLY message that wakes the sensor hub: the on-glass probe
+     * `g2flash/payloads/sensor_state_probe.c` read the hub's thread and message-queue handles as
+     * non-zero while all four consumer-enable flags and the euler float[3] at 0x20074864 were
+     * zero, which means the hub is alive and has simply never been asked to open.
+     *
+     * ⚠️ THE WRAPPER FIELD IS 22, NOT 20. Both numbers are in circulation: MentraOS's driver
+     * (`reference/MentraOS/.../sgcs/G2.kt:503`, `.../G2.swift:519`) hard-codes 20. It is WRONG,
+     * and this is checkable rather than a matter of opinion -- the generated FileDescriptorProto
+     * in `reference/g2-kit-unofficial/ble/gen/EvenHub_pb.ts` assigns field 20 of
+     * evenhub_main_msg_ctx to `MenuStartEv` (MenuStartUpEvent) and field 22 to `ImuCtrl`
+     * (IMU_CtrlCmd). faceclaw's independent Java driver
+     * (`.../g2protocol/BleProtocol.java:290`) also uses 22. A wrong wrapper field is SILENT:
+     * protobuf skips fields it does not recognise, so the glasses would accept the frame, do
+     * nothing, and look exactly like hardware with no IMU.
+     *
+     * IMU_CtrlCmd { uint32 IMUReportEn = 1; uint32 reportFrq = 2; }
+     *
+     * `reportFrq` is an ImuReportPace CODE, not a literal Hz -- the documented range is 100..1000
+     * in steps of 100 -- and it is written ONLY when enabling, matching both reference drivers.
+     * Sending a pace alongside a disable has never been observed on the wire, so we do not
+     * invent it.
+     */
+    fun imuControl(enable: Boolean, reportFrq: Int, magicRandom: Int): ByteArray {
+        val c = G2ProtobufWriter()
+        c.writeInt32Field(1, if (enable) 1 else 0) // IMUReportEn
+        if (enable && reportFrq > 0) c.writeInt32Field(2, reportFrq) // reportFrq (pace code)
+        return message(G2EvenHubCmd.IMU_CONTROL, 22, c.data, magicRandom)
+    }
+
+    /**
      * Shut down our EvenHub page so the firmware releases the HUD -- this is how the stock
      * DASHBOARD (or any firmware idle screen) gets to show; while we hold a page it never can.
      * Pairs with pageCreated=false so our next page re-creates fresh. (FUT-170)

@@ -12,6 +12,7 @@ import { nativeHost, nativeTransport, takeoverPage } from "../sdk/native";
 import { describeEvent, normalizeEvent, parseImageAck, parsePageResponse } from "../sdk/events";
 import { hex } from "../sdk/proto";
 import {
+  IMU_CTRL_FIELD,
   encodeImuControl,
   encodeProbe3Page,
   encodeStyleProbePage,
@@ -225,17 +226,20 @@ async function probeImu(log: Log): Promise<void> {
     }
   });
 
-  // The wrapper field is the one real disagreement between sources: g2-kit's GENERATED schema and
-  // faceclaw both say 22, MentraOS's notes say 20. Try both rather than argue — a wrong field
-  // number is silent, because protobuf ignores fields it does not know.
-  for (const field of [22, 20]) {
+  // THE 22-vs-20 QUESTION IS CLOSED, so this no longer sweeps both.
+  //
+  // This loop used to also try wrapper field 20, on the grounds that g2-kit and faceclaw said 22
+  // while MentraOS said 20 and a wrong field is silent. Reading the generated FileDescriptorProto
+  // settles it: field 20 is `MenuStartEv` (MenuStartUpEvent), field 22 is `ImuCtrl`. So the
+  // field-20 arm was not an alternative hypothesis — it was sending a malformed menu-startup
+  // event to the firmware and calling the resulting silence evidence. See IMU_CTRL_FIELD.
+  {
     const before = samples;
-    log(`[imu] enabling via wrapper field ${field} (pace 100)`);
-    await tx.sendEvenHub(encodeImuControl({ enable: true, magic: 210, pace: 100, field }));
+    log(`[imu] enabling via wrapper field ${IMU_CTRL_FIELD} (pace 100)`);
+    await tx.sendEvenHub(encodeImuControl({ enable: true, magic: 210, pace: 100 }));
     await new Promise((r) => setTimeout(r, 5000));
-    await tx.sendEvenHub(encodeImuControl({ enable: false, magic: 211, field }));
-    log(`[imu] field ${field}: ${samples - before} sample(s)`);
-    await new Promise((r) => setTimeout(r, 500));
+    await tx.sendEvenHub(encodeImuControl({ enable: false, magic: 211 }));
+    log(`[imu] field ${IMU_CTRL_FIELD}: ${samples - before} sample(s)`);
   }
 
   off();

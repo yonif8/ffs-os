@@ -368,6 +368,12 @@ class FfsBleModule : Module() {
               "header" -> c?.showListWithHeader(listOf("ONE", "TWO", "THREE", "FOUR"), "HEADER")
               // The firmware's OWN swirl animation (even_ai service, not EvenHub). value!=0 = on.
               "swirl" -> c?.aiSwirl(value != 0)
+              // Start/stop the head-motion (IMU) stream -- EvenHub Cmd 19, the one message that
+              // opens the sensor hub. value 1 = start, 0 = stop. `--ei hz <pace>` overrides the
+              // report pace; it is an ImuReportPace CODE (100..1000 step 100), NOT literal Hz,
+              // so the default is 100 rather than a plausible-looking 50.
+              //   am broadcast -a com.futurefounders.ffs.SETTING --es key imu --ei value 1
+              "imu" -> c?.setImuStream(value != 0, intent.getIntExtra("hz", 100))
               // In-place text update (Cmd 5). `text` is the new content; `value` the container id
               // (default 1 = the SDK's header container).
               "uptext" -> c?.updateTextContainer(

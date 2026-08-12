@@ -292,26 +292,50 @@ export function encodeUpdateText(opts: {
 export const IMU_PACES = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000] as const;
 
 /**
- * Start or stop the IMU (head-motion) stream.
+ * The wrapper field `IMU_CtrlCmd` occupies in evenhub_main_msg_ctx.
  *
- * Wrapper field 22, per g2-kit's GENERATED schema and faceclaw's independent implementation.
- * MentraOS's notes say field 20; two independent sources beat one, and the generated schema is
- * evidence where prose is not.
+ * ⚠️ 22, NOT 20 — and this is now SETTLED rather than a majority vote. The number is read
+ * straight out of the generated FileDescriptorProto in
+ * `reference/g2-kit-unofficial/ble/gen/EvenHub_pb.ts`, which assigns:
  *
- * `pace` is omitted entirely when disabling — the reference implementations only encode it when
- * turning the stream ON.
+ *     field 20 -> MenuStartEv (MenuStartUpEvent)
+ *     field 22 -> ImuCtrl     (IMU_CtrlCmd)
+ *
+ * So MentraOS's 20 (`reference/MentraOS/.../sgcs/G2.kt:503` and `G2.swift:519`) does not merely
+ * disagree — it names a DIFFERENT message. faceclaw's independent Java driver
+ * (`reference/faceclaw/.../g2protocol/BleProtocol.java:290`) uses 22, matching the descriptor.
+ *
+ * Why the mistake is expensive: a wrong wrapper field is SILENT. Protobuf skips fields it does
+ * not recognise, so the glasses accept the frame, open nothing, and are indistinguishable from
+ * hardware whose IMU does not work.
+ */
+export const IMU_CTRL_FIELD = 22;
+
+/**
+ * Start or stop the IMU (head-motion) stream — the one message that opens the sensor hub.
+ *
+ * `IMU_CtrlCmd { uint32 IMUReportEn = 1; uint32 reportFrq = 2; }`, per the generated descriptor.
+ * Both fields are uint32, so a plain varint is correct for each.
+ *
+ * `pace` is omitted entirely when disabling, and when non-positive — both reference drivers only
+ * encode it when turning the stream ON, and inventing a field neither has ever put on the wire is
+ * exactly the kind of guess that produces an unexplainable refusal.
  */
 export function encodeImuControl(opts: {
   enable: boolean;
   magic: number;
   pace?: number;
-  /** Override the wrapper field. Only for resolving the 22-vs-20 disagreement empirically. */
+  /**
+   * Override the wrapper field. Retained only as an escape hatch — the default is proven by the
+   * descriptor above and there is no longer a 22-vs-20 question to resolve empirically.
+   */
   field?: number;
 }): Uint8Array {
+  const pace = opts.pace ?? 100;
   const c = new ProtoWriter();
   c.int32(1, opts.enable ? 1 : 0);
-  if (opts.enable) c.int32(2, opts.pace ?? 100);
-  return encodeEnvelope(Cmd.IMU_CONTROL, opts.field ?? 22, c.data, opts.magic);
+  if (opts.enable && pace > 0) c.int32(2, pace);
+  return encodeEnvelope(Cmd.IMU_CONTROL, opts.field ?? IMU_CTRL_FIELD, c.data, opts.magic);
 }
 
 /**
