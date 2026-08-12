@@ -191,7 +191,11 @@ const LOADER_SHA = "373bfe9aa3645f1cda5b0204df1db3516e16347f31dcc9a39846442022c4
 // ffs_ui_patch prop-id migration. ⚠️ The payload frame gained an 8-byte CRC header, so app
 // and firmware MUST ship together — an old app against this loader is refused rej_code=4.
 const LOADER_2_2_7_14_URL = `${FW_BASE}/g2_2.2.7.14_loader.bin`;
-const LOADER_2_2_7_14_SHA = "7ecf5f4948e510469cc85cd77c1a291e67bf78800f93a40cb918cf5f326eb9a6";
+// ⚠️ BUMPED 2026-08-13 for the permanent-payload-arena loader. The previous image
+// (7ecf5f49…) mallocs a fresh payload buffer per push while the old blob is still
+// resident, which is why every interaction push died on rej=1/OOM. This one reserves a
+// single LDR_MAX_PAYLOAD buffer once and memcpys into it forever after.
+const LOADER_2_2_7_14_SHA = "bc374b8e774d6eaee85c6eb5821ee55e2c2c53979c7065fbe4d82ba72a266d1e";
 // Stock 2.2.7.14, kept as the restore-to-stock escape hatch for the current base.
 const STOCK_2_2_7_14_URL = `${FW_BASE}/g2_2.2.7.14_stock.bin`;
 const STOCK_2_2_7_14_SHA = "0fced0aebcc6c88db6f76dba34f91b805d842a5fc297bfd7fa6d6a34ec83cecb";

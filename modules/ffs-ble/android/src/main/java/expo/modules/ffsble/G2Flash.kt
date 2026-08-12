@@ -335,14 +335,30 @@ object G2Flash {
     /** FUT-246 resident loader REBASED onto 2.2.7.14 -- what the glasses currently run. */
     val goldenLoader27 = GoldenVector(
         "7ecf5f4948e510469cc85cd77c1a291e67bf78800f93a40cb918cf5f326eb9a6",
-        3600806L, 0x007A7186L, true, "resident loader (2.2.7.14) [CURRENT]"
+        3600806L, 0x007A7186L, true, "resident loader (2.2.7.14)"
+    )
+    /** 2026-08-13 — the PERMANENT PAYLOAD ARENA loader. goldenLoader27 above malloc'd a
+     * fresh payload buffer on every push while the previous blob was still resident — and it
+     * has to stay resident, because FFSP gesture handlers execute out of it. So a push needed
+     * two blobs' worth of pool A at once, and once a screen's widgets were up (~32 KB of the
+     * ~40 KB free, measured by heap_gauge_probe) the second allocation failed: every
+     * interaction push died on rej=1/OOM. This image reserves ONE LDR_MAX_PAYLOAD buffer and
+     * memcpys into it forever after, so a push allocates nothing.
+     * Built in CI on the clang-18 pin (run 31644244797) — NOT locally; Windows clang emits
+     * different bytes. ps/prog_end below are that run's, and selfTestGuard re-derives both
+     * from the image, so a mis-transcribed digit here refuses the flash rather than passing
+     * it. Restore path = goldenStock27. */
+    val goldenArena27 = GoldenVector(
+        "bc374b8e774d6eaee85c6eb5821ee55e2c2c53979c7065fbe4d82ba72a266d1e",
+        3601454L, 0x007A740EL, true, "arena loader (2.2.7.14) [CURRENT]"
     )
 
     /** Every build this driver will consider flashing. Anything else is refused outright. */
     val allGoldens: List<GoldenVector> = listOf(
         goldenCFW, goldenStock, goldenStock27, goldenCanary,
         goldenFontpeek, goldenBidiOnly, goldenHebrewFull, goldenHebrewProbe,
-        goldenFfsui, goldenRamexec, goldenLoader, goldenLoader27, goldenV3
+        goldenFfsui, goldenRamexec, goldenLoader, goldenLoader27, goldenV3,
+        goldenArena27
     )
 
     /** Look up a build by the SHA-256 of its bytes. Null means "not a known build". */
