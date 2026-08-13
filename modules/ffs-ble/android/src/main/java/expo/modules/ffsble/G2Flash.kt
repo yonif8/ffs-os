@@ -350,7 +350,24 @@ object G2Flash {
      * it. Restore path = goldenStock27. */
     val goldenArena27 = GoldenVector(
         "e206a0ec5449c865546e8f2885d50c66e118da5c502df97fcce82b4048de4eeb",
-        3601454L, 0x007A740EL, true, "arena loader (2.2.7.14) [CURRENT]"
+        3601454L, 0x007A740EL, true, "arena loader (2.2.7.14)"
+    )
+    /** 2026-08-13 — the BIG ARENA loader: LDR_MAX_PAYLOAD 9216 -> 16384.
+     * goldenArena27 fixed the per-push OOM but left only 768 B of blob headroom, and the INK
+     * opcode's rasteriser (ffs_ink.h — ffs_ink_tri alone is 1324 B) needs ~4.2 KB: the
+     * interpreter went 8436 -> 12632 B, which the 9216 arena answers with rej=2/CAP. Without
+     * it FFSP_OP_IMAGE can only draw an EMPTY BORDERED BOX, because nothing on the wire can
+     * reach the L8 surface. Costs pool A 7 KB more of 460800 (1.6%).
+     * Built in CI on the clang-18 pin (run 31700889263) — NOT locally; Windows clang emits
+     * different bytes. ⚠️ ps/prog_end are CARRIED OVER from goldenArena27 because the change
+     * is one immediate operand (0x2400 -> 0x4000, both encodable as a Thumb-2 modified
+     * immediate) and the artifact is byte-identical in length (4379285). selfTestGuard
+     * re-derives both from the image, so if that reasoning is wrong the flash is REFUSED
+     * rather than attempted — which is why it is safe to reason rather than re-measure here.
+     * Restore path = goldenStock27. */
+    val goldenInk27 = GoldenVector(
+        "47a337ef02f83808424c11ca75ac28129f232186d72c8bd99e958d0d8dd0c16b",
+        3601454L, 0x007A740EL, true, "big-arena loader (2.2.7.14) [CURRENT]"
     )
 
     /** Every build this driver will consider flashing. Anything else is refused outright. */
@@ -358,7 +375,7 @@ object G2Flash {
         goldenCFW, goldenStock, goldenStock27, goldenCanary,
         goldenFontpeek, goldenBidiOnly, goldenHebrewFull, goldenHebrewProbe,
         goldenFfsui, goldenRamexec, goldenLoader, goldenLoader27, goldenV3,
-        goldenArena27
+        goldenArena27, goldenInk27
     )
 
     /** Look up a build by the SHA-256 of its bytes. Null means "not a known build". */

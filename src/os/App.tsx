@@ -191,11 +191,14 @@ const LOADER_SHA = "373bfe9aa3645f1cda5b0204df1db3516e16347f31dcc9a39846442022c4
 // ffs_ui_patch prop-id migration. ⚠️ The payload frame gained an 8-byte CRC header, so app
 // and firmware MUST ship together — an old app against this loader is refused rej_code=4.
 const LOADER_2_2_7_14_URL = `${FW_BASE}/g2_2.2.7.14_loader.bin`;
-// ⚠️ BUMPED 2026-08-13 for the permanent-payload-arena loader. The previous image
-// (7ecf5f49…) mallocs a fresh payload buffer per push while the old blob is still
-// resident, which is why every interaction push died on rej=1/OOM. This one reserves a
-// single LDR_MAX_PAYLOAD buffer once and memcpys into it forever after.
-const LOADER_2_2_7_14_SHA = "e206a0ec5449c865546e8f2885d50c66e118da5c502df97fcce82b4048de4eeb";
+// ⚠️ BUMPED AGAIN 2026-08-13 (same day) for the BIG-ARENA loader: LDR_MAX_PAYLOAD
+// 9216 -> 16384. The previous image (e206a0ec…) fixed the per-push OOM but left only
+// 768 B of blob headroom, and INK's rasteriser needs ~4.2 KB — the interpreter went
+// 8436 -> 12632 B, which a 9216 arena refuses with rej=2/CAP. Without it FFSP_OP_IMAGE
+// can only draw an empty bordered box, because nothing on the wire reaches the surface.
+// ⛔ THIS CONSTANT IS NOT THE GATE. G2Flash.kt's allGoldens is what actually refuses an
+// unknown image; bumping only this one silently changes nothing (learned the hard way).
+const LOADER_2_2_7_14_SHA = "47a337ef02f83808424c11ca75ac28129f232186d72c8bd99e958d0d8dd0c16b";
 // Stock 2.2.7.14, kept as the restore-to-stock escape hatch for the current base.
 const STOCK_2_2_7_14_URL = `${FW_BASE}/g2_2.2.7.14_stock.bin`;
 const STOCK_2_2_7_14_SHA = "0fced0aebcc6c88db6f76dba34f91b805d842a5fc297bfd7fa6d6a34ec83cecb";
