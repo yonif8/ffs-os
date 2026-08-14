@@ -2722,6 +2722,28 @@ class G2Central(
         log("requestDeviceInfo -> both (service 0x09)")
     }
 
+    /**
+     * FUT-269 dual-lens telemetry: request device info from ONE lens only. This is the phone-side
+     * lever for defeating the deduped "whichever lens answered" — addressing a single lens means
+     * only it can reply, so its side-tagged answer (and the payload's own G2FW_LENS_SIDE stamp) is
+     * unambiguous. ⚠️ Whether the LEFT lens actually answers a direct service-0x09 query is
+     * UNVERIFIED on-glass: FUT-159 records the left arm as SILENT on async protocol events. A
+     * left reply appearing after this call is itself the on-glass proof the path works.
+     */
+    fun requestDeviceInfoSide(side: G2Side) = post {
+        if (!pairReadyLocked()) {
+            log("requestDeviceInfoSide ignored -- pair not ready (connect both lenses first)")
+            return@post
+        }
+        val target = when (side) {
+            G2Side.LEFT -> G2Target.LEFT
+            G2Side.RIGHT -> G2Target.RIGHT
+            else -> { log("requestDeviceInfoSide: unknown side"); return@post }
+        }
+        sendG2SettingLocked(G2Setting.requestDeviceInfo(counters.nextMagic()), target)
+        log("requestDeviceInfoSide -> ${side.raw} (service 0x09)")
+    }
+
     // MARK: - Native (firmware-rendered) dashboards
 
     /**

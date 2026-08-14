@@ -409,6 +409,14 @@ interface FfsBleNativeModule {
    */
   requestDeviceInfo(): void;
   /**
+   * FUT-269 dual-lens telemetry: request device info from ONE lens ("L" | "R"). The answer
+   * arrives via `onDeviceInfo` and every telemetry payload self-reports its lens, so a single-lens
+   * query removes the deduped "whichever answered" ambiguity. ⚠️ Whether the LEFT lens answers a
+   * direct service-0x09 query is unverified on-glass (FUT-159: the left arm is silent on async
+   * events) — treat a left reply as the proof, its absence as the (documented) limit.
+   */
+  requestDeviceInfoSide(side: "L" | "R"): void;
+  /**
    * FUT-216: push an arbitrary base64 payload to a raw service id (e.g. 0x90 = resident CFW
    * OTA loader), framed + chunked through the standard 0xAA transport, to both lenses.
    */

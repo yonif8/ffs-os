@@ -218,6 +218,11 @@ public class FfsBleModule: Module {
       self?.ensureCentral().requestDeviceInfo()
     }
 
+    // FUT-269 dual-lens telemetry: request device info from ONE lens ("L" | "R").
+    Function("requestDeviceInfoSide") { [weak self] (side: String) in
+      self?.ensureCentral().requestDeviceInfoSide(Self.parseSide(side))
+    }
+
     // P3: tear down the EvenHub session (stops the keep-alive heartbeat).
     Function("stopSession") { [weak self] in
       self?.central?.stopSession()

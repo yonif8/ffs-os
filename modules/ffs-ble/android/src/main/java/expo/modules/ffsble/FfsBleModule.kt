@@ -185,6 +185,13 @@ class FfsBleModule : Module() {
     // `onDeviceInfo`. Connect the pair first.
     Function("requestDeviceInfo") { ensureCentral()?.requestDeviceInfo() }
 
+    // FUT-269 dual-lens telemetry: request device info from ONE lens ("L"|"R"). Answer arrives via
+    // `onDeviceInfo`, and every telemetry payload self-reports its lens, so a single-lens query
+    // removes the deduped "whichever answered" ambiguity. See G2Central.requestDeviceInfoSide.
+    Function("requestDeviceInfoSide") { side: String ->
+      ensureCentral()?.requestDeviceInfoSide(G2Side.parse(side))
+    }
+
     // Tear down the EvenHub session (stops the keep-alive heartbeat).
     Function("stopSession") { central?.stopSession() }
 

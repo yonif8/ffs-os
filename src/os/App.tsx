@@ -35,6 +35,7 @@ import { PhoneNav, type PhoneCtx } from "./phone/nav";
 import { homeScreen, textTestScreen, setTextTestContent } from "./phone/screens";
 import { Chips, Group, Progress, Row, SectionLabel, Tabs, Tile, TileGrid } from "./ui";
 import { DashboardPanel } from "./dashboard";
+import { DevTelemetryPanel } from "./devtools/DevTelemetryPanel";
 import { GENERATED_PAYLOADS } from "./payloads.generated";
 import { attachOsCommandListener } from "./runtime";
 
@@ -132,6 +133,10 @@ export function parseCfw(version: string | null | undefined): {
 // Point somewhere else by setting EXPO_PUBLIC_FW_BASE at build time.
 const FW_BASE = process.env.EXPO_PUBLIC_FW_BASE ?? "http://127.0.0.1:8799/fw";
 const CFW_URL = `${FW_BASE}/g2_2.2.6.10_cfw.bin`;
+
+// FUT-269 on-glass telemetry: dev-only diagnostic panel (Carrier A/B, tag 0x7D). On in dev
+// builds; force it in a release build with EXPO_PUBLIC_DEV_TELEMETRY=1.
+const DEV_TELEMETRY = __DEV__ || process.env.EXPO_PUBLIC_DEV_TELEMETRY === "1";
 const CFW_SHA = "5c1539fd39c599e6035f6a8ec0779ba687c250d342a24c21a39952fed6c56aa0";
 const STOCK_URL = `${FW_BASE}/g2_2.2.6.10_stock.bin`;
 const STOCK_SHA = "f4dfb0b49ad3de3c2daf17f8a27a157c3dc98411d6a0d3ab2cfd0918f41b9afa";
@@ -1272,6 +1277,10 @@ function AppInner() {
             a configuration you compose. It shares guardedPush, so the OTA-loader gate and
             the push status line are exactly the same ones the Probes tab shows. */}
         <DashboardPanel disabled={!canAct} status={pushMsg} onPush={guardedPush} />
+
+        {/* Dev-only: live on-glass telemetry (memory / active page / VM error / lens), no camera.
+            Gated by DEV_TELEMETRY so it never ships in a normal release build. */}
+        {DEV_TELEMETRY ? <DevTelemetryPanel pairReady={bt.pairReady} /> : null}
           </>
         )}
 

@@ -27,7 +27,7 @@ import {
   FFSP_MAGIC, FFSP_ABI, FFSP_SYMGEN, FFSP_FW_BUILD, FFSP_FLAG, FFSP_SLOT_PARENT,
   FFSP_PROG_SIZE, FFSP_HDR_SIZE, NOTIFY_VAR, FFSP_NOTIFY_VAR, STYLE_PROP, WHICH, NEED, DEV,
   EMIT_SRC, FFSP_DEF_PAD_TEXT, FFSP_DEF_PAD_LIST, FFSP_STYLE_PROP_MAX, FFSP_GEO_MIN, FFSP_GEO_MAX,
-  STYLE_PTR_PROPS,
+  STYLE_PTR_PROPS, GIF_MODE,
 } from "../program";
 
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
@@ -181,6 +181,77 @@ describe("opcode encoders", () => {
 
   it("0x23 BOUNCE slot:u8, base_y:i16, dir:u8", () => {
     expect(ihex(Op.bounce(1, 78, 0))).toBe("230400" + "01" + "4e00" + "00");
+  });
+
+  // ── newgfx family (0x24–0x27), hand-derived from §3's table — must equal ffsp_goldens.json ──
+  it("0x24 FONT slot:u8, font_id:u8 — a SMALL ENUM, never a pointer", () => {
+    expect(ihex(Op.font(0, 0))).toBe("240200" + "00" + "00");        // FONT (default+icons)
+    expect(ihex(Op.font(1, 5))).toBe("240200" + "01" + "05");        // FONT_CLOCK (num62 face)
+  });
+
+  it("0x25 IMAGE dst:u8, x,y:i16, w,h:u16, bw,bc,rad:u8 — len 12, w/h are u16", () => {
+    expect(ihex(Op.image({ dst: 3, x: 40, y: 60, w: 288, h: 144, bw: 2, bc: 15, rad: 10 }))).toBe(
+      "250c00" +          // op, len = 12, vmask
+      "03" +              // dst
+      "2800" + "3c00" +   // x=40, y=60 (i16)
+      "2001" + "9000" +   // w=288, h=144 (u16)
+      "02" + "0f" + "0a", // bw bc rad
+    );
+  });
+
+  it("0x26 ANIM slot, dur,delay:u16, x0,x1,y0,y1,w0,w1,h0,h1:i16 — START,END per channel", () => {
+    expect(ihex(Op.anim({
+      slot: 1, x0: -496, x1: 40, y0: 78, y1: 78, w0: 496, w1: 496, h0: 150, h1: 150,
+      durMs: 300, delayMs: 0,
+    }))).toBe(
+      "261500" +          // op, len = 21, vmask
+      "01" +              // slot
+      "2c01" + "0000" +   // dur_ms=300, delay_ms=0 (u16)
+      "10fe" + "2800" + "4e00" + "4e00" +   // x0=-496, x1=40, y0=78, y1=78
+      "f001" + "f001" + "9600" + "9600",    // w0=496, w1=496, h0=150, h1=150
+    );
+    // x0 is [V3], y1 is [V6] — binding both sets vmask 0x08 | 0x40 = 0x48; the var index rides in
+    // the operand's own bytes (x0->var[0]=0000, y1->var[6]=0600).
+    expect(ihex(Op.anim({
+      slot: 1, x0: varRef(0), x1: 40, y0: 78, y1: varRef(6), w0: 496, w1: 496, h0: 150, h1: 150,
+      durMs: 300, delayMs: 0,
+    }))).toBe("261548" + "01" + "2c01" + "0000" + "0000" + "2800" + "4e00" + "0600" +
+      "f001" + "f001" + "9600" + "9600");
+  });
+
+  it("0x27 INK slot, prim, a..f:i16, w,lvl:u8 — len 16, coords are WHOLE PIXELS", () => {
+    // SEG: reads a,b,c,d (ax,ay,bx,by); e,f default 0. w=halfwidth, lvl=grey index 0..15.
+    expect(ihex(Op.ink({ slot: 3, prim: 1, a: 4, b: 4, c: 60, d: 40, w: 2, lvl: 15 }))).toBe(
+      "271000" + "03" + "01" +
+      "0400" + "0400" + "3c00" + "2800" + "0000" + "0000" +   // a b c d e f
+      "02" + "0f",                                            // w lvl
+    );
+    // RING: reads a,b,c (cx,cy,r); w defaults nothing-specific here but is 1 unless given.
+    expect(ihex(Op.ink({ slot: 1, prim: 3, a: 44, b: 44, c: 36, w: 1, lvl: 12 }))).toBe(
+      "271000" + "01" + "03" + "2c00" + "2c00" + "2400" + "0000" + "0000" + "0000" + "01" + "0c");
+    // TRI: reads a..f (three points); a FILLED primitive with no halfwidth, so `w` defaults to 1.
+    expect(ihex(Op.ink({ slot: 2, prim: 5, a: -8, b: -8, c: 8, d: -8, e: 0, f: 12, lvl: 15 }))).toBe(
+      "271000" + "02" + "05" + "f8ff" + "f8ff" + "0800" + "f8ff" + "0000" + "0c00" + "01" + "0f");
+  });
+
+  // ★ GIF (0x28) — native frame cycling over three IMAGE slots, ping-pong at 100 ms/frame.
+  // len must be 5 + n = 8 (dst + period:u16 + mode + n + 3 slots); `len` is the field the
+  // zero-knowledge `pc += 3 + len` skip rule depends on, so an off-by-one is status=LEN or an
+  // interpreter walking into the next instruction. period is LITTLE-ENDIAN (100 => 64 00), n is
+  // DERIVED from srcSlots.length, and vmask is 0 because GIF has no [V] operands. Hand-derived
+  // from ffs_prog.h §3 — must equal tools/ffsp_goldens.json's "GIF" entry.
+  it("0x28 GIF dst:u8, period_ms:u16, mode:u8, n:u8, src_slots[n]:u8", () => {
+    expect(ihex(Op.gif(4, [1, 2, 3], 100, GIF_MODE.PINGPONG))).toBe(
+      "280800" +          // op, len = 5 + 3, vmask (no [V] operands)
+      "04" +              // dst
+      "6400" +            // period_ms = 100, little-endian
+      "02" +              // mode = PINGPONG
+      "03" +              // n (derived)
+      "01" + "02" + "03", // src slots
+    );
+    // period 0 => the firmware's own 50 ms default is a legal wire value, not a refusal.
+    // n=2 => len = 5 + 2 = 7 (0x07); the minimum-frame GIF.
+    expect(ihex(Op.gif(0, [5, 6], 0, GIF_MODE.LOOP))).toBe("280700" + "00" + "0000" + "00" + "02" + "05" + "06");
   });
 
   it("0x30 WFCREATE kind:u8, x:i16, cfg[c]", () => {
@@ -501,16 +572,18 @@ describe("readback() — design §6's Push B", () => {
     void programLength; // the named source that produced src=8
   });
 
-  it("★ pads to the DISTINCTIVE code_len 0x0555, because the point is to spot a folded readback", () => {
-    // ⚠️ 0x0555 = 0000 0101 0101 0101. The alternating bits are the whole design: a folded, masked
-    // or truncated readback is visible AT A GLANCE, and 0x7F000555 as a ret= word is unmistakable.
-    // The bare 10-byte version expected 0x7F00000A, and 10 is very hard to tell apart from a
-    // partially folded or byte-truncated readback of 10. `patch_prog.py --selftest-echo` pads to
-    // exactly this number; if CI ever pushes the TS-built echo the two must agree on the word.
+  it("★ pads to the DISTINCTIVE code_len 0x0255, because the point is to spot a folded readback", () => {
+    // ⚠️ 0x0255 = 0000 0010 0101 0101. The alternating low bits are the whole design: a folded,
+    // masked or truncated readback is visible AT A GLANCE, and 0x7F000255 as a ret= word is
+    // unmistakable. The bare 10-byte version expected 0x7F00000A, and 10 is very hard to tell apart
+    // from a partially folded or byte-truncated readback of 10. `patch_prog.py --selftest-echo` pads
+    // to exactly this number (its own ECHO_LEN_DEFAULT is 0x0255); if CI ever pushes the TS-built
+    // echo the two must agree on the word. ⚠️ TS drifted to 0x0555 (code_len 1365 vs Python's 597)
+    // and the whole-program cross-check below caught it.
     const a = assemble(echoProgram());
-    expect(a.codeLen).toBe(0x0555);
-    expect(a.drawEnd).toBe(0x0555);   // no ON blocks: the whole program is the draw pass
-    expect(ECHO_LEN_DEFAULT).toBe(0x0555);
+    expect(a.codeLen).toBe(0x0255);
+    expect(a.drawEnd).toBe(0x0255);   // no ON blocks: the whole program is the draw pass
+    expect(ECHO_LEN_DEFAULT).toBe(0x0255);
     // The head is unchanged; everything after it is skippable filler.
     expect(hex(a.code.subarray(0, 10))).toBe("050400" + "08" + "00" + "00" + "10" + "000000");
     // ★ op 0x7F with bit 7 CLEAR is optional, so a conforming interpreter skips it with the
@@ -526,7 +599,7 @@ describe("readback() — design §6's Push B", () => {
       pc += 3 + a.code[pc + 1];
     }
     expect(pc).toBe(a.codeLen);
-    expect(seen).toBe(6);   // 5 x 258 B + 1 x 65 B = 1355 B of padding
+    expect(seen).toBe(3);   // 2 x 258 B + 1 x 71 B = 587 B of padding (597 - 10)
   });
 });
 
@@ -913,7 +986,14 @@ describe("constraints the format cannot enforce — program.ts throws, with the 
     // §8 region bounds — a region-bounded write is the whole reason WRITE is not a raw POKE.
     expect(() => Op.write(2, 0x1a, 4, 0)).toThrow(/runs past the region's 28 B/);
     expect(() => Op.read(0, 3, 0x16, 4)).toThrow(/runs past the region's 24 B/);
-    expect(() => text({ x: 0, y: 0, w: 1, h: 1, text: "x", font: 2 })).toThrow(/out of range 0\.\.1/);
+    // ★ ffs_prog.h renamed TEXT's `font`->`align` (LV_STYLE_TEXT_ALIGN) and WIDENED the range to
+    // 0..3 (0 AUTO, 1 LEFT, 2 CENTER, 3 RIGHT) on 2026-08-13. The old 0..1 bound cited "two fonts"
+    // — true of fonts, irrelevant to this byte — and it refused centred titles. 4 is now the first
+    // illegal value; 2 (CENTER) and 3 (RIGHT) are legal. The wire byte is unchanged; only the name
+    // and the legal range moved. (`font` stays accepted as the pre-rename spelling of the byte.)
+    expect(() => text({ x: 0, y: 0, w: 1, h: 1, text: "x", font: 4 })).toThrow(/out of range 0\.\.3/);
+    expect(() => text({ x: 0, y: 0, w: 1, h: 1, text: "x", align: 2 })).not.toThrow();
+    expect(() => text({ x: 0, y: 0, w: 1, h: 1, text: "x", align: 3 })).not.toThrow();
   });
 
   it("★ text() and list() default `pad` to the header's FFSP_DEF_* — 6 and 8, not one number", () => {
@@ -1144,6 +1224,29 @@ const OPCODE_VECTORS_TS: Readonly<Record<string, () => Uint8Array>> = {
   })),
   OBJ: () => insBytes(Op.obj(2)),
   BOUNCE: () => insBytes(Op.bounce(1, 78, 0)),
+  // ── newgfx family (0x24–0x27). These four HAD no emitter here (the comment on OP said so) and so
+  // had no cross-check vector, which is exactly the drift the missing-key policy now fails on: the
+  // Python golden carried FONT/IMAGE/INK/ANIM and this map did not. Each is built with the SAME
+  // operands as its ffsp_goldens.json entry so the byte comparison is meaningful.
+  FONT: () => insBytes(Op.font(0, 0)),
+  FONT_CLOCK: () => insBytes(Op.font(1, 5)),
+  IMAGE: () => insBytes(Op.image({ dst: 3, x: 40, y: 60, w: 288, h: 144, bw: 2, bc: 15, rad: 10 })),
+  INK: () => insBytes(Op.ink({ slot: 3, prim: 1, a: 4, b: 4, c: 60, d: 40, w: 2, lvl: 15 })),
+  "INK.RING": () => insBytes(Op.ink({ slot: 1, prim: 3, a: 44, b: 44, c: 36, w: 1, lvl: 12 })),
+  "INK.TRI": () => insBytes(Op.ink({ slot: 2, prim: 5, a: -8, b: -8, c: 8, d: -8, e: 0, f: 12, lvl: 15 })),
+  ANIM: () => insBytes(Op.anim({
+    slot: 1, x0: -496, x1: 40, y0: 78, y1: 78, w0: 496, w1: 496, h0: 150, h1: 150,
+    durMs: 300, delayMs: 0,
+  })),
+  // ⚠️ x0 and y1 var-bound: [V3] and [V6], so vmask 0x48 and the var index rides in the field bytes.
+  ANIM_VARBOUND: () => insBytes(Op.anim({
+    slot: 1, x0: varRef(0), x1: 40, y0: 78, y1: varRef(6), w0: 496, w1: 496, h0: 150, h1: 150,
+    durMs: 300, delayMs: 0,
+  })),
+  // ★ 0x28 GIF — native frame cycling over three IMAGE slots, ping-pong at 100 ms/frame. This is
+  // the ONE newgfx-family opcode this port authors (FONT/IMAGE/ANIM/INK have no emitter here yet),
+  // so it is the one whose bytes the cross-check can actually pin against the Python golden.
+  GIF: () => insBytes(Op.gif(4, [1, 2, 3], 100, GIF_MODE.PINGPONG)),
   // ⚠️ 7 bytes, NOT bigClock()'s 8: the Python vector's cfg_hex is "01000000000104".
   WFCREATE: () => insBytes(Op.wfCreate(1, 40, Uint8Array.from([1, 0, 0, 0, 0, 1, 4]))),
   WFCALL: () => insBytes(Op.wfCall(1, 3, 0, 20, 17, 1)),

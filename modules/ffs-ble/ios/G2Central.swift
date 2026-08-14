@@ -862,6 +862,29 @@ final class G2Central: NSObject {
     }
   }
 
+  /// FUT-269 dual-lens telemetry: request device info from ONE lens. Addressing a single lens
+  /// removes the deduped "whichever answered" ambiguity; each telemetry payload also self-reports
+  /// its lens. ⚠️ Whether the LEFT lens answers a direct service-0x09 query is unverified on-glass
+  /// (FUT-159: the left arm is silent on async events).
+  func requestDeviceInfoSide(_ side: G2Side) {
+    queue.async { [weak self] in
+      guard let self = self else { return }
+      if self.flashActive {
+        self.log("requestDeviceInfoSide ignored — flash in progress")
+        return
+      }
+      guard self.pairReadyLocked() else {
+        self.log("requestDeviceInfoSide ignored — pair not ready (connect both lenses first)")
+        return
+      }
+      let target: G2Target = side == .left ? .left : .right
+      guard side == .left || side == .right else { return }
+      self.sendG2SettingLocked(
+        G2Setting.requestDeviceInfo(magicRandom: self.counters.nextMagic()), to: target)
+      self.log("requestDeviceInfoSide → \(side.rawValue) (service 0x09)")
+    }
+  }
+
   /// FUT-216: frame + chunk + write an arbitrary payload to a RAW service id on both lenses,
   /// reusing the standard 0xAA transport (syncId / CRC16 / 236 B chunking). Used to push a
   /// native code payload to the resident CFW loader's service 0x90.
