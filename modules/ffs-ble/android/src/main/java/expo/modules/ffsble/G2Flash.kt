@@ -367,7 +367,19 @@ object G2Flash {
      * Restore path = goldenStock27. */
     val goldenInk27 = GoldenVector(
         "47a337ef02f83808424c11ca75ac28129f232186d72c8bd99e958d0d8dd0c16b",
-        3601454L, 0x007A740EL, true, "big-arena loader (2.2.7.14) [CURRENT]"
+        3601454L, 0x007A740EL, true, "big-arena loader (2.2.7.14)"
+    )
+    /** 2026-08-14 — GIF + LD05 always-on telemetry loader. Same 16384 arena as goldenInk27;
+     * the only loader.c delta is the additive LD05 telemetry block (Carrier B — LD04's 68
+     * bytes are byte-identical at the same offsets). The GIF opcode (0x28) is NOT in this
+     * flashed image — it ships in the PUSHED ffs_prog.c interpreter. Built in CI on the
+     * clang-18 pin (run 31837608620) — NOT locally; Windows clang emits different bytes.
+     * ps/progEnd are that run's ("ps 3557884 -> 3601866", payload end MRAM 0x007a75aa);
+     * selfTestGuard re-derives both from the image, so a mis-transcribed digit refuses the
+     * flash rather than passing it. Restore path = goldenStock27. */
+    val goldenGif27 = GoldenVector(
+        "80d4c1a70bb86cf2db0c2b8bf42b1dec87be6e007a309750eaef58b500bfafa0",
+        3601866L, 0x007A75AAL, true, "gif+telemetry loader (2.2.7.14) [CURRENT]"
     )
 
     /** Every build this driver will consider flashing. Anything else is refused outright. */
@@ -375,7 +387,7 @@ object G2Flash {
         goldenCFW, goldenStock, goldenStock27, goldenCanary,
         goldenFontpeek, goldenBidiOnly, goldenHebrewFull, goldenHebrewProbe,
         goldenFfsui, goldenRamexec, goldenLoader, goldenLoader27, goldenV3,
-        goldenArena27, goldenInk27
+        goldenArena27, goldenInk27, goldenGif27
     )
 
     /** Look up a build by the SHA-256 of its bytes. Null means "not a known build". */

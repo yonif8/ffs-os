@@ -196,14 +196,16 @@ const LOADER_SHA = "373bfe9aa3645f1cda5b0204df1db3516e16347f31dcc9a39846442022c4
 // ffs_ui_patch prop-id migration. ⚠️ The payload frame gained an 8-byte CRC header, so app
 // and firmware MUST ship together — an old app against this loader is refused rej_code=4.
 const LOADER_2_2_7_14_URL = `${FW_BASE}/g2_2.2.7.14_loader.bin`;
-// ⚠️ BUMPED AGAIN 2026-08-13 (same day) for the BIG-ARENA loader: LDR_MAX_PAYLOAD
-// 9216 -> 16384. The previous image (e206a0ec…) fixed the per-push OOM but left only
-// 768 B of blob headroom, and INK's rasteriser needs ~4.2 KB — the interpreter went
-// 8436 -> 12632 B, which a 9216 arena refuses with rej=2/CAP. Without it FFSP_OP_IMAGE
-// can only draw an empty bordered box, because nothing on the wire reaches the surface.
+// ⚠️ BUMPED 2026-08-14 for the GIF + LD05-TELEMETRY loader (CI run 31837608620, clang-18).
+// Same 16384 arena as the big-arena image below; the ONLY loader.c change over 47a337ef is
+// the LD05 always-on telemetry block (Carrier B — Pool-A headroom + ffsp_vm_t state on every
+// frame), which is additive: LD04's 68 bytes stay byte-identical at the same offsets. The GIF
+// opcode (0x28) itself is NOT in the flashed image — it lives in the PUSHED ffs_prog.c
+// interpreter (13136 B, fits the 16384 arena) and is exercised by the dev-box testkit.
+// Prior big-arena image was 47a337ef (LDR_MAX_PAYLOAD 9216 -> 16384, for INK's rasteriser).
 // ⛔ THIS CONSTANT IS NOT THE GATE. G2Flash.kt's allGoldens is what actually refuses an
 // unknown image; bumping only this one silently changes nothing (learned the hard way).
-const LOADER_2_2_7_14_SHA = "47a337ef02f83808424c11ca75ac28129f232186d72c8bd99e958d0d8dd0c16b";
+const LOADER_2_2_7_14_SHA = "80d4c1a70bb86cf2db0c2b8bf42b1dec87be6e007a309750eaef58b500bfafa0";
 // Stock 2.2.7.14, kept as the restore-to-stock escape hatch for the current base.
 const STOCK_2_2_7_14_URL = `${FW_BASE}/g2_2.2.7.14_stock.bin`;
 const STOCK_2_2_7_14_SHA = "0fced0aebcc6c88db6f76dba34f91b805d842a5fc297bfd7fa6d6a34ec83cecb";
