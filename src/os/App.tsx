@@ -33,10 +33,9 @@ import { useConnectionSupervisor, healthLabel, type ConnectionHealth } from "./c
 import { screenOwner } from "./reclaim";
 import { PhoneNav, type PhoneCtx } from "./phone/nav";
 import { homeScreen, textTestScreen, setTextTestContent } from "./phone/screens";
-import { Chips, Group, Progress, Row, SectionLabel, Tabs, Tile, TileGrid } from "./ui";
+import { Group, Progress, Row, SectionLabel, Tabs } from "./ui";
 import { DashboardPanel } from "./dashboard";
 import { DevTelemetryPanel } from "./devtools/DevTelemetryPanel";
-import { GENERATED_PAYLOADS } from "./payloads.generated";
 import { attachOsCommandListener } from "./runtime";
 
 // Read the REAL shipped version rather than a hand-maintained copy. A hardcoded
@@ -46,34 +45,7 @@ import { attachOsCommandListener } from "./runtime";
 // (FUT-233, 2026-07-28: a log said 0.11.1 while 0.11.4 was installed.)
 const APP_VERSION = (Constants.expoConfig?.version ?? "unknown") as string;
 
-type TabKey = "link" | "drive" | "probes" | "flash" | "log";
-
-/**
- * Squeeze a generated payload's title down to something readable in a ~78 px tile.
- *
- * The generated titles carry shouty affordances that made sense in a flat list of fifty
- * identical rows ("⭐ BMP PROBE DISPLAY — TAP THIS ONE"), where the only way to point at
- * the row you wanted was to shout. In a grid the badge does that job, so the emoji, the
- * SHOUTING and the "— TAP THIS ONE" tail are pure noise. Trailing dashes are dropped
- * with them, otherwise trimming leaves labels ending in a stray "—".
- */
-function tileLabel(title: string): string {
-  let t = title
-    // Strip leading emoji/symbols + any variation selectors and the space after them.
-    .replace(/^[^\p{L}\p{N}]+/u, "")
-    .replace(/\s*—?\s*TAP (THIS ONE|FIRST)\s*$/i, "");
-
-  // "Render ONLY 3 — menu" → "menu"; "SDK DEMO scene#1 — launcher only" → "launcher only".
-  // Only when the head carries a NUMBER, because that number is exactly what the badge
-  // (R3, Ds1) already shows — dropping a head without one would lose the only label there is.
-  const split = t.match(/^(.*?\d.*?)\s+—\s+(.+)$/);
-  if (split && split[2].trim().length >= 3) t = split[2];
-
-  return t.replace(/\s*—\s*$/, "").trim() || title;
-}
-
-/** Probe families, taken from the tag each generated payload already carries. */
-const PROBE_FAMILIES = ["render", "bisect", "select", "probe", "app", "safe"] as const;
+type TabKey = "link" | "drive" | "flash" | "log";
 
 /**
  * Pull the CFW diagnostic blocks out of the firmware version string.
@@ -190,7 +162,7 @@ const LOADER_URL = `${FW_BASE}/g2_2.2.6.10_loader.bin`;
 // FUT-217: no gesture hooks (left touchpad); FUT-216: dispatch probe (logs service keys → svc[]).
 const LOADER_SHA = "373bfe9aa3645f1cda5b0204df1db3516e16347f31dcc9a39846442022c43103";
 // FUT-246 — the SAME loader rebased onto stock 2.2.7.14, which is what Yoni's glasses now run.
-// Every payload in payloads.generated.ts is built against THIS base; pushing them at the
+// Every pushed payload is built against THIS base; pushing at the
 // 2.2.6.10 loader above would branch into unrelated code. Also carries the FUT-244 pair:
 // loader body-CRC (a corrupt frame is refused as LD04 instead of being executed) and the
 // ffs_ui_patch prop-id migration. ⚠️ The payload frame gained an 8-byte CRC header, so app
@@ -210,134 +182,6 @@ const LOADER_2_2_7_14_SHA = "e4befdccbeda6fb17cde5cf55cd3c1bd8b4e73f9e6be5856f1c
 const STOCK_2_2_7_14_URL = `${FW_BASE}/g2_2.2.7.14_stock.bin`;
 const STOCK_2_2_7_14_SHA = "0fced0aebcc6c88db6f76dba34f91b805d842a5fc297bfd7fa6d6a34ec83cecb";
 const CFW_SERVICE = 0x90; // custom CFW loader BLE service id
-// FUT-238 — STYLE PROPS ORACLE (one tap, one answer). Runs the firmware's OWN
-// lv_style_set_* thunks, then asks lv_style_set_prop whether the prop it wrote is the
-// id we claim: an id already held is OVERWRITTEN (prop_cnt unchanged), an id not held is
-// APPENDED (prop_cnt+1). prop_cnt's struct offset is DISCOVERED at runtime, not assumed.
-// Returns a bitmask on the firmware-L line as ret=0x……  Decode (full table on FUT-238):
-//   0x5B18FFFD / 0x5B18FFFE = ✅ full PASS (layout A / layout B) — the recovered v9.3.0 map is right
-//   0x5B1F000D = 🔴 the OLD numbering was right; 0x5B00000D = thunk addresses wrong
-//   0x5BE10000 / 0x5BE00000 = oracle couldn't run (bad struct layout / no layer_top)
-// It should ALSO draw a rounded outlined box with legible "FUT238 OK" mid-HUD — the
-// semantic proof, because the same intent under the OLD ids rendered an invisible label
-// (FUT-197). Built from payloads/payload_style_props.c, blob 2420 B,
-// sha256 8b035cdb…49143a, + the 4-byte FXP1 magic = 2424 B on the wire.
-const PAYLOAD_STYLE_PROPS_B64 =
-  "RlhQMS3p8E+DsE/2v0GCRgAmwPJEAQAgxfbhNohH4LNE9tNJBEbA8kcJICDIRwAoAPCehAdGQvZpCAAgwPJICDhweHC4cPhwOHF4cbhx+HE4cnhyuHL4cjhzeHO4c/hzOHR4dLh0+HQ4dXh1uHX4dTh2eHa4dvh2OHd4d7h3+Hc4RgwhESLARzh5CCgJ0Th6ASgG0QEnCCUN4Kb1gDYA8Ge8OHoIKEDwY4Q4ewEoQPBfhAInDCUgIMhHYLMAIQFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXcMIQEiBkbARzBGDCECIsBHcF0BKAi/BDcgIMhHYLMAIQFwQXCBcMFwAXFBcYFxwXEBckFygXLBcgFzQXOBc8FzAXRBdIF0wXQBdUF1gXXBdQF2QXaBdsF2AXdBd4F3wXcMIQEiBkbARzBGHSECIsBHcF0CKAi/CDdE9iEbICDA8k0LyEeIswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/WUcjBGACGQR3BdASgH0TBGWiEiIsBHcF0BKAi/EDcgIMhHeLMGRgAgMHBwcLBw8HAwcXBxsHHwcTBycHKwcvByMHNwc7Bz8HMwdHB0sHTwdDB1cHWwdfB1MHZwdrB28HYwd3B3sHfwdzBGACHYR3BdASgH0TBGMCEiIsBHcF0BKAi/IDcgIMhHiLMGRgAgMHBwcLBw8HAwcXBxsHHwcTBycHKwcvByMHNwc7Bz8HMwdHB0sHTwdDB1cHWwdfB1MHZwdrB28HYwd3B3sHfwd6vxDgIwRgAhkEdwXQEoB9EwRjIhIiLAR3BdASgIv0A3ICDIR4izBkYAIDBwcHCwcPBwMHFwcbBx8HEwcnBysHLwcjBzcHOwc/BzMHRwdLB08HQwdXB1sHXwdTB2cHawdvB2MHdwd7B38Her8VwCMEYAIZBHcF0BKAfRMEYdISIiwEdwXQEoCL+ANyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/WncjBGACGQR3BdASgI0TBGDCEiIsBHcF0BKAi/B/WAdyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3q/G+AjBGACGQR3BdASgI0TBGECEiIsBHcF0BKAi/B/UAdyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/HaAjBGACGQR3BdASgI0TBGUCEiIsBHcF0BKAi/B/WAZyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/G0AjBGACGQR3BdASgI0TBGSCEiIsBHcF0BKAi/B/UAZyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/WacjBGACGQR3BdASgI0TBGXCEiIsBHcF0BKAi/B/WAVyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3q/E0AjBGACGQR3BdASgI0TBGKCEiIsBHcF0BKAi/B/UAVyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/WHcjBGACGQR3BdASgI0TBGWCEiIsBHcF0BKAi/B/WARyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3q/EoAjBGACGQR3BdASgI0TBGMSEiIsBHcF0BKAi/B/UARyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/WUcjBGACGQR3BdASgI0TBGMiEiIsBHcF0BKAi/B/WANyAgyEeQswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3C/WHcjBGACGQR3BdASgI0TBGMCEiIsBHcF0BKAi/B/UANyAgyEeAswZGACAwcHBwsHDwcDBxcHGwcfBxMHJwcrBy8HIwc3BzsHPwczB0cHSwdPB0MHVwdbB18HUwdnB2sHbwdjB3cHewd/B3MEYAIdhHcF0BKAjRMEYoISIiwEdwXQEoCL8H9YAnRPLcYMLyBwAGaE32g2HA8kMBIEYALhi/B/WAF4hHACgA8MOAT/LBQ0v2GxtP8psEwPJDA0/0lnFaIgVGwPJEC8DyQwTK+AAAmEcoRoohYyKgRyAgyEfIswAhAXBBcIFwwXABcUFxgXHBcQFyQXKBcsFyAXNBc4FzwXMBdEF0gXTBdAF1QXWBdcF1AXZBdoF2wXYBd0F3gXfBdx0hACIERsBHIEYwIQMiwEcgRjIh/yLARyBGMSFv8H9CwEcgRgwhDCLARyhGIUYAIthH2kZJ8hdLwPJJCyhG2EcAKGXQBEYgIMhHmLMFRgAgKHBocKhw6HAocWhxqHHocShyaHKocuhyKHNoc6hz6HModGh0qHTodCh1aHWodeh1KHZodqh26HYod2h3qHfodx6xKEZaITJGwEcoRlghb/B/QsBHKEZZIf8iwEcgRilGACLQR0YgjfgCAFUgjfgDAFQgjfgEADIgjfgFADMgjfgGADggjfgHACAgjfgIAE8gjfgJAEsgjfgKAAAgjfgLAAvxGAIN8QIBIEaQR0/ymwMgRhQhHiLA8kMDmEdH9AAnB/G2RjBGA7C96PCP";
-// ── The 26 pushable payloads now come from GENERATED DATA ──────────────────────
-// FUT-228: these used to be 26 hand-pasted base64 literals with no record of what
-// produced them. They now live in ./payloads.generated.ts, emitted by
-//   cd ~/Downloads/g2cfw/g2flash && ./tools/ffs-sdk gen
-// from g2flash/payloads/manifest.json (source .c + exact -D flags per variant).
-// The generator reproduces the previously-shipped strings BYTE-EXACT — that 26-way
-// comparison is the migration's regression test (tools/ffs_sdk/tests/test_parity.py).
-// The notes below are kept because they explain what each payload DOES; only the
-// base64 moved. The FUT238 STYLE PROBE above is deliberately still a literal: it is
-// published and load-bearing, so it is not regenerated.
-
-// Demo payloads = "FXP1" magic + a compiled PIC blob (payload_main draws a bordered box +
-// label on lv_layer_top). Pushing B after A visibly replaces A. (patches/payloads/payload_*.c)
-//   -> ffs-sdk id "PAYLOAD_A_B64"
-//   -> ffs-sdk id "PAYLOAD_B_B64"
-// FUT-234 — THE FIRST ANIMATION. A box slides left→right across the HUD, 3× over 4.5 s,
-// driven by the firmware's own lv_anim engine (lv_anim_init → set_values → lv_anim_start)
-// with a custom exec_cb living inside the payload itself. Even's SDK has no animation
-// primitive at all, so this is capability we have and they structurally cannot offer.
-// Source: g2flash/payloads/payload_anim.c. Verified by disassembly before first push —
-// notably +0x20 (path_cb, a CODE POINTER whose corruption reboots the glasses) is never
-// written; lv_anim_init installs lv_anim_path_linear there.
-//   -> ffs-sdk id "PAYLOAD_ANIM_B64"
-
-// FUT-234 crash bisect. payload_anim (above) crashed the glasses: right lens blank ~15-20 s,
-// then a watchdog reboot of both. The three lv_anim addresses have since been VERIFIED GENUINE
-// by disassembly against a known-good control, so a bad address is NOT the cause. These two
-// stages split what's left. Source: g2flash/payloads/payload_anim_bisect.c
-//   AN1 — box + lv_anim_init + set_values + all field writes, but NO lv_anim_start. Nothing is
-//         ever ticked. Answers: does our payload render AT ALL?  (returns 0xB1)
-//   AN2 — AN1 + lv_anim_start with a NO-OP exec_cb. The engine ticks and calls into our RAM
-//         blob 60x/s, touching nothing. Answers: do the engine + a callback into our resident
-//         payload survive?  (returns 0xB2)
-// AN1 crashes → not the animation at all. AN1 ok, AN2 crashes → calling our RAM blob from the
-// tick. Both ok → the per-frame lv_obj_set_pos redraw is the culprit.
-//   -> ffs-sdk id "PAYLOAD_AN1_B64"
-//   -> ffs-sdk id "PAYLOAD_AN2_B64"
-
-// FUT-232 — THE GENERIC WIDGET DOOR. Constructs lv_arc, a widget Even's own firmware
-// NEVER creates ("orphan" in g2fw.h), via lv_obj_class_create_obj + lv_obj_class_init_obj.
-// LVGL v9's create is TWO calls — allocate, then run the constructor chain; we only had
-// the first until class_init_obj was resolved 2026-07-28. If this works, ~25 widgets open.
-// Proof is STRUCTURAL, not visual (lv_layer_top has no theme, so appearance is unreliable):
-// the payload reads back obj->class_p (+0x00) and reports via the loader's ret=
-//   0xC7 = arc constructed AND class verified   0xE1 = create returned NULL
-//   0xE2 = created but class_p mismatch (our class table is wrong)   0xE0 = no layer_top
-// Source: g2flash/payloads/payload_widget.c
-//   -> ffs-sdk id "PAYLOAD_WIDGET_B64"
-
-// FUT-232 sweep — ALL 22 ORPHAN widget classes in one push. Each is created via the
-// generic door, its obj->class_p verified, then immediately DELETED (so nothing is ever
-// drawn and nothing accumulates). Result is a 32-bit BITMASK in the loader's ret=:
-//   ret = 0x5A?????? where the low 22 bits are the widgets that constructed + verified.
-//   bit0=arc(CONTROL, must be set) 1=slider 2=switch 3=checkbox 4=led 5=line 6=scale
-//   7=spinner 8=spinbox 9=table 10=textarea 11=chart 12=menu 13=menu_page 14=menu_cont
-//   15=menu_section 16=tabview 17=win 18=keyboard 19=calendar 20=cal_hdr_arrow 21=cal_hdr_drop
-// A visible arc is left behind. Source: g2flash/payloads/payload_widgets_all.c
-//   -> ffs-sdk id "PAYLOAD_WIDGETS_ALL_B64"
-
-// FUT-232 bisect ladder — the full 22-widget sweep HARDFAULTED (no ret at all), so a
-// prefix ladder finds the culprit. Each returns the 0x5A|mask for the first N widgets,
-// so a passing rung is not just a bisect step, it PROVES those N widgets.
-//   -> ffs-sdk id "PAYLOAD_WA12_B64"
-
-//   -> ffs-sdk id "PAYLOAD_WA16_B64"
-
-//   -> ffs-sdk id "PAYLOAD_WA18_B64"
-
-//   -> ffs-sdk id "PAYLOAD_WA20_B64"
-
-// FUT-232 menu bisect — W12 returned 0x5A000FFF (bits 0-11 ALL set: 12 widgets proven,
-// control included) and W16 crashed, so the fault is in bits 12-15, the menu family.
-// These rungs isolate which one, and MND separates constructor vs destructor.
-//   -> ffs-sdk id "PAYLOAD_WA_13_B64"
-
-//   -> ffs-sdk id "PAYLOAD_WA_14_B64"
-
-//   -> ffs-sdk id "PAYLOAD_WA_15_B64"
-
-//   -> ffs-sdk id "PAYLOAD_WA_MENUND_B64"
-
-// FUT-232 upper range — M13 returned 0x5A001FFF (13 widgets incl. lv_menu) and W16
-// crashed, so the fault is in bits 13-15. -DFROM lets us probe bits 16-21 WITHOUT
-// touching the menu family, so a bad index in the middle can't mask everything above.
-//   -> ffs-sdk id "PAYLOAD_WA_U16_B64"
-
-//   -> ffs-sdk id "PAYLOAD_WA_U16B_B64"
-
-// FUT-232 narrow range probes. Confirmed: bit 13 (lv_menu_page) crashes — M13 (bits
-// 0-12) passed and M14 (bits 0-13) did not. And U16 (bits 16-21, which skips the menu
-// family entirely) ALSO crashed, so there is a SECOND independent crasher up there.
-// These probes isolate each remaining suspect without any known-bad index in the way.
-//   -> ffs-sdk id "PAYLOAD_WA_P14_B64"
-
-//   -> ffs-sdk id "PAYLOAD_WA_P16_B64"
-
-//   -> ffs-sdk id "PAYLOAD_WA_P18_B64"
-
-//   -> ffs-sdk id "PAYLOAD_WA_P19_B64"
-
-// FUT-232 endgame. 17 of 22 proven: bits 0-12 (M13), 14-15 (R14 0xC000), 16 (R16),
-// 18 (R18). Remaining: 13 menu_page (confirmed crasher), 17 win (never tested alone),
-// and 19-21 calendar (R19 crashed, so >=1 of the three is bad). Single-bit probes.
-//   -> ffs-sdk id "PAYLOAD_WA_S17_B64"
-
-//   -> ffs-sdk id "PAYLOAD_WA_S19_B64"
-
-//   -> ffs-sdk id "PAYLOAD_WA_S20_B64"
-
-//   -> ffs-sdk id "PAYLOAD_WA_S21_B64"
-
-//   -> ffs-sdk id "PAYLOAD_WA_S13_B64"
-
-
 const WARRANTY_PHRASE = "my warranty is void";
 
 // FUT-167 soft precheck — a self-attested readiness checklist that must be
@@ -557,10 +401,6 @@ function AppInner() {
   });
 
   const [tab, setTab] = useState<TabKey>("link");
-  /** Long-pressed probe tile — its full reference text, shown inline under the grid. */
-  const [tileInfo, setTileInfo] = useState<string>("");
-  /** Probe family filter — "all", or one of the tags the generated payloads carry. */
-  const [probeFilter, setProbeFilter] = useState<string>("all");
   /**
    * Last device-info response that actually CARRIED the CFW blocks, latched for the life
    * of the link.
@@ -652,22 +492,7 @@ function AppInner() {
   // blocked path and Yoni still had to tap repeatedly. Loader presence cannot vanish
   // without a reflash, so LATCH it: once seen in any readback, it stays seen.
   const loaderSeenRef = useRef<boolean>(false);
-  const [loaderSeen, setLoaderSeen] = useState(false);
   const readTriesRef = useRef<number>(0);
-
-  // FUT-252 TEST WIZARD — one-tap guided on-glass capture. The wizard payload runs a
-  // timer state machine on-glass and writes a rolling 32-bit record into the loader's
-  // ret= field every tick; here we poll device-info at ~2 Hz for the run's duration,
-  // decode each ⟨WIZARD⟩ record out of ret=, and stream it to the glasses log so Rico
-  // reads the full multi-step capture from the server file. The tag nibble is 0x7,
-  // unique among live payloads. See payloads/wizard.c for the encoding.
-  const [wizardMsg, setWizardMsg] = useState<string>("");
-  const wizardRunRef = useRef<boolean>(false);
-  const wizardTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const wizardStopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const wizardLastRawRef = useRef<number>(-1);
-  const stopWizardRef = useRef<((done: boolean) => void) | null>(null);
-  const WIZ_STEP_NAMES = ["intro", "TEMPLE TAP", "RING TAP", "RING UP", "RING DOWN", "DONE"];
 
   // Live refs so the nav's context getters always read current session state.
   const btRef = useRef(bt);
@@ -766,47 +591,6 @@ function AppInner() {
         glog.emit("drv", "device_info", { batt: e.battery, chg: e.charging, l: e.leftVersion, r: e.rightVersion });
         if (`${e.leftVersion ?? ""} ${e.rightVersion ?? ""}`.includes("LOADER")) {
           loaderSeenRef.current = true;
-          setLoaderSeen(true);
-        }
-        // FUT-252 wizard capture: decode the ⟨WIZARD⟩ record out of the loader's ret=.
-        if (wizardRunRef.current) {
-          const ver = `${e.leftVersion ?? ""} ${e.rightVersion ?? ""}`;
-          const m = ver.match(/ret=0x([0-9A-Fa-f]+)/);
-          if (m) {
-            const v = parseInt(m[1], 16) >>> 0;
-            if ((v >>> 28) === 0x7 && v !== wizardLastRawRef.current) {
-              wizardLastRawRef.current = v;
-              const kind = (v >>> 27) & 1;
-              const step = (v >>> 24) & 7;
-              const name = WIZ_STEP_NAMES[step] ?? `step${step}`;
-              if (kind === 0) {
-                const S = (v >>> 16) & 0xff;
-                const U = (v >>> 8) & 0xff;
-                const fl = v & 0xff;
-                glog.emit("wizard", "rec", {
-                  raw: "0x" + v.toString(16).padStart(8, "0"),
-                  kind: "header", step, input: name,
-                  S: "0x" + S.toString(16).padStart(2, "0"),
-                  U: "0x" + U.toString(16).padStart(2, "0"),
-                  control_ok: (fl >>> 7) & 1, font_ok: (fl >>> 6) & 1,
-                  changed: (fl >>> 5) & 1, captured: (fl >>> 4) & 1,
-                  in_capture: (fl >>> 3) & 1, ctr: fl & 7,
-                });
-              } else {
-                glog.emit("wizard", "rec", {
-                  raw: "0x" + v.toString(16).padStart(8, "0"),
-                  kind: "id", step, input: name,
-                  id24: "0x" + (v & 0xffffff).toString(16).padStart(6, "0"),
-                });
-              }
-              setWizardMsg(
-                step >= 5
-                  ? "✅ glasses say DONE — capture streamed to the log. You can stop."
-                  : `🧙 Wizard running… step ${step}/4 (${name}) — follow the glasses; say 'done' when they say DONE.`,
-              );
-              if (step >= 5) stopWizardRef.current?.(true);
-            }
-          }
         }
         const p = pendingPushRef.current;
         if (!p) return;
@@ -890,35 +674,6 @@ function AppInner() {
     FfsBle.requestDeviceInfo();
   };
 
-  // FUT-252 — run the on-glass TEST WIZARD end to end: push it ONCE, then poll
-  // device-info at ~2 Hz for the run's duration so every ⟨WIZARD⟩ record the payload
-  // writes into ret= is decoded (in the onDeviceInfo listener above) and streamed to the
-  // glasses log. ~45 s covers the full run (intro + 4 steps + DONE) with margin; the
-  // wizard's own timer self-cleans on-glass (finite repeat_count).
-  const stopWizard = (done: boolean) => {
-    if (wizardTimerRef.current) { clearInterval(wizardTimerRef.current); wizardTimerRef.current = null; }
-    if (wizardStopRef.current) { clearTimeout(wizardStopRef.current); wizardStopRef.current = null; }
-    if (!wizardRunRef.current) return;
-    wizardRunRef.current = false;
-    glog.emit("wizard", "stop", { done });
-    if (!done) setWizardMsg("🧙 Wizard poll window closed — capture is in the log.");
-  };
-  stopWizardRef.current = stopWizard;
-  const runWizard = () => {
-    if (!bt.pairReady || wizardRunRef.current) return;
-    const wiz = GENERATED_PAYLOADS.find((p) => p.id === "wizard");
-    if (!wiz) { setWizardMsg("⛔ wizard payload missing from the build — run `ffs-sdk gen`."); return; }
-    wizardRunRef.current = true;
-    wizardLastRawRef.current = -1;
-    setWizardMsg("🧙 Starting the wizard… put the glasses on and follow the prompts.");
-    glog.emit("wizard", "start", { payload: wiz.id });
-    guardedPush(wiz.pushLabel, wiz.pushKey, wiz.b64);
-    // Poll device-info at ~2 Hz (the native side dedups reads under 300 ms).
-    wizardTimerRef.current = setInterval(() => FfsBle.requestDeviceInfo(), 500);
-    // Hard stop after the full run + margin, even if we never see the DONE record.
-    wizardStopRef.current = setTimeout(() => stopWizard(false), 45000);
-  };
-
   const startFlash = (url: string, sha: string, dryRun: boolean) => {
     if (!bt.pairReady || flashBusy) return;
     setFlashBusy(true);
@@ -970,7 +725,6 @@ function AppInner() {
   const canAct = bt.pairReady && !flashBusy;
   const batt = bt.deviceInfo?.battery;
   const fwVersion = parseCfw(bt.deviceInfo?.leftVersion ?? bt.deviceInfo?.rightVersion).fw;
-  const probeCount = GENERATED_PAYLOADS.filter((p) => p.id !== "wizard").length + 1;
 
   // Placed AFTER every hook above, so hook order stays identical whether or not the
   // harness is showing — an early return above any hook would break the rules of hooks.
@@ -1040,7 +794,6 @@ function AppInner() {
         tabs={[
           { key: "link", label: "Link" },
           { key: "drive", label: "Drive" },
-          { key: "probes", label: "Probes", badge: probeCount },
           { key: "flash", label: "Flash" },
           { key: "log", label: "Log" },
         ]}
@@ -1390,101 +1143,6 @@ function AppInner() {
           </>
         )}
 
-        {tab === "link" && (
-          <>
-        <SectionLabel note="FUT-252 · one tap · fully on-glass · auto-saved to the log">
-          Test wizard
-        </SectionLabel>
-        {wizardMsg ? <Text style={styles.dim}>{wizardMsg}</Text> : null}
-        <Group>
-          <Row
-            badge="🧙"
-            tint={theme.tint.green}
-            title="🧙 RUN TEST WIZARD — TAP THIS ONE"
-            subtitle="Put the glasses on and follow the prompts (TEMPLE TAP · RING TAP · RING UP · RING DOWN). Everything is captured on-glass and streamed to the log automatically — say 'done' when the glasses say DONE. No typing, no hex."
-            tag="no flash"
-            tagTint={theme.tint.green}
-            trace="FUT-252"
-            divider={false}
-            disabled={!bt.pairReady || wizardRunRef.current}
-            onPress={runWizard}
-          />
-        </Group>
-          </>
-        )}
-
-        {tab === "probes" && (
-          <>
-        <SectionLabel
-          note={
-            loaderSeen || loaderPresent()
-              ? "FUT-216 · ✅ OTA loader detected — pushes are safe"
-              : bt.deviceInfo
-                ? "FUT-216 · ⛔ NO loader (stock firmware) — pushes are BLOCKED"
-                : "FUT-216 · loader unverified — read the firmware version first"
-          }
-        >
-          Push over the air
-        </SectionLabel>
-        {pushMsg ? <Text style={styles.dim}>{pushMsg}</Text> : null}
-
-        <Chips
-          options={[
-            { key: "all", label: "all", count: probeCount },
-            ...PROBE_FAMILIES.map((f) => ({
-              key: f,
-              label: f,
-              count: GENERATED_PAYLOADS.filter((p) => p.id !== "wizard" && p.tag === f).length,
-            })).filter((o) => o.count > 0),
-          ]}
-          active={probeFilter}
-          onChange={setProbeFilter}
-        />
-
-        {/* Long-press readout. The subtitles are reference text — needed when you are
-            deciding WHICH probe, never on the way to tapping one you already know. */}
-        <Text style={styles.tileHint} numberOfLines={4}>
-          {tileInfo || "tap to push · long-press for what a probe does"}
-        </Text>
-        <TileGrid>
-          {probeFilter === "all" ? (
-            <Tile
-              badge="★"
-              tint={theme.tint.red}
-              label="FUT238 style"
-              tag="no flash"
-              disabled={!bt.pairReady}
-              onLongPress={() =>
-                setTileInfo(
-                  "★ FUT238 STYLE PROBE — one tap → read back ret=0x… from the firmware-L line, and look for a rounded outlined box with legible “FUT238 OK” mid-HUD.",
-                )
-              }
-              onPress={() => {
-                guardedPush("FUT238 STYLE PROBE", "push_style_props", PAYLOAD_STYLE_PROPS_B64);
-              }}
-            />
-          ) : null}
-          {GENERATED_PAYLOADS.map((p) =>
-            // The wizard has its own one-tap section on the Link tab (push + poll + log);
-            // skip its bare-push tile here so it isn't offered twice.
-            p.id === "wizard" || (probeFilter !== "all" && p.tag !== probeFilter) ? null : (
-              <Tile
-                key={p.id}
-                badge={p.badge}
-                tint={p.tint}
-                label={tileLabel(p.title)}
-                tag={p.tag}
-                disabled={!bt.pairReady}
-                onLongPress={() => setTileInfo(`${p.badge} ${p.title}\n${p.subtitle ?? ""}`)}
-                onPress={() => {
-                  guardedPush(p.pushLabel, p.pushKey, p.b64);
-                }}
-              />
-            ),
-          )}
-        </TileGrid>
-          </>
-        )}
 
         {tab === "log" && (
           <>
