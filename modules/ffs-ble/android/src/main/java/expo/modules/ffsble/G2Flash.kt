@@ -379,7 +379,24 @@ object G2Flash {
      * flash rather than passing it. Restore path = goldenStock27. */
     val goldenGif27 = GoldenVector(
         "80d4c1a70bb86cf2db0c2b8bf42b1dec87be6e007a309750eaef58b500bfafa0",
-        3601866L, 0x007A75AAL, true, "gif+telemetry loader (2.2.7.14) [CURRENT]"
+        3601866L, 0x007A75AAL, true, "gif+telemetry loader (2.2.7.14)"
+    )
+    /** 2026-08-15 — NATIVE GIF STEREO-SYNC loader. Adds the resident master-broadcast poll
+     * (ffs_gif_master_poll from the loader tick) + the slave-snap trampoline at the peer-receive
+     * bl FUN_00464ffa @0x0045b660, so the two lenses phase-lock a looping GIF with no phone in
+     * the loop. Built in CI on the clang-18 pin (run 31849497034). ps/progEnd are that run's
+     * ("ps 3557884 -> 3602538", payload end MRAM 0x007a784a); selfTestGuard re-derives both from
+     * the image, so a mis-transcribed digit refuses the flash. Restore path = goldenStock27. */
+    val goldenSync27 = GoldenVector(
+        "8d63a4312f703a6011dda4e68cee62bc1ea2d7fd82343456bb0409fed53d23b3",
+        3602538L, 0x007A784AL, true, "gif-sync loader (2.2.7.14)"
+    )
+    /** 2026-08-15 DIAGNOSTIC — gif-sync loader with FFS_GIF_SYNC_DEBUG (slave forces frame 2 on
+     * receipt to isolate the sync-chain break). CI run 31852233186; ps 3557884 -> 3602514,
+     * payload end MRAM 0x007a7832. To be replaced once the chain is diagnosed. */
+    val goldenSyncDiag27 = GoldenVector(
+        "e4befdccbeda6fb17cde5cf55cd3c1bd8b4e73f9e6be5856f1c349b8f7b69b35",
+        3602514L, 0x007A7832L, true, "gif-sync DIAG (2.2.7.14) [CURRENT]"
     )
 
     /** Every build this driver will consider flashing. Anything else is refused outright. */
@@ -387,7 +404,7 @@ object G2Flash {
         goldenCFW, goldenStock, goldenStock27, goldenCanary,
         goldenFontpeek, goldenBidiOnly, goldenHebrewFull, goldenHebrewProbe,
         goldenFfsui, goldenRamexec, goldenLoader, goldenLoader27, goldenV3,
-        goldenArena27, goldenInk27, goldenGif27
+        goldenArena27, goldenInk27, goldenGif27, goldenSync27, goldenSyncDiag27
     )
 
     /** Look up a build by the SHA-256 of its bytes. Null means "not a known build". */

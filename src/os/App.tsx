@@ -205,7 +205,7 @@ const LOADER_2_2_7_14_URL = `${FW_BASE}/g2_2.2.7.14_loader.bin`;
 // Prior big-arena image was 47a337ef (LDR_MAX_PAYLOAD 9216 -> 16384, for INK's rasteriser).
 // ⛔ THIS CONSTANT IS NOT THE GATE. G2Flash.kt's allGoldens is what actually refuses an
 // unknown image; bumping only this one silently changes nothing (learned the hard way).
-const LOADER_2_2_7_14_SHA = "80d4c1a70bb86cf2db0c2b8bf42b1dec87be6e007a309750eaef58b500bfafa0";
+const LOADER_2_2_7_14_SHA = "e4befdccbeda6fb17cde5cf55cd3c1bd8b4e73f9e6be5856f1c349b8f7b69b35";
 // Stock 2.2.7.14, kept as the restore-to-stock escape hatch for the current base.
 const STOCK_2_2_7_14_URL = `${FW_BASE}/g2_2.2.7.14_stock.bin`;
 const STOCK_2_2_7_14_SHA = "0fced0aebcc6c88db6f76dba34f91b805d842a5fc297bfd7fa6d6a34ec83cecb";
