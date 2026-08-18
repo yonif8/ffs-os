@@ -396,7 +396,39 @@ object G2Flash {
      * payload end MRAM 0x007a7832. To be replaced once the chain is diagnosed. */
     val goldenSyncDiag27 = GoldenVector(
         "e4befdccbeda6fb17cde5cf55cd3c1bd8b4e73f9e6be5856f1c349b8f7b69b35",
-        3602514L, 0x007A7832L, true, "gif-sync DIAG (2.2.7.14) [CURRENT]"
+        3602514L, 0x007A7832L, true, "gif-sync DIAG (2.2.7.14)"
+    )
+    /** 2026-08-18 — OS TAKEOVER: resident base-page dashboard constructor. Patches the base-page
+     * module-table constructor ptr (ROM word 0x006aa670, entry 3 / app_id 1) from Even's
+     * dashboard_page_lifecycle to our ffs_dash_rt_ctor, so cold boot / wake / return-to-home builds
+     * OUR dashboard as the base page and Even's dashboard is never constructed (zero-trace). Built in
+     * CI on the clang-18 pin (run 32139161393); ps 3557884 -> 3603710, payload end MRAM 0x007a7cde.
+     * selfTestGuard re-derives ps/progEnd from the image, so a mis-typed digit refuses the flash
+     * rather than passing it. Restore path = goldenStock27. */
+    val goldenTakeover27 = GoldenVector(
+        "4521d40cef3bdb7c776fc2395f236671a92ce8b001a4f63b6ad02a341eac9594",
+        3603810L, 0x007A7D42L, true, "OS takeover usable dashboard — tap-safe (2.2.7.14)"
+    )
+    /** 2026-08-18 — OS TAKEOVER + functional navigation. Same base-page ctor swap as
+     * goldenTakeover27, now with the Even-like gesture model wired into ffs_dash_rt_ctor:
+     * roll moves the app-drawer selection, tap enters (dashboard -> drawer -> app), double-tap
+     * is back (app -> drawer -> dashboard). Now with the redraw fix: rt_repaint invalidates the
+     * image + base-page root so the HUD actually refreshes (clock ticks, nav is visible). Built
+     * in CI on the clang-18 pin (run 32166565461); ps 3557884 -> 3610244, payload end MRAM
+     * 0x007a9664. selfTestGuard re-derives ps/progEnd from the image, so a mis-typed digit
+     * refuses the flash rather than passing it. */
+    val goldenNav27 = GoldenVector(
+        "361cdb214ebc4ae85e2a35310d43c79799b6c9439d1cbfa54a33917f384e7aa2",
+        3610244L, 0x007A9664L, true, "OS takeover — functional nav + redraw fix (2.2.7.14)"
+    )
+    /** 2026-08-18 — long-press opens the menu, double-tap hides the dashboard (Even's own fade
+     * FUN_004ed540, gated by *0x2007543c=0), and both eyes stay in sync (gestures folded
+     * synchronously in the input hook instead of the per-lens timer). Long-press retargets the
+     * eventID==3 predicate bl at 0x00442e70 to ffs_dash_longpress. Built CI run 32171189107;
+     * ps 3557884 -> 3610970, payload end MRAM 0x007a993a. selfTestGuard re-derives ps/progEnd. */
+    val goldenNav27b = GoldenVector(
+        "cbeacb985d03fd9bc923c5ac371dd6fa3f656e3227949e04c579ec493acf3a44",
+        3610970L, 0x007A993AL, true, "OS takeover — longpress menu + hide + stereo-sync (2.2.7.14) [CURRENT]"
     )
 
     /** Every build this driver will consider flashing. Anything else is refused outright. */
@@ -404,7 +436,8 @@ object G2Flash {
         goldenCFW, goldenStock, goldenStock27, goldenCanary,
         goldenFontpeek, goldenBidiOnly, goldenHebrewFull, goldenHebrewProbe,
         goldenFfsui, goldenRamexec, goldenLoader, goldenLoader27, goldenV3,
-        goldenArena27, goldenInk27, goldenGif27, goldenSync27, goldenSyncDiag27
+        goldenArena27, goldenInk27, goldenGif27, goldenSync27, goldenSyncDiag27,
+        goldenTakeover27, goldenNav27, goldenNav27b
     )
 
     /** Look up a build by the SHA-256 of its bytes. Null means "not a known build". */
