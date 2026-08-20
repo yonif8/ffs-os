@@ -1359,6 +1359,56 @@ object G2Setting {
     fun setLensY(magicRandom: Int, level: Int): ByteArray =
         infoEnvelope(magicRandom, 2, oneField(1, level))
 
+    /**
+     * PANIC RESET -- reboot the glasses when NOTHING ELSE CAN REACH THEM.
+     *
+     * ## What a panic reset is, and why a device needs one
+     *
+     * The glasses run a custom firmware whose diagnostic and update loop works by "pushing"
+     * native code to the device over BLE. Everything on that path -- reassembling a multi-packet
+     * message, copying it into a queue, handing it to our loader -- allocates memory from a
+     * single shared heap. If that heap fills up, EVERY allocation on the receive path fails, and
+     * the firmware's own code drops the message silently. The device is still running: it answers
+     * status reads, its display thread keeps ticking, its counters keep climbing. It just cannot
+     * accept anything new. It has gone deaf.
+     *
+     * The obvious remedy -- push a payload that reboots the device -- does not work, because that
+     * payload is itself a push and dies at the same allocation. And these glasses have no
+     * user-reachable power button. On 2026-08-20 that combination cost two full firmware reflashes
+     * in one day, ~14 minutes each, on a device that was never actually broken.
+     *
+     * ## How this message gets through
+     *
+     * The custom firmware patches the two ROM pointers through which the BLE transport calls its
+     * inbound message handlers, so OUR code runs first, on the BLE thread, on the received packet
+     * buffer -- **before any allocation of any kind**. It looks for the 12-byte marker below and,
+     * on a match, triggers a hardware reset (the same reset the watchdog performs) instead of
+     * returning. A frame this small arrives in a single packet, which the transport dispatches
+     * without allocating at all, so the entire path from radio to reset needs zero heap.
+     *
+     * ## Why this is safe to send at any time
+     *
+     * The marker rides in sub-field **100** of the settings message the app already uses for
+     * brightness, wear detection and lens offsets (sid 0x09). Even's own firmware uses sub-fields
+     * 1..8, and a protobuf decoder SKIPS a field number it does not know. So on stock firmware --
+     * or on any custom image built before this feature -- this frame is inert: it is parsed,
+     * ignored, and nothing happens. It cannot brick a device that does not understand it.
+     *
+     * A reset loses nothing but volatile state: the glasses re-pair on their own in ~30-40 s.
+     *
+     * @param token the 12-byte marker. Defaults to [PANIC_TOKEN], which is the only value the
+     *   firmware acts on. A DIFFERENT 12-byte string is the NEGATIVE CONTROL for the recovery
+     *   drill: it must reach the device and do nothing, which is what proves that a reset seen
+     *   after the real token came from the gate and not from a coincidental reboot.
+     *
+     * ⛔ Never move this to sid 0x80 (`UX_DEVICE_SETTINGS` / `dev_config`). Writing that service
+     *    bricked a pair of glasses during early reverse engineering; see [SID].
+     */
+    const val PANIC_TOKEN: String = "FFSPANICRST!"
+
+    fun panicReset(magicRandom: Int, token: String = PANIC_TOKEN): ByteArray =
+        infoEnvelope(magicRandom, 100, token.toByteArray(Charsets.US_ASCII))
+
     /** APPRequestSettingType. Used as `settingInfoType` (field 1) on a read request. */
     const val REQ_BRIGHTNESS_INFO: Int = 0
     const val REQ_BASIC_SETTING: Int = 1
@@ -1582,6 +1632,28 @@ object G2Setting {
                     if (code == 5L) {
                         sb.append(String.format(" crc want=0x%X got=0x%X", u32(ld, 60), u32(ld, 64)))
                     }
+                }
+                // R1/S-SAFE: the 4-byte LD07 safety block at +120. Three numbers that exist
+                // because each of them was, at some point, an INVISIBLE frame drop -- and an
+                // invisible drop is indistinguishable from a dead BLE link from over here.
+                //   ballast=  KB of heap still pre-claimed for the BLE receive path. 0 on a
+                //             fresh boot means the lifeboat was never obtained; read it before
+                //             trusting any recovery result.
+                //   spent=    times the heap ran dry under an inbound message and the lifeboat
+                //             was handed over instead. >0 means the device WOULD have gone deaf.
+                //   snapoom=  times an image-snapshot copy was refused by the heap. This one
+                //             used to be a dropped frame with no counter at all.
+                //   gate=armed  this image carries the panic-reset gate (see G2Setting.panicReset).
+                // See g2flash/patches/loader.c ld07_safety and g2flash/docs/S-SAFE-report.md.
+                if (ld.size >= 124) {
+                    sb.append(
+                        String.format(
+                            " ballast=%dKB spent=%d snapoom=%d",
+                            ld[120].toInt() and 0xFF, ld[121].toInt() and 0xFF,
+                            ld[122].toInt() and 0xFF
+                        )
+                    )
+                    if ((ld[123].toInt() and 0x01) != 0) sb.append(" gate=armed")
                 }
                 out.leftVersion = (out.leftVersion ?: "") + sb.toString() + "⟩"
             }

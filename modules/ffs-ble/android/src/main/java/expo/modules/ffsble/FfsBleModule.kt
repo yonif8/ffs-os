@@ -387,6 +387,15 @@ class FfsBleModule : Module() {
                 if (value == 0) 1 else value,
                 intent.getStringExtra("text") ?: "UPDATED"
               )
+              // PANIC RESET -- reboot the glasses when the BLE receive path is too starved to
+              // accept anything else, including a reboot payload. Costs the device nothing but
+              // volatile state; it re-pairs on its own in ~30-40 s. See G2Setting.panicReset.
+              //   am broadcast -a com.futurefounders.ffs.SETTING --es key panic --ei value 1
+              // `--es token <12 chars>` overrides the marker. A WRONG marker is the negative
+              // control for the recovery drill: it must reach the device and do nothing, which
+              // is what proves a reset seen after the real marker came from our gate and not
+              // from a coincidental reboot. Do not "simplify" it away.
+              "panic" -> c?.panicReset(intent.getStringExtra("token") ?: G2Setting.PANIC_TOKEN)
               "silent" -> c?.setSilentMode(value != 0)
               "wear" -> c?.setWearDetection(value != 0)
               "lensx" -> c?.setLensOffset(value, null)

@@ -2484,6 +2484,25 @@ class G2Central(
         if (y != null) sendSettingLocked("setLensY($y)") { m -> G2Setting.setLensY(m, y) }
     }
 
+    /**
+     * PANIC RESET -- reboot both lenses when nothing else can reach them.
+     *
+     * Sent to BOTH arms, because a starved heap is a per-lens condition and recovering one eye
+     * is not recovering the glasses. See [G2Setting.panicReset] for what this is and why the
+     * ordinary "push a reboot payload" route cannot work.
+     *
+     * ⚠️ This deliberately runs through the SAME `sendSettingLocked` path as brightness and wear
+     * detection. It is not special-cased, does not bypass the pair-ready check, and holds no
+     * privileged state: the entire mechanism lives in the firmware, and this is a normal
+     * settings write that happens to carry a marker the firmware acts on.
+     *
+     * [token] defaults to the real marker. Passing a different 12-byte string is the NEGATIVE
+     * CONTROL: it takes an identical path and must do nothing.
+     */
+    fun panicReset(token: String = G2Setting.PANIC_TOKEN) = post {
+        sendSettingLocked("panicReset(token=%s)".format(token)) { m -> G2Setting.panicReset(m, token) }
+    }
+
     private fun sendSettingLocked(label: String, build: (Int) -> ByteArray) {
         if (!pairReadyLocked()) {
             log("$label ignored -- pair not ready")

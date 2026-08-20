@@ -571,6 +571,62 @@ class G2ProtocolTest {
         assertEquals(true, info?.leftVersion?.contains("crc want=0x1234 got=0x5678"))
     }
 
+    // ---- Panic reset (sid 0x09 sub-field 100) ----
+
+    /**
+     * ⭐ THE WIRE CONTRACT FOR THE PANIC RESET, PINNED BYTE FOR BYTE.
+     *
+     * The firmware matches these bytes with hand-written code that runs before any memory is
+     * allocated, so it cannot log, cannot report, and cannot degrade: it either matches or the
+     * glasses stay unreachable. That makes this encoding untestable on the device in any useful
+     * sense -- a silent non-match looks exactly like a broken feature. So it is pinned here.
+     *
+     * The vector was computed independently of this Kotlin (a Python protobuf model, mirrored in
+     * g2flash/docs/S-SAFE-report.md §2.5), which is the same cross-check every other golden in
+     * this file rests on.
+     *
+     *   08 01        field 1 varint  commandId = 1 (deviceReceiveInfo)
+     *   10 2a        field 2 varint  magicRandom = 0x2A
+     *   1a 0f        field 3 len 15  DeviceReceiveInfoFromAPP
+     *     a2 06 0c   field 100 (tag 802) wire type 2, length 12
+     *     "FFSPANICRST!"
+     *
+     * Sub-field 100 is far above Even's 1..8, so a stock decoder skips it and the frame is inert
+     * on firmware that does not carry the gate.
+     */
+    @Test
+    fun `panicReset encodes the exact frame the firmware gate matches`() {
+        assertArrayEquals(
+            bytes(
+                0x08, 0x01, 0x10, 0x2A, 0x1A, 0x0F, 0xA2, 0x06, 0x0C,
+                0x46, 0x46, 0x53, 0x50, 0x41, 0x4E, 0x49, 0x43, 0x52, 0x53, 0x54, 0x21
+            ),
+            G2Setting.panicReset(0x2A)
+        )
+        assertEquals(12, G2Setting.PANIC_TOKEN.length)
+        // 21 bytes fits one transport packet, which is what lets the firmware handle it without
+        // building a reassembly context -- i.e. without allocating. If this ever grows past a
+        // single packet the whole mechanism stops being heap-free.
+        assertEquals(
+            1,
+            G2Transport.buildPackets(0x2A, 0x09, G2Setting.panicReset(0x2A)).size
+        )
+    }
+
+    /**
+     * The NEGATIVE CONTROL takes a byte-identical path and differs only in the marker. Without
+     * it, a reset observed after the real marker cannot be attributed to the gate rather than to
+     * a coincidental reboot -- which would make the recovery drill a false pass.
+     */
+    @Test
+    fun `panicReset with a decoy token differs only in the marker`() {
+        val real = G2Setting.panicReset(0x2A)
+        val decoy = G2Setting.panicReset(0x2A, "FFSPANICRSTX")
+        assertEquals(real.size, decoy.size)
+        assertArrayEquals(real.copyOfRange(0, real.size - 1), decoy.copyOfRange(0, decoy.size - 1))
+        assertEquals(0x58.toByte(), decoy[decoy.size - 1])   // 'X', not '!'
+    }
+
     // ---- CFW capability advertisement (field 100) ----
 
     /** A sid-0x09 device-info response: field 4 = inner{f5 = leftVersion}, plus optional extras. */
