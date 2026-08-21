@@ -13,6 +13,8 @@ export const Cmd = {
   UPDATE_IMAGE_RAW_DATA: 3,
   /** TextContainerUpgrade — change a live container's text WITHOUT rebuilding the page. */
   UPDATE_TEXT_DATA: 5,
+  /** APP_REQUEST_AUDIO_CTR — start/stop the MICROPHONE stream. */
+  AUDIO_CONTROL: 15,
   /** APP_REQUEST_OPEN_IMU_PACKET — start/stop the head-motion stream. */
   IMU_CONTROL: 19,
   REBUILD_PAGE: 7,
@@ -283,6 +285,59 @@ export function encodeUpdateText(opts: {
   u.int32(4, bytes.length);
   u.string(5, opts.content);
   return encodeEnvelope(Cmd.UPDATE_TEXT_DATA, 9, u.data, opts.magic);
+}
+
+/**
+ * The wrapper field `AudioCtrCommand` occupies in evenhub_main_msg_ctx.
+ *
+ * Same shape as the IMU pair below, and settled the same way — straight out of the generated
+ * FileDescriptorProto in `reference/g2-kit-unofficial/ble/gen/EvenHub_pb.ts`:
+ *
+ *     field 18 -> AudioCtrCommand (AudioCtrCmd { uint32 AudoFuncEn = 1; })
+ *     field 19 -> AudioResCommand (AudioResCmd { uint32 AudioStat  = 1; })   <- the ack
+ *
+ * Cross-checked against faceclaw's independent Java driver, which is the only implementation
+ * known to have actually run this on hardware (`BleProtocol.buildAudioControl`, Cmd 15 / field 18).
+ *
+ * ⚠️ A wrong wrapper field here is SILENT, exactly as it is for the IMU: protobuf skips fields it
+ * does not recognise, the glasses accept the frame, no microphone opens, and the result is
+ * indistinguishable from hardware whose mic is broken.
+ */
+export const AUDIO_CTRL_FIELD = 18;
+/** The wrapper field the firmware's ack comes back on: `AudioResCmd { AudioStat }`. */
+export const AUDIO_RES_FIELD = 19;
+
+/**
+ * Start or stop the MICROPHONE stream.
+ *
+ * ── WHAT THIS ACTUALLY DOES ON THE GLASSES ──────────────────────────────────────
+ * The whole handler is 60 bytes (`evenhub_audio_ctr_handler` @0x004e5e9e): it sets a bookkeeping
+ * flag and calls `AUDM_appAcquire(5)` / `AUDM_appRelease(5)`. First acquire powers the DMIC pair
+ * (one mic per lens, master/slave handshake) and the external GX8002 codec; last release shuts it
+ * down. The glasses then encode PCM→LC3 **themselves** and notify 205-byte packets up the
+ * **LEFT** arm's render characteristic (…6402) — see `src/sdk/mic.ts` for the packet layer.
+ *
+ * ── PRECONDITION (the part that bites) ──────────────────────────────────────────
+ * On STOCK firmware an EvenHub StartUpPage container must already be up, or the enable does
+ * nothing. faceclaw guards on exactly this ("skip G2 mic enable; EvenHub display path not ready").
+ * ⚠️ On our takeover image the base page is OURS, not an EvenHub page, so this precondition is
+ * **untested on our firmware** — that is what `g2flash/payloads/ffs_mic_probe.c` is for.
+ *
+ * ── PRIVACY ─────────────────────────────────────────────────────────────────────
+ * ⛔ Calling this starts RECORDING. It must never be issued except in direct response to a
+ * deliberate user action, it must always be paired with a disable, and the glasses must show a
+ * visible listening indicator for its whole duration. Nothing derived from the audio — not the
+ * samples, not a transcript, not message text — may reach `glog`. See `src/sdk/mic.ts`.
+ */
+export function encodeAudioControl(opts: {
+  enable: boolean;
+  magic: number;
+  /** Escape hatch only; the default is what the descriptor and faceclaw both say. */
+  field?: number;
+}): Uint8Array {
+  const c = new ProtoWriter();
+  c.int32(1, opts.enable ? 1 : 0);
+  return encodeEnvelope(Cmd.AUDIO_CONTROL, opts.field ?? AUDIO_CTRL_FIELD, c.data, opts.magic);
 }
 
 /**

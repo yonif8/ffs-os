@@ -1,0 +1,19 @@
+{
+  "name": "ffs-notify",
+  "version": "0.1.0",
+  "description": "FFS local Expo native module — allowlist-only Android NotificationListenerService. Reads the notifications of a handful of named messaging apps so the glasses' messages app can render a REAL conversation; everything else is dropped before it is read.",
+  "main": "index.ts",
+  "author": "Future Founders Systems",
+  "license": "MIT",
+  "private": true,
+  "keywords": [
+    "react-native",
+    "expo",
+    "expo-modules",
+    "android",
+    "notifications",
+    "even-realities",
+    "g2",
+    "smart-glasses"
+  ]
+}

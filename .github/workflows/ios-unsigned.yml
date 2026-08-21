@@ -21,9 +21,8 @@ jobs:
     timeout-minutes: 45
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
-      # Off-device telemetry token (FUT-144). Private repo secret — inlined into the
-      # JS bundle by Metro as an EXPO_PUBLIC_* var; never hardcoded in this public repo.
-      EXPO_PUBLIC_GLOG_TOKEN: ${{ secrets.EXPO_PUBLIC_GLOG_TOKEN }}
+      # (glog telemetry is in-house/loopback now — no token to inject. The old
+      # EXPO_PUBLIC_GLOG_TOKEN secret was retired 2026-08-21 with the public tunnel.)
       # The React Native Podfile enables ccache when USE_CCACHE=1 (checked before the
       # expo-build-properties apple.ccacheEnabled property). This is the reliable switch
       # that actually routes the Pods clang/ld through ccache. (FUT-142)

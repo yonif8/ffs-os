@@ -522,6 +522,33 @@ object G2EvenHub {
      * Sending a pace alongside a disable has never been observed on the wire, so we do not
      * invent it.
      */
+    /**
+     * MICROPHONE control -- EvenHub Cmd 15, wrapper field 18.
+     *
+     * ⚠️ READ THIS BEFORE USING IT: on OUR firmware this is the SECONDARY route, not the
+     * primary one. The primary is `G2EvenAI.ctrl(STATUS_ENTER)` -- see G2Central.setMicStream.
+     *
+     * What the glasses do with this message is a 60-byte handler
+     * (`evenhub_audio_ctr_handler` @0x004e5e9e): set a bookkeeping flag, then
+     * `AUDM_appAcquire(5)` / `AUDM_appRelease(5)`. `[proven]` on glass 2026-08-21 that calling
+     * that acquire DIRECTLY from a CFW payload is a clean no-op -- `ret=0x76100000`, rc=0, no
+     * fault, and the per-app state byte did not move -- so app_id 5's consumer is not what
+     * routes audio to BLE on the takeover image. Sending the real Cmd 15 may still differ from
+     * calling the acquire by hand, because stock also requires an EvenHub StartUpPage to be up
+     * first (faceclaw guards on exactly that). That difference is what this builder exists to
+     * test; it is not the path to build on until it is proven.
+     *
+     * AudioCtrCmd { uint32 AudoFuncEn = 1; }, acked as field 19 AudioResCmd { AudioStat }.
+     * Field numbers from the generated FileDescriptorProto in
+     * `reference/g2-kit-unofficial/ble/gen/EvenHub_pb.ts` and confirmed by faceclaw's
+     * independent Java driver (`BleProtocol.buildAudioControl`).
+     */
+    fun audioControl(enable: Boolean, magicRandom: Int): ByteArray {
+        val c = G2ProtobufWriter()
+        c.writeInt32Field(1, if (enable) 1 else 0) // AudoFuncEn
+        return message(G2EvenHubCmd.AUDIO_CONTROL, 18, c.data, magicRandom)
+    }
+
     fun imuControl(enable: Boolean, reportFrq: Int, magicRandom: Int): ByteArray {
         val c = G2ProtobufWriter()
         c.writeInt32Field(1, if (enable) 1 else 0) // IMUReportEn
@@ -1631,6 +1658,78 @@ object G2Setting {
                     sb.append(String.format(" rej=%d/%s", rej, why))
                     if (code == 5L) {
                         sb.append(String.format(" crc want=0x%X got=0x%X", u32(ld, 60), u32(ld, 64)))
+                    }
+                }
+                // FUT-269 Carrier B telemetry block (LD05, bytes 68..88). The firmware has been
+                // shipping these five fields for weeks and this decoder JUMPED from 68 straight
+                // to 88 and threw them away.
+                //
+                // `id` is the one that matters, and it makes a whole class of failure readable
+                // WITH NO PUSH AT ALL. It is the ui module id of the ACTIVE PAGE:
+                //   0xE0 = Even's EvenHub page — the page our payload pushes land on, because a
+                //          push is an update to an image CONTAINER and containers belong to it
+                //   0x01 = our base page
+                // The page manager holds exactly ONE page, so these are mutually exclusive.
+                // Anything that switches ui module (an explicit RequestDisplayStartUp "summon",
+                // a long-press "end this feature", Even's AI popup) EXITs the EvenHub page, and
+                // its lifecycle handler frees the very word the container lookup guards on. After
+                // that every push is refused by a lookup that allocates nothing and counts
+                // nothing — which is why this was misdiagnosed as a starved heap three times.
+                // ⭐ So: `id=0x1` while a push is failing means the push has no page to land on.
+                // That is a diagnosis, from a device-info read, with nothing pushed.
+                // See g2flash/docs/S-TRAP-report.md and g2flash/docs/S-FIX-report.md.
+                //
+                //   fkb=   largest block the loader could actually malloc+free, in bytes
+                //   node=  the active page node's address (0 = no page at all)
+                //   id=    that node's ui module id (see above)
+                //   gates= b0 mgr sane · b1 LVGL root · b2 overlay · b3 base page active
+                //          · b4 an FFSP VM is attached to the node
+                //   lens=  which lens answered. ⚠️ ret= is deduped across two lenses that can
+                //          diverge, so knowing which one spoke is not a detail.
+                if (ld.size >= 88) {
+                    sb.append(
+                        String.format(
+                            " fkb=%d node=0x%08X id=0x%X gates=0x%02X lens=%d",
+                            u32(ld, 68), u32(ld, 72),
+                            (ld[76].toInt() and 0xFF) or ((ld[77].toInt() and 0xFF) shl 8),
+                            ld[78].toInt() and 0xFF, ld[79].toInt() and 0xFF
+                        )
+                    )
+                }
+                // S2-top: the 32-byte AP01 app/shell block at +88 (LD05 -> LD06). Until now
+                // nothing on the phone read it, so `installed=2` came only from the ret= word
+                // and NOTHING reported whether the thing the wearer looks at actually got
+                // built. On 2026-08-20 Yoni wore an image where every counter said healthy and
+                // the glass was black: our base page had cleaned Even's widgets away and then
+                // failed to allocate its own surface, silently. `dash=` is that missing field.
+                //   dash=built  surface allocated and live       (the only good value)
+                //   dash=notop  lv_layer_top/container refused
+                //   dash=nocfg/noimg/nobuf  the image or its pixels refused
+                //   dash=none   never even attempted
+                //   src=ft      pixels in P_FT      (costs P_GLOBAL nothing)
+                //   src=glob    pixels in P_GLOBAL  (the fallback path)
+                // See g2flash/patches/ffs_appload.c ffs_appload_status for the bit packing.
+                if (ld.size >= 120) {
+                    val ap = ld.copyOfRange(88, 120)
+                    if (String(ap.copyOfRange(0, 4), Charsets.US_ASCII) == "AP01") {
+                        val b4 = ap[4].toInt() and 0xFF
+                        val b7 = ap[7].toInt() and 0xFF
+                        val dashName = when ((b4 shr 4) and 0x0F) {
+                            0 -> "none"; 1 -> "built"; 2 -> "notop"
+                            3 -> "nocfg"; 4 -> "noimg"; 5 -> "nobuf"
+                            else -> "?${(b4 shr 4) and 0x0F}"
+                        }
+                        val srcName = when ((b7 shr 4) and 0x03) {
+                            1 -> "ft"; 2 -> "glob"; else -> "-"
+                        }
+                        sb.append(
+                            String.format(
+                                " dash=%s src=%s live=%d%s apps=%d run=%d",
+                                dashName, srcName, (b7 shr 6) and 1,
+                                if ((b7 shr 7) and 1 == 1) " HIDDEN" else "",
+                                b7 and 0x0F, ap[5].toInt() and 0xFF
+                            )
+                        )
                     }
                 }
                 // R1/S-SAFE: the 4-byte LD07 safety block at +120. Three numbers that exist

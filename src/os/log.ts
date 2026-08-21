@@ -1,9 +1,15 @@
-// FFS Glasses OS — off-device structured logger (FUT-144 · hardened FUT-253)
+// FFS Glasses OS — structured logger (FUT-144 · hardened FUT-253)
 //
-// WHY: the OS runs on Yoni's iPhone; on-glass/app/ring/link signals are invisible from
-// here. The app ships every structured log record over a WebSocket to our collector
-// (wss://g2app.x36.site/glog/ingest → Cloudflare Tunnel → this Windows box's
-// tools/glog-collector/server.js → glasses-logs/<session>.jsonl), tailed live.
+// WHY: the OS runs on the phone; on-glass/app/ring/link signals are invisible from
+// the dev box. The app ships every structured log record over a WebSocket to our
+// collector, which runs ON THE DEV BOX — the phone reaches it over the local adb link,
+// never the internet:
+//   phone  ws://127.0.0.1:8795/glog/ingest
+//     └─ adb reverse tcp:8795 tcp:8795 (USB or adb-over-wifi) ─┐
+//                            tools/glog-collector/server.js  ──┘ → glasses-logs/<session>.jsonl
+// `adb reverse` maps the phone's localhost:8795 straight to the collector on this box,
+// so it works cable-free when the glasses are worn (adb-over-wifi) and the logs never
+// leave the desk. phone_link.py's `heal` restores the reverse alongside the forwards.
 //
 // This is pure JS → deployable via OTA (no native rebuild). It is deliberately
 // SELF-HARDENED so it can never hurt the very glasses it's debugging:
@@ -11,6 +17,7 @@
 //     dropped) — never a hot reconnect loop (exponential backoff, capped at 30s + jitter),
 //   • one socket at a time, all sends wrapped, emit() never throws into the app,
 //   • high-frequency SDK events (mic/accel) are NOT subscribed — no render-thread flood.
+//   • collector is loopback-only (127.0.0.1) — nothing here is exposed off-device.
 //
 // FUT-253 TRANSPORT HARDENING (this file must survive 10× the record rate):
 //   • BATCH: records coalesce into one JSON-array frame per flush (size/interval bound),
@@ -21,9 +28,9 @@
 //     keyed by cat:event; a kept record carries `_n` = how many frames it stands for.
 //   • O(1)-amortized drain via a head index (no per-record Array.shift()).
 //
-// SECURITY NOTE: the endpoint is public and the token below is a light spam-guard on a
-// THROWAWAY diagnostic sink (the collector only accepts writes, it can't read back).
-// Tear the /glog route down + rotate when diagnosis is done (see FUT-144).
+// SECURITY NOTE: the endpoint is loopback (127.0.0.1) reached over the adb link — it is
+// never exposed off-device, so no token/auth is needed. If the reverse isn't up the
+// socket simply never connects and the logger buffers then drops silently (below).
 
 import { AppState, type AppStateStatus } from "react-native";
 
@@ -33,19 +40,9 @@ import { AppState, type AppStateStatus } from "react-native";
 type ConnectionEvent = { health: string; rawState: string; note?: string; at?: number };
 type ReclaimTrigger = string;
 
-const ENDPOINT = "wss://g2app.x36.site/glog/ingest";
-// Injected at build time from a private GitHub Actions secret (EXPO_PUBLIC_GLOG_TOKEN);
-// never hardcoded in this public repo. Empty = telemetry ships without a token (the
-// collector may reject it) — the logger degrades silently, it never breaks the app.
-//
-// ⚠️ THIS TOKEN IS PUBLIC ONCE A BUILD SHIPS, and no amount of secret-handling changes that.
-// `EXPO_PUBLIC_*` means Expo INLINES the value into the JS bundle, and our IPA is published to
-// a public repo — so anyone who downloads the app can read it out. (Checked 2026-08-09: the
-// currently published IPA is clean only because it predates the glog work.) Treat it as a
-// throttling key, not a secret: rate-limit the collector, rotate on a schedule, and never
-// grant it anything beyond log ingest. Sending it as a query param below is deliberate for the
-// same reason — it lands in proxy logs, which costs nothing that is not already public.
-const TOKEN = process.env.EXPO_PUBLIC_GLOG_TOKEN ?? "";
+// Loopback on the dev box, reached via `adb reverse tcp:8795 tcp:8795`. No host, no TLS,
+// no token — the collector is not reachable off the desk, so there is nothing to guard.
+const ENDPOINT = "ws://127.0.0.1:8795/glog/ingest";
 
 const BUFFER_CAP = 3000;          // pending records held while offline; oldest dropped past this
 const MAX_BACKOFF_MS = 30_000;
@@ -119,7 +116,7 @@ function connect(): void {
   try {
     const url =
       `${ENDPOINT}?session=${encodeURIComponent(sessionId)}` +
-      `&device=${encodeURIComponent(deviceTag)}&token=${TOKEN}`;
+      `&device=${encodeURIComponent(deviceTag)}`;
     const sock = new WebSocket(url);
     ws = sock;
     sock.onopen = () => {
@@ -289,8 +286,8 @@ export const glog = {
 /**
  * Core logger boot — mint a session, open the WSS, wire AppState. NO @mentra SDK
  * subscriptions. Use this from stacks that don't run the mentra pipes (e.g. the
- * ffs-ble P1 test harness), so their logs still ship off-device to the FUT-144
- * collector without pulling mentra into the loop.
+ * ffs-ble P1 test harness), so their logs still reach the on-desk collector over the
+ * adb link without pulling mentra into the loop.
  * Idempotent. `boot` carries app/runtime version context for the session header.
  */
 export function initLoggerCore(boot?: Record<string, unknown>): void {

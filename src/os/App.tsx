@@ -36,7 +36,10 @@ import { homeScreen, textTestScreen, setTextTestContent } from "./phone/screens"
 import { Group, Progress, Row, SectionLabel, Tabs } from "./ui";
 import { DashboardPanel } from "./dashboard";
 import { DevTelemetryPanel } from "./devtools/DevTelemetryPanel";
+import { NotificationsPanel } from "../notifications/NotificationsPanel";
+import { useNotificationBridge } from "../notifications/useNotificationBridge";
 import { attachOsCommandListener } from "./runtime";
+import { base64ByteLength, loaderRecordFromVersions, verifyPushAck, type LoaderRecord } from "./pushAck";
 
 // Read the REAL shipped version rather than a hand-maintained copy. A hardcoded
 // "0.11.1" had drifted three releases behind app.json, so telemetry reported the
@@ -177,7 +180,24 @@ const LOADER_2_2_7_14_URL = `${FW_BASE}/g2_2.2.7.14_loader.bin`;
 // Prior big-arena image was 47a337ef (LDR_MAX_PAYLOAD 9216 -> 16384, for INK's rasteriser).
 // ⛔ THIS CONSTANT IS NOT THE GATE. G2Flash.kt's allGoldens is what actually refuses an
 // unknown image; bumping only this one silently changes nothing (learned the hard way).
-const LOADER_2_2_7_14_SHA = "e4befdccbeda6fb17cde5cf55cd3c1bd8b4e73f9e6be5856f1c349b8f7b69b35";
+// ⚠️ BUMPED 2026-08-20 for the S2 APP RUNTIME (CI run 32317924211, clang-18). Adds the
+// resident app loader behind the takeover dashboard: an FXP1 body beginning "FFSA" is an app
+// IMAGE, copied into its own buffer and launched/killed by the shell, so a new mini app costs
+// a BLE push instead of a ~13 min reflash. Also: the loader's permanent arena now degrades in
+// halves to a 2 KB floor instead of giving up, and reports the size it actually got.
+// The frozen FFSP wire contract (patches/ffs_prog.h) is untouched.
+// ⚠️ BUMPED 2026-08-20 (S-INT) for the SAFETY GATE + LAYER-TOP SHELL (CI run 32397128110).
+// Merges three streams: R1's arena-independent panic reset (a 12-byte marker on service 0x09
+// reboots the lenses from Even's own inbound handler, before any allocation -- the escape
+// hatch for the `calls=0 rxlen=0` deafness that cost two reflashes, which ffs_reset.c cannot
+// fix because a reset is itself a push) plus a ballast on Even's two silent inbound mallocs;
+// S2-top's shell on lv_layer_top with its surface in P_FT instead of P_GLOBAL (~20.5 KB
+// returned) and a constructor that only cleans Even's widgets once ours exists; and
+// G2A_MAX_CODE 2048 -> 6144 with a 16 KB cap on the running total.
+// Prior image was 7e8422fa (goldenBig27, full-HUD 576x288 shell on P_FT).
+// 2026-08-21 (S-SHIP): + the phone->app data channel (FFSC / G2_ABI 2), S-FIX tier 3
+// (FXP1 consumed at the transport gate), and S-EYES's left-lens peer readback.
+const LOADER_2_2_7_14_SHA = "c5dfd200459fe5f0ff0e6721a5197105807e5eb6de7f77732a8edfda8d73eb24";
 // Stock 2.2.7.14, kept as the restore-to-stock escape hatch for the current base.
 const STOCK_2_2_7_14_URL = `${FW_BASE}/g2_2.2.7.14_stock.bin`;
 const STOCK_2_2_7_14_SHA = "0fced0aebcc6c88db6f76dba34f91b805d842a5fc297bfd7fa6d6a34ec83cecb";
@@ -481,11 +501,23 @@ function AppInner() {
   // → blank lens → watchdog reboot, identically for every payload. Cost on 2026-07-28:
   // a whole session and three lens crashes. `pushMsg` is the refusal/confirmation line.
   const [pushMsg, setPushMsg] = useState<string>("");
+
+  // ⚠️ THE GLASSES CAN OPEN THEIR OWN MICROPHONE. Three of the eighteen audio bursts in the
+  // 08-18/08-20 archive had no CTRL ENTER from this phone before them — the GX8002 wake word, or
+  // a temple long-press into Even's stock voice flow. This banner is the only place that fact is
+  // ever visible to the wearer, so it is pinned above the tabs' content rather than filed in a
+  // panel, and it does not auto-dismiss. Metadata only: a side and a clock reading, never audio.
+  const [micAlert, setMicAlert] = useState<{ side: string; at: number; n: number } | null>(null);
   // FUT-237 fix: the guard demanded positive proof of the loader, but deviceInfo starts
   // empty — so the first tap only fired the read and the user had to tap AGAIN (Yoni hit
   // three taps). A guard that makes you repeat yourself is a bad guard. We now park the
   // push here and fire it automatically the moment the readback lands.
   const pendingPushRef = useRef<{ label: string; event: string; b64: string } | null>(null);
+  const pushAckRef = useRef<{
+    token: number; label: string; frameLen: number;
+    baseline: Pick<LoaderRecord, "gen" | "ran"> | null; tries: number; pollScheduled: boolean;
+  } | null>(null);
+  const pushTokenRef = useRef(0);
   // FUT-237 fix #2. My first fix assumed the problem was "never read the firmware yet".
   // WRONG — device-info arrives as SEVERAL events and only some carry the ⟨LOADER⟩ markers
   // (they ride the L-lens version string), so a marker-less event pushed us down the
@@ -548,7 +580,16 @@ function AppInner() {
   }, [bt.deviceInfo?.leftVersion, bt.deviceInfo?.rightVersion]);
 
   useEffect(() => {
-    if (!bt.pairReady) setCfwSeen(null);
+    if (!bt.pairReady) {
+      setCfwSeen(null);
+      const ack = pushAckRef.current;
+      if (ack) {
+        pushAckRef.current = null;
+        setPushMsg(`⛔ PUSH FAILED — ${ack.label}: glasses link dropped before loader acknowledgement`);
+        glog.emit("os", "push_failed", { label: ack.label, reason: "link_dropped_before_ack" });
+      }
+      pendingPushRef.current = null;
+    }
   }, [bt.pairReady]);
 
   // FUT-167 Stage 1: receive the zero-write flash-channel probe result.
@@ -589,16 +630,46 @@ function AppInner() {
         glog.emit("drv", "disconnected", { side: e.side, reason: e.reason ?? null, code: e.code, domain: e.domain })),
       FfsBle.addListener("onDeviceInfo", (e) => {
         glog.emit("drv", "device_info", { batt: e.battery, chg: e.charging, l: e.leftVersion, r: e.rightVersion });
+        const loaderRecord = loaderRecordFromVersions(e.leftVersion, e.rightVersion);
         if (`${e.leftVersion ?? ""} ${e.rightVersion ?? ""}`.includes("LOADER")) {
           loaderSeenRef.current = true;
         }
+        const ack = pushAckRef.current;
+        if (ack) {
+          const verdict = verifyPushAck(ack.baseline, loaderRecord, ack.frameLen);
+          if (verdict.state === "accepted") {
+            pushAckRef.current = null;
+            setPushMsg(`✅ loader ran ${ack.label} (gen ${verdict.record.gen}, ${ack.frameLen} B attributed)`);
+            glog.emit("os", "push_acked", { label: ack.label, frameLen: ack.frameLen, gen: verdict.record.gen });
+          } else if (verdict.state === "failed") {
+            pushAckRef.current = null;
+            setPushMsg(`⛔ PUSH FAILED — ${ack.label}: ${verdict.reason}`);
+            glog.emit("os", "push_failed", { label: ack.label, reason: verdict.reason });
+          } else if (!ack.pollScheduled) {
+            ack.tries += 1;
+            if (ack.tries >= 4) {
+              pushAckRef.current = null;
+              setPushMsg(`⛔ PUSH UNCONFIRMED — ${ack.label}: ${verdict.reason}`);
+              glog.emit("os", "push_unconfirmed", { label: ack.label, reason: verdict.reason });
+            } else {
+              const token = ack.token;
+              ack.pollScheduled = true;
+              setTimeout(() => {
+                const current = pushAckRef.current;
+                if (current?.token === token) {
+                  current.pollScheduled = false;
+                  FfsBle.requestDeviceInfo();
+                }
+              }, 1200);
+            }
+          }
+        }
         const p = pendingPushRef.current;
         if (!p) return;
-        if (loaderSeenRef.current) {
+        if (loaderSeenRef.current && loaderRecord) {
           pendingPushRef.current = null;
-          setPushMsg(`✅ loader confirmed — pushed ${p.label}`);
           glog.emit("os", p.event, {});
-          FfsBle.pushPayloadViaImage(p.b64);
+          sendAwaitingAck(p.label, p.b64, loaderRecord);
           return;
         }
         // Marker-less readback. Some events legitimately lack it, so try a few times
@@ -625,6 +696,14 @@ function AppInner() {
       FfsBle.addListener("onTxResume", (e) => glog.emit("ble", "tx_resume", { side: e.side, depth: e.queueDepth })),
       FfsBle.addListener("onSubscribe", (e) =>
         glog.emit("ble", "subscribe", { side: e.side, characteristic: e.characteristic, on: e.on })),
+      // Mic burst edges. `requestedByUs` false = WE DID NOT ASK — raise it to the wearer. The
+      // requested case is counted and logged but never banners, or every dictation nags.
+      FfsBle.addListener("onMicUnexpected", (e) => {
+        glog.emit("ble", "mic_burst", { side: e.side, gapMs: e.gapMs, requestedByUs: e.requestedByUs });
+        if (e.requestedByUs) return;
+        console.warn(`MIC-UNEXPECTED side=${e.side} — the glasses opened their own microphone`);
+        setMicAlert((prev) => ({ side: e.side, at: Date.now(), n: (prev?.n ?? 0) + 1 }));
+      }),
       FfsBle.addListener("onImgAck", (e) =>
         glog.emit("drv", "img_ack", { session: e.session, fragment: e.fragment, ok: e.ok, timedOut: e.timedOut })),
     ];
@@ -658,13 +737,45 @@ function AppInner() {
     const di = bt.deviceInfo;
     return `${di?.leftVersion ?? ""} ${di?.rightVersion ?? ""}`.includes("LOADER");
   };
+
+  // The notification → glasses bridge, at APP SCOPE so it forwards, auto-rebinds and runs its crash
+  // breaker regardless of which tab is showing (it used to live inside NotificationsPanel and thus
+  // only ran on the Drive tab — see useNotificationBridge). The panel is just its view.
+  const notifBridge = useNotificationBridge(bt.pairReady, loaderPresent());
+  const sendAwaitingAck = (label: string, b64: string, baselineOverride?: LoaderRecord | null) => {
+    let frameLen: number;
+    try {
+      frameLen = base64ByteLength(b64);
+    } catch (e) {
+      setPushMsg(`⛔ PUSH BLOCKED — ${label}: ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
+    const di = bt.deviceInfo;
+    const baseline = baselineOverride ?? loaderRecordFromVersions(di?.leftVersion, di?.rightVersion);
+    const token = ++pushTokenRef.current;
+    pushAckRef.current = { token, label, frameLen, baseline, tries: 0, pollScheduled: true };
+    setPushMsg(`⏳ sent ${label}; waiting for attributed loader execution…`);
+    FfsBle.pushPayloadViaImage(b64);
+    setTimeout(() => {
+      const current = pushAckRef.current;
+      if (current?.token === token) {
+        current.pollScheduled = false;
+        FfsBle.requestDeviceInfo();
+      }
+    }, 2500);
+  };
   const guardedPush = (label: string, event: string, b64: string) => {
     if (!bt.pairReady) return;
-    if (loaderPresent()) {
+    if (pushAckRef.current || pendingPushRef.current) {
+      setPushMsg("⛔ PUSH BLOCKED — another payload is still awaiting loader attribution");
+      return;
+    }
+    const di = bt.deviceInfo;
+    const baseline = loaderRecordFromVersions(di?.leftVersion, di?.rightVersion);
+    if (loaderPresent() && baseline) {
       loaderSeenRef.current = true;
-      setPushMsg(`✅ loader confirmed — pushed ${label}`);
       glog.emit("os", event, {});
-      FfsBle.pushPayloadViaImage(b64);
+      sendAwaitingAck(label, b64, baseline);
       return;
     }
     // Not proven yet — park the push and let the readback fire it. ONE tap.
@@ -819,6 +930,25 @@ function AppInner() {
               Keep the app open and stay within ~1 m of the glasses until this finishes.
             </Text>
           ) : null}
+        </View>
+      ) : null}
+
+      {micAlert ? (
+        <View style={styles.micBar}>
+          <Text style={styles.micTitle}>🎤 The glasses opened their own microphone</Text>
+          <Text style={styles.micBody}>
+            Audio started streaming from the {micAlert.side === "L" ? "left" : "right"} lens at{" "}
+            {new Date(micAlert.at).toLocaleTimeString()} and this phone never asked for it — a wake
+            word or a temple long-press into Even's own voice flow.
+            {micAlert.n > 1 ? `  (${micAlert.n}× this session)` : ""}
+          </Text>
+          <Text style={styles.micBody}>
+            Nothing was recorded, logged or sent: the audio characteristic is dropped in the driver
+            before it can reach a log, JavaScript or the network.
+          </Text>
+          <Pressable onPress={() => setMicAlert(null)}>
+            <Text style={styles.micDismiss}>Dismiss</Text>
+          </Pressable>
         </View>
       ) : null}
 
@@ -1033,6 +1163,14 @@ function AppInner() {
             the push status line are exactly the same ones the Probes tab shows. */}
         <DashboardPanel disabled={!canAct} status={pushMsg} onPush={guardedPush} />
 
+        {/* The notification bridge: an allowlist-only Android listener feeding REAL messages to
+            the on-glass `messages` app over the FFSC data channel. The allowlist lives on screen
+            rather than in a constant, because it is the whole privacy design — see
+            src/notifications/allowlist.ts. Not gated on `pairReady`: the grant, the allowlist and
+            the counters all matter with the glasses off, and the pump holds its value until the
+            link returns. */}
+        <NotificationsPanel bridge={notifBridge} />
+
         {/* Dev-only: live on-glass telemetry (memory / active page / VM error / lens), no camera.
             Gated by DEV_TELEMETRY so it never ships in a normal release build. */}
         {DEV_TELEMETRY ? <DevTelemetryPanel pairReady={bt.pairReady} /> : null}
@@ -1217,6 +1355,17 @@ const styles = StyleSheet.create({
   flashPct: { color: theme.text, fontSize: 15, fontWeight: "800", width: 52 },
   flashMsg: { color: theme.textDim, fontSize: 12, fontFamily: "Menlo", flex: 1 },
   flashWarn: { color: theme.warn, fontSize: 11.5, marginTop: 7, lineHeight: 15 },
+
+  micBar: {
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+    backgroundColor: "#2A1208",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.surfaceAlt,
+  },
+  micTitle: { color: theme.warn, fontSize: 13.5, fontWeight: "800" },
+  micBody: { color: theme.textDim, fontSize: 11.5, lineHeight: 16, marginTop: 5 },
+  micDismiss: { color: theme.accent, fontSize: 12, fontWeight: "700", marginTop: 8 },
 
   scroll: { flex: 1 },
   scrollContent: { paddingHorizontal: 16, paddingBottom: 56 },

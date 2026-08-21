@@ -245,6 +245,24 @@ export interface OnSubscribeEvent {
   on: boolean;
 }
 
+/**
+ * The microphone started streaming. Fired once per BURST, not per packet.
+ *
+ * ⚠️ `requestedByUs === false` means **the glasses opened their own microphone** — the GX8002
+ * wake word, or a temple long-press into Even's stock voice flow. Three of the eighteen audio
+ * bursts in the 08-18/08-20 archive looked like that, so this is an observed behaviour, not a
+ * theoretical one. Surface it to the wearer; never treat an idle mic as a closed one.
+ *
+ * Carries no audio and nothing derived from audio.
+ */
+export interface OnMicUnexpectedEvent {
+  side: G2Side;
+  /** Silence before this burst, ms. `-1` = first burst since the app started. */
+  gapMs: number;
+  /** true = our own setMicStream/aiSwirl opened it. false = the glasses did. */
+  requestedByUs: boolean;
+}
+
 /** An image-fragment ACK resolved or timed out (render-pipeline signal, FUT-249). */
 export interface OnImgAckEvent {
   session: number;
@@ -341,6 +359,7 @@ export interface FfsBleEvents {
   onTxStall: OnTxStallEvent;
   onTxResume: OnTxResumeEvent;
   onSubscribe: OnSubscribeEvent;
+  onMicUnexpected: OnMicUnexpectedEvent;
   onImgAck: OnImgAckEvent;
   onGlassesEvent: OnGlassesEvent;
   onServiceRaw: OnServiceRawEvent;

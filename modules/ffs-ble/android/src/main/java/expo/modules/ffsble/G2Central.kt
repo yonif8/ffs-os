@@ -195,8 +195,128 @@ class G2Central(
     var onServicesDiscovered: ((String, List<String>) -> Unit)? = null
     /** () -- BOTH lenses connected AND required chars found. Fires once per pair-up. */
     var onPairReady: (() -> Unit)? = null
-    /** (base64Payload, characteristicUUID, side) -- a notification arrived. */
+    /**
+     * (base64Payload, characteristicUUID, side) -- a notification arrived.
+     *
+     * ⛔ MICROPHONE AUDIO NEVER ARRIVES HERE. See [onAudioPacket] and the guard at the top of
+     * `handleNotificationLocked`.
+     */
     var onNotify: ((String, String, String) -> Unit)? = null
+
+    /**
+     * (packet, side) -- ONE raw 205-byte LC3 microphone packet from the glasses.
+     *
+     * ══ WHY THIS EXISTS SEPARATELY FROM [onNotify] ═════════════════════════════════════════
+     * Mic packets are a RECORDING OF THE WEARER. [onNotify] base64s its payload, writes a
+     * `Notify <uuid> (side=…, N bytes)` line to the driver log, and ships the base64 to
+     * JavaScript, where `os/calibration/capture.ts` records it and `os/log.ts` is configured to
+     * treat `ble:notify` as a sampled hot category bound for an off-device collector. Every one
+     * of those is a place audio must never reach, and none of them would notice if it did.
+     *
+     * So the audio characteristic is diverted BEFORE any of that happens: no base64, no log
+     * line, no JS bridge, no `onNotify`. This callback hands the bytes straight to whatever is
+     * decoding them, and its contract is:
+     *
+     *   • do not log the packet, its length, its contents, or anything derived from them;
+     *   • do not write it to disk;
+     *   • do not marshal it to JavaScript (20 packets/s over the bridge is both wasteful and a
+     *     second copy of the recording in a second process) -- decode in native code and pass
+     *     JS only the transcript, and only once the wearer has asked for it to be sent.
+     *
+     * Metadata -- counts, gaps, durations -- IS safe to log, and `src/sdk/mic.ts` defines exactly
+     * which fields those are. Nothing else about a mic session is.
+     *
+     * Packet layout, and the LC3 decode, are documented in `src/sdk/mic.ts`.
+     * ═══════════════════════════════════════════════════════════════════════════════════════
+     */
+    var onAudioPacket: ((ByteArray, String) -> Unit)? = null
+
+    /**
+     * (side, gapMs, requestedByUs) -- the microphone started streaming and **we did not ask**.
+     *
+     * The glasses can open their own mic: `[proven]` from the 08-18/08-20 archive, three of the
+     * eighteen audio bursts had no `CTRL ENTER` from this phone before them -- the GX8002 wake
+     * word, or a temple long-press into Even's stock voice flow. An idle mic is not a closed one,
+     * and nothing in the stack said so out loud.
+     *
+     * Fired once per BURST (first packet after [MIC_BURST_GAP_MS] of silence), never per packet.
+     * Carries no audio and nothing derived from audio -- a side, a gap in milliseconds, and
+     * whether our own [setMicStream]/[aiSwirl] is what opened it.
+     */
+    var onMicUnexpected: ((String, Long, Boolean) -> Unit)? = null
+
+    // ── mic session counters ─────────────────────────────────────────────────────────
+    // ⛔ THE ONLY THING ABOUT A MIC SESSION THAT MAY BE LOGGED. Counts and clock readings,
+    // never a byte of audio. This is not squeamishness: `[proven]` from our own glog archive,
+    // 3,281 notifications of the audio characteristic were base64'd, written to the driver log
+    // and shipped off-device across four days before the guard above existed. The instrument
+    // that replaces them has to be numeric by construction, or the same thing happens again the
+    // first time somebody needs to know whether packets arrived.
+    private var micPkts = 0
+    private var micPktsRight = 0
+    private var micBad = 0
+    private var micFirstMs = 0L
+    private var micLastMs = 0L
+    /** Any audio notification, L or R, good or bad -- the clock burst detection runs on. */
+    private var micLastAnyMs = 0L
+    /** True between our own CTRL ENTER and CTRL EXIT. A burst outside that window is theirs. */
+    private var micRequestedByUs = false
+    private var micBursts = 0
+    private var micBurstsUnexpected = 0
+
+    /**
+     * Silence, in ms, that separates one mic burst from the next. Packets arrive every ~50 ms, so
+     * anything past this is a new session rather than a dropped frame.
+     */
+    private val MIC_BURST_GAP_MS = 1_500L
+
+    /** Zero the counters. Call at the start of a capture, not at the end. */
+    fun micResetStats() = post {
+        micPkts = 0; micPktsRight = 0; micBad = 0; micFirstMs = 0L; micLastMs = 0L
+        log("mic stats reset")
+    }
+
+    /**
+     * Emit the counters. Safe to log, safe to ship, and the ONLY answer to "did packets flow?"
+     * that does not involve putting the wearer's voice in a file.
+     */
+    fun micLogStats() = post {
+        val span = if (micFirstMs == 0L) 0L else micLastMs - micFirstMs
+        log(
+            "MICSTATS pkts=$micPkts (L) right=$micPktsRight bad=$micBad " +
+                "spanMs=$span audioMs=${micPkts * 50} " +
+                "expectedPkts=${if (span > 0) span / 50 else 0} " +
+                "bursts=$micBursts unrequested=$micBurstsUnexpected"
+        )
+    }
+
+    /** Count one audio notification. Length and side only -- never the contents. */
+    private fun micCountLocked(len: Int, side: String) {
+        val now = android.os.SystemClock.elapsedRealtime()
+
+        // Burst edge: the first packet after a gap of silence. This is the only moment worth
+        // reporting -- at ~20 packets/s a per-packet signal would be noise, and the question
+        // ("did the mic just open?") is a question about edges.
+        val gap = if (micLastAnyMs == 0L) Long.MAX_VALUE else now - micLastAnyMs
+        micLastAnyMs = now
+        if (gap > MIC_BURST_GAP_MS) {
+            micBursts++
+            if (!micRequestedByUs) {
+                micBurstsUnexpected++
+                // Metadata only, and deliberately loud: this line is the record that the glasses
+                // opened their own microphone. Never add the packet to it.
+                log("MIC-UNEXPECTED side=$side -- audio started and WE DID NOT ASK " +
+                    "(burst #$micBursts, $micBurstsUnexpected unrequested this session)")
+            }
+            onMicUnexpected?.invoke(side, if (gap == Long.MAX_VALUE) -1L else gap, micRequestedByUs)
+        }
+
+        if (len != 205) { micBad++; return }
+        if (side == "R") { micPktsRight++; return }
+        if (micFirstMs == 0L) micFirstMs = now
+        micLastMs = now
+        micPkts++
+    }
     /** (name, side, reason?, code, domain) -- a lens disconnected. code=0 is a clean teardown. */
     var onDisconnected: ((String, String, String?, Int, String) -> Unit)? = null
 
@@ -384,13 +504,24 @@ class G2Central(
     /** Callers that arrived mid-handshake, run in order once it completes. */
     private val authWaiters = ArrayList<() -> Unit>()
     /**
+     * The phone's cached model of Even's EvenHub page: `pageCreated` + `animContainerReady`.
+     * Both live in [EvenHubPageLatches] so the invalidation rule ([EvenHubPageLatches.onImageAck])
+     * is reachable from a plain JVM unit test; this class cannot be instantiated without a
+     * BluetoothManager. The two properties below delegate to it, so every call site is unchanged.
+     */
+    private val pageLatches = EvenHubPageLatches()
+
+    /**
      * A startup page has been created this session -- subsequent pages must use rebuildPage
      * (createStartupPage only takes once per session). Reset on drop.
      *
-     * @Volatile because the SDK reads it off the bus thread via [sdkTakeoverPage] to seed its own
-     * page slot; every write still happens on the serial queue.
+     * @Volatile (on the backing field in [EvenHubPageLatches]) because the SDK reads it off the
+     * bus thread via [sdkTakeoverPage] to seed its own page slot; every write still happens on
+     * the serial queue.
      */
-    @Volatile private var pageCreated = false
+    private var pageCreated: Boolean
+        get() = pageLatches.pageCreated
+        set(value) { pageLatches.pageCreated = value }
 
     // Image transfer state (FUT-153).
     private var imgSessionCounter = 0
@@ -403,7 +534,10 @@ class G2Central(
     // are here because the FUT-216 payload push rides the same image channel).
     private var animActive = false
     private var animId = ""
-    private var animContainerReady = false
+    /** Backed by [pageLatches] -- see [EvenHubPageLatches.animContainerReady]. */
+    private var animContainerReady: Boolean
+        get() = pageLatches.animContainerReady
+        set(value) { pageLatches.animContainerReady = value }
     private var animSession = 0
 
     private var recoverTimer: Runnable? = null
@@ -420,7 +554,9 @@ class G2Central(
 
     private var lastGestureName = ""
     private var lastGestureAt = 0L
-    private var lastDeviceInfoAt = 0L
+    /** Per-SIDE, not global — see [handleDeviceInfoLocked]. A global window dropped the left
+     *  lens's answer entirely, which is how two per-lens bugs stayed invisible to us. */
+    private val lastDeviceInfoAtBySide = HashMap<String, Long>()
 
     /**
      * MUST be declared ABOVE the `init` block. Kotlin runs property initializers and init blocks
@@ -1765,6 +1901,18 @@ class G2Central(
             return
         }
 
+        // ⛔ PRIVACY GUARD -- microphone audio leaves the notification path RIGHT HERE, before it
+        // can be base64'd, logged, or shipped to JS. This is not a routing optimisation: below
+        // this line every notification is turned into a base64 string, written to the driver log
+        // and emitted to JavaScript, and a recording of the wearer must not go anywhere near any
+        // of that. Keep this the FIRST thing that happens after the flasher check, and never
+        // "temporarily" add a log line inside it. See [onAudioPacket].
+        if (uuid == AUDIO_NOTIFY) {
+            micCountLocked(data.size, s.raw)
+            onAudioPacket?.invoke(data, s.raw)
+            return
+        }
+
         val b64 = android.util.Base64.encodeToString(data, android.util.Base64.NO_WRAP)
         // Compact log -- the full payload goes to JS as base64 via onNotify, tagged side.
         log("Notify ${uuidString(uuid)} (side=${s.raw}, ${data.size} bytes)")
@@ -1926,6 +2074,68 @@ class G2Central(
         }
     }
 
+    /**
+     * OPEN OR CLOSE THE MICROPHONE.
+     *
+     * ══ WHICH MESSAGE ACTUALLY OPENS IT, AND HOW WE KNOW ═════════════════════════════════
+     * `[proven]` from our own glog archive, not inferred. The audio characteristic has notified
+     * this phone **3,281 times, every single one 205 bytes and every single one side=L**, in 18
+     * bursts across four days. Nine of those bursts start 0.2-0.5 s after an
+     * `aiSwirl: CTRL ENTER` line and stop within a second of `CTRL EXIT`. In the 22:55:47 burst
+     * the first packet lands at .845 -- **250 ms after CTRL ENTER and 165 ms BEFORE the ASK** --
+     * so it is the CTRL, not the ASK, that opens the mic.
+     *
+     * That single fact rearranges the whole design:
+     *   • the mic needs **no EvenHub container**, no Cmd 15, and no CFW patch;
+     *   • it is ONE message on the even_ai service (0x07), which we already send;
+     *   • ⭐ and we never have to send an ASK, so **nothing is ever submitted to Even's cloud**.
+     *     `aiSwirl` sends `ask(" ")` purely to keep an animation alive. Dictation must not.
+     *
+     * ⚠️ EXIT IS NOT OPTIONAL. Without it the DMIC pair stays powered and the glasses keep
+     * recording. Every caller pairs them; [micStop] is also what the safety timeout calls.
+     *
+     * ⚠️ Some bursts in the archive have NO swirl before them (2026-08-19 02:17, 08-20 18:29,
+     * 18:35). Those are almost certainly Even's own on-glass triggers -- the GX8002 wake word,
+     * or a temple long-press into the stock voice flow -- which means **the glasses can open
+     * their own microphone without the phone asking**. Worth knowing before assuming an idle
+     * mic is a closed one.
+     *
+     * @param alsoCmd15 additionally send EvenHub Cmd 15 / field 18. Off by default: that path
+     *   is the SECONDARY experiment (see G2EvenHub.audioControl) and mixing it into the proven
+     *   route would make a success unattributable.
+     */
+    fun setMicStream(on: Boolean, alsoCmd15: Boolean = false) = post {
+        if (!pairReadyLocked()) {
+            log("setMicStream ignored -- pair not ready (connect both lenses first)")
+            return@post
+        }
+        withSessionLocked {
+            if (on) {
+                micPkts = 0; micPktsRight = 0; micBad = 0; micFirstMs = 0L; micLastMs = 0L
+                micLastAnyMs = 0L; micBursts = 0; micBurstsUnexpected = 0
+                // Claim the window BEFORE the open goes out, or our own first burst races the
+                // flag and gets reported as the glasses opening their own microphone.
+                micRequestedByUs = true
+                sendEvenAILocked(
+                    G2EvenAI.ctrl(G2EvenAI.STATUS_ENTER, counters.nextMagic()), G2Target.BOTH
+                )
+                log("setMicStream: OPEN -- evenAI CTRL ENTER -> both (NO ask; nothing goes to Even's cloud)")
+            } else {
+                micRequestedByUs = false
+                sendEvenAILocked(
+                    G2EvenAI.ctrl(G2EvenAI.STATUS_EXIT, counters.nextMagic()), G2Target.BOTH
+                )
+                log("setMicStream: CLOSE -- evenAI CTRL EXIT -> both")
+            }
+            if (alsoCmd15) {
+                sendEvenHubLocked(
+                    G2EvenHub.audioControl(on, counters.nextMagic()), G2Target.RIGHT
+                )
+                log("setMicStream: ALSO sent EvenHub Cmd 15/field 18 -> right (secondary route under test)")
+            }
+        }
+    }
+
     fun injectInboundEvenHub(base64: String) = post {
         val data = decodeBase64(base64)
         if (data == null || data.isEmpty()) {
@@ -1985,19 +2195,43 @@ class G2Central(
     }
 
     /**
-     * A device-info response arrived. Both lenses may answer the same request, so dedup
-     * duplicates within 300ms (the aggregate battery/version is identical from either).
+     * A device-info response arrived. Both lenses answer the same request.
+     *
+     * ⛔ THIS USED TO DEDUP GLOBALLY — `if (now - lastDeviceInfoAt < 300L) return` — on the
+     * reasoning that "the aggregate battery/version is identical from either". That was true
+     * when the reply carried only battery and firmware version. It stopped being true the day
+     * we started riding `⟨LOADER … lens= dash= apps= run= src= …⟩` in the SAME reply, because
+     * every one of those fields is PER-LENS and the two lenses genuinely diverge.
+     *
+     * The cost was not theoretical. The left lens answered every single time and the phone
+     * threw it away inside 300 ms, so the left lens was unobservable from this machine, so
+     * TWO per-lens bugs (left eye receiving no data; a `°` drawn in one eye only) could only
+     * ever be found by Yoni putting the glasses on his face. Nothing upstream was broken —
+     * a value arrived correctly and something discarded it before anyone could look, which is
+     * the same shape as the `!s->have` bug it took a night to find.
+     *
+     * So: dedup PER SIDE. A lens that answers twice in 300 ms is still a duplicate; the other
+     * lens answering is NOT. `onDeviceInfo` still fires once per burst (the aggregate really
+     * is side-independent) but the LOG — where every `⟨LOADER⟩` readback is read from — now
+     * carries both.
      */
     private fun handleDeviceInfoLocked(info: G2Setting.DeviceInfo, side: G2Side) {
         val now = System.currentTimeMillis()
-        if (now - lastDeviceInfoAt < 300L) return
-        lastDeviceInfoAt = now
+        val key = side.raw
+        val prev = lastDeviceInfoAtBySide[key] ?: 0L
+        if (now - prev < 300L) return
+        val firstThisBurst = lastDeviceInfoAtBySide.values.none { now - it < 300L }
+        lastDeviceInfoAtBySide[key] = now
         log(
-            "DEVICE INFO (side=${side.raw}): batt=${info.battery ?: "?"} " +
+            "DEVICE INFO (side=$key): batt=${info.battery ?: "?"} " +
                 "charging=${info.charging ?: "?"} " +
                 "L=${info.leftVersion ?: "?"} R=${info.rightVersion ?: "?"}"
         )
-        onDeviceInfo?.invoke(info.leftVersion, info.rightVersion, info.battery, info.charging)
+        // The aggregate (battery/version) IS side-independent, so only surface it once per
+        // burst -- but never let that suppress the per-side log line above.
+        if (firstThisBurst) {
+            onDeviceInfo?.invoke(info.leftVersion, info.rightVersion, info.battery, info.charging)
+        }
     }
 
     // MARK: - EvenHub senders
@@ -2410,6 +2644,12 @@ class G2Central(
         imgAckTimer?.let { handler.removeCallbacks(it) }
         imgAckTimer = null
         onImgAck?.invoke(session, fragment, success, false)
+        // S-TRAP tier 2: a refusal means the EvenHub PAGE went away under us (the container
+        // lookup the firmware fails is the same word the page's EXIT handler frees), so our
+        // cached page state is now a lie and every later push would be refused identically.
+        // Clears BOTH latches -- only a CREATE re-summons the page. See the class doc for the
+        // mechanism and for the honest limit (this is gate A only; gate B ACKs success=true).
+        pageLatches.onImageAck(success)
         val resolve = imgAckResolve
         imgAckResolve = null
         resolve?.invoke(success)
@@ -2609,6 +2849,23 @@ class G2Central(
             offset = end
             fragIdx += 1
         }
+        // ⛔ DO NOT CHANGE THIS TO G2Target.BOTH. Tried 2026-08-21 01:13 and it REBOOTS THE
+        // PAIR on the first push: disp 11968 -> 31, gen 5 -> 0, apps 2 -> 0, dash=built ->
+        // none, i.e. both lenses restarted and every installed app was wiped. [proven, once]
+        //
+        // Why RIGHT-only is not merely a convention: the firmware gates image-completion on
+        // LENS_SIDE()==1 (the right/master lens) -- see docs/S-TRAP-report.md Gate B. A slave
+        // lens receiving image-container fragments it can never complete is an untested path,
+        // and it does not survive contact.
+        //
+        // The real problem this was an attempt to solve remains OPEN and is worth solving:
+        // a payload can only be pushed to ONE lens, so the left lens cannot be probed at all
+        // and everything we believe about it is inference. That is why the same class of bug
+        // (left eye with no data) has been found twice by Yoni WEARING the glasses while every
+        // mask stayed green -- the rig camera sees one eyebox and `ret=` is deduped across two
+        // lenses that diverge. The right fix is almost certainly the sid-0x90 route
+        // (`pushToService`, which already targets BOTH and is reassembled before any page
+        // exists) -- S-FIX Tier 3 -- not this line.
         enqueueLocked(packets, G2Target.RIGHT)
     }
 
@@ -2776,10 +3033,14 @@ class G2Central(
         }
         withSessionLocked {
             if (on) {
+                // ⚠️ CTRL ENTER opens the MICROPHONE as well as the swirl -- `[proven]`, nine
+                // matched burst/ENTER pairs in the 08-18/08-20 archive. Claim the window here
+                // too, or every decorative swirl fires a false "the glasses opened their own mic".
+                micRequestedByUs = true
                 sendEvenAILocked(
                     G2EvenAI.ctrl(G2EvenAI.STATUS_ENTER, counters.nextMagic()), G2Target.BOTH
                 )
-                log("aiSwirl: CTRL ENTER -> native swirl on")
+                log("aiSwirl: CTRL ENTER -> native swirl on (this also opens the mic)")
                 // Hold the session in the "thinking" state so the animation keeps running
                 // instead of timing straight back out.
                 schedule(400) {
@@ -2789,6 +3050,7 @@ class G2Central(
                     log("aiSwirl: ASK sustain")
                 }
             } else {
+                micRequestedByUs = false
                 sendEvenAILocked(
                     G2EvenAI.ctrl(G2EvenAI.STATUS_EXIT, counters.nextMagic()), G2Target.BOTH
                 )

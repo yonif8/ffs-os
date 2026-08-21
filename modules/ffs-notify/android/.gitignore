@@ -1,0 +1,9 @@
+# Gradle build output for the ffs-notify Android library.
+#
+# Same reasoning as modules/ffs-ble/android/.gitignore: the root .gitignore's `/android`
+# entry is anchored to the repo root (the generated app project) and does NOT cover a
+# module's own build dir. And on this box, Gradle's deeply nested .transforms/ artifacts
+# blow past Windows MAX_PATH — `git add` then fails with "Filename too long" and aborts
+# the WHOLE staging operation, not just that file.
+build/
+.cxx/

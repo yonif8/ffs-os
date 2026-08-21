@@ -11,6 +11,7 @@
 
 import { ProtoWriter } from "../proto";
 import {
+  encodeAudioControl,
   encodeEnvelope,
   encodeImuControl,
   encodeListPage,
@@ -118,6 +119,21 @@ export function imuControl(
 ): FramedMessage {
   const magic = counters.nextMagic();
   return frameEvenHub(encodeImuControl({ ...opts, magic }), counters, magic);
+}
+
+/**
+ * OPEN/CLOSE the MICROPHONE stream (Cmd 15, wrapper field 18).
+ *
+ * ⛔ This starts recording the wearer. Only ever issue it from a deliberate user action, always
+ * pair it with `audioControl(counters, { enable: false })`, and never let anything derived from
+ * the audio reach the telemetry pipe. The contract is written out in `src/sdk/mic.ts`.
+ */
+export function audioControl(
+  counters: Counters,
+  opts: { enable: boolean }
+): FramedMessage {
+  const magic = counters.nextMagic();
+  return frameEvenHub(encodeAudioControl({ ...opts, magic }), counters, magic);
 }
 
 // ── Settings / status channel (sid 0x09) ──────────────────────────────────────

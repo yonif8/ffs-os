@@ -428,7 +428,89 @@ object G2Flash {
      * ps 3557884 -> 3610970, payload end MRAM 0x007a993a. selfTestGuard re-derives ps/progEnd. */
     val goldenNav27b = GoldenVector(
         "cbeacb985d03fd9bc923c5ac371dd6fa3f656e3227949e04c579ec493acf3a44",
-        3610970L, 0x007A993AL, true, "OS takeover — longpress menu + hide + stereo-sync (2.2.7.14) [CURRENT]"
+        3610970L, 0x007A993AL, true, "OS takeover — longpress menu + hide + stereo-sync (2.2.7.14)"
+    )
+
+    /** 2026-08-20 — S2 app runtime: apps install and launch over BLE with no reflash. Adds the
+     * resident app loader (patches/ffs_appload.c) behind the takeover dashboard: an FXP1 body
+     * beginning "FFSA" is an app image, copied into its own buffer, launched/killed by the shell.
+     * Also makes the loader's permanent arena degrade in halves instead of giving up. Built CI run
+     * 32317924211; ps 3557884 -> 3627524, payload end MRAM 0x007AD9E4. selfTestGuard re-derives
+     * ps/progEnd, so a mistyped constant here fails closed rather than flashing something else. */
+    val goldenApps27 = GoldenVector(
+        "7ad48130a6b3616a7cdddb0d268193d902d5e5f03bd639a6793f9fff79b7097e",
+        3627524L, 0x007AD9E4L, true, "OS takeover + S2 app runtime (2.2.7.14)"
+    )
+
+    /** 2026-08-20 — S2b: 160x64 shell canvas (was 240x96). The surface drops 46,152 -> 20,552 B
+     * of P_GLOBAL, which is the same heap the loader arena and the EvenHub image channel's
+     * reassembly buffer come from — at 240x96 the pool was too tight to push anything once the
+     * dashboard was on screen. Also keeps a running app alive across a page rebuild. CI run
+     * 32324934793; ps 3557884 -> 3628388, payload end MRAM 0x007ADD44. */
+    val goldenApps27b = GoldenVector(
+        "340a078884dba9f0b60b608e8c87a5a8d2ed8adabb63086bd57859fa27224cba",
+        3628388L, 0x007ADD44L, true, "OS takeover + S2 app runtime, 160x64 canvas (2.2.7.14)"
+    )
+
+    /** 2026-08-20 (S-INT) — the safety gate + the layer-top shell, three streams in one image.
+     *
+     * R1/S-SAFE: an arena-independent PANIC RESET. Twice on 2026-08-20 the glasses went deaf
+     * with `calls=0 rxlen=0` -- alive, answering DEVICE_INFO, but dropping every inbound frame
+     * inside EVEN'S receive path, upstream of our loader. `ffs_reset.c` could not help: a reset
+     * is itself a push. This image gates BOTH inbound handler ROM words (0x004ce398 AND
+     * 0x004ce39c -- which slot a frame takes depends on an undecoded header bit, so gating one
+     * would be a coin flip) on a 12-byte marker and writes SYSRESETREQ directly: zero heap, zero
+     * display thread. `panicReset()` in G2Central sends it. It also gives Even's two silent
+     * inbound MALLOC sites a pre-claimed ballast block.
+     *
+     * S2-top: the shell leaves Even's base page for our own container on `lv_layer_top`, and its
+     * pixels leave P_GLOBAL for P_FT (20,552 -> 10,336 B, ~20.5 KB returned to the heap the
+     * loader arena competes for). The ctor now cleans Even's widgets ONLY after our surface
+     * exists -- the previous order is what put a live, valid, EMPTY page in front of the wearer
+     * with every counter reading healthy. The AP01 readback carries `dash=`/`src=` so that
+     * failure can never be silent again.
+     *
+     * S-INT: G2A_MAX_CODE 2048 -> 6144, plus a 16 KB cap on the running TOTAL of installed code.
+     *
+     * CI run 32397128110; ps 3557884 -> 3622864, payload end MRAM 0x007AC7B0. selfTestGuard
+     * re-derives ps/progEnd, so a mistyped constant here fails closed. */
+    val goldenShell27 = GoldenVector(
+        "791998750f7db3c4ab7d7b70e51d878f9ebff249167805961d8acac765acb569",
+        3622864L, 0x007AC7B0L, true,
+        "OS takeover + panic-reset gate + layer-top shell on P_FT (2.2.7.14)"
+    )
+
+    /** S-BIG: the shell canvas is the WHOLE HUD — 160x64 -> 576x288, the full panel.
+     *
+     * The old cap was a P_GLOBAL trade and both its premises were already dead: the pixels
+     * moved to P_FT with S2-top, and P_FT was MEASURED on glass rather than assumed
+     * (ret=0x72FE5E1B -> 539 KB free; ret=0x73F47518 -> 280 KB peak; 540 KB of headroom
+     * above its own high-water mark). Full-screen L8 is 165,984 B and fits with the 192 KB
+     * safety margin UNTOUCHED and 186 KB to spare. Contiguity proven separately by a
+     * 163 KB claim+release round trip (ret=0x75FF8A3F, `used` returned exactly).
+     *
+     * CI run 32405122312; ps 3557884 -> 3622844, payload end MRAM 0x007AC79C. selfTestGuard
+     * re-derives ps/progEnd, so a mistyped constant here fails closed. */
+    val goldenBig27 = GoldenVector(
+        "7e8422fac671885ac6a6c7cf1da3713859f0cfe7360087256da2353c3cd83053",
+        3622844L, 0x007AC79CL, true,
+        "OS takeover + panic gate + FULL-HUD 576x288 shell on P_FT (2.2.7.14)"
+    )
+
+    /**
+     * 2026-08-21 (S-SHIP). goldenBig27 plus three things that turn the HUD from a display
+     * into something that shows LIVE data: the phone->app data channel ("FFSC" route,
+     * G2_ABI 2), S-FIX tier 3 (FXP1 consumed at the transport gate), and S-EYES's left-lens
+     * readback over the peer channel.
+     *
+     * NOTE for whoever reads a device-info line on this image: the RAMEXEC and FTFONTS
+     * blocks are GONE on purpose — their bytes paid for the new peer= field, and the
+     * positive restatement is an `rxok` token in CAPS. Their absence is not a regression.
+     */
+    val goldenShip27 = GoldenVector(
+        "c5dfd200459fe5f0ff0e6721a5197105807e5eb6de7f77732a8edfda8d73eb24",
+        3643874L, 0x007B19C2L, true,
+        "OS takeover + FFSC data channel + tier-3 gate + left-lens peer readback (2.2.7.14) [CURRENT]"
     )
 
     /** Every build this driver will consider flashing. Anything else is refused outright. */
@@ -437,7 +519,8 @@ object G2Flash {
         goldenFontpeek, goldenBidiOnly, goldenHebrewFull, goldenHebrewProbe,
         goldenFfsui, goldenRamexec, goldenLoader, goldenLoader27, goldenV3,
         goldenArena27, goldenInk27, goldenGif27, goldenSync27, goldenSyncDiag27,
-        goldenTakeover27, goldenNav27, goldenNav27b
+        goldenTakeover27, goldenNav27, goldenNav27b, goldenApps27, goldenApps27b,
+        goldenShell27, goldenBig27, goldenShip27
     )
 
     /** Look up a build by the SHA-256 of its bytes. Null means "not a known build". */

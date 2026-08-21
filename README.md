@@ -1,9 +1,19 @@
 # FFS Glasses OS
 
-> 🎯 **The goal:** an SDK that makes it easy to build our own screens, UX and animations that
-> **render natively on the glasses** (drawn and animated by the glasses themselves, not streamed
-> as phone-rendered pixels), and an on-glass OS built with it. The stock text-and-list surface is
-> the floor, not the ceiling. Full statement lives in the private workspace's `CLAUDE.md`.
+> 🎯 **The goal (two halves, both first-class):**
+>
+> 1. **Use them.** Do the things a phone gets pulled out for — text, navigate, music, read — natively
+>    on the glasses, in our own UI, smoothly enough to wear every day.
+> 2. **Build for them in an afternoon.** A toolkit where a new mini app is written in C against a real
+>    header, previewed on a PC in seconds, installed over BLE without reflashing, navigated on-glass
+>    by temple gestures — with the **full** UI surface of the device's graphics engine available, not
+>    just the handful of widgets the stock wrappers expose.
+>
+> Everything **renders natively on the glasses** (drawn and animated by the glasses themselves, never
+> streamed as phone-rendered pixels). Split of responsibility: **phone = the brain** (data, network,
+> app logic), **glasses = the face** (render, animate, scroll, handle input). The stock
+> text-and-list surface is the floor, not the ceiling. Full statement lives in the private
+> workspace's `GOAL.md`.
 
 A clean-room operating layer for the **Even Realities G2** smart glasses, built on our
 own from-scratch BLE driver (Kotlin on Android — the primary dev platform; the Swift/CoreBluetooth

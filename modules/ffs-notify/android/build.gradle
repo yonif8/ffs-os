@@ -1,0 +1,36 @@
+// ffs-notify — Android side of the local Expo native module.
+//
+// Same shape as modules/ffs-ble/android/build.gradle: `expo-module-gradle-plugin` supplies the
+// Kotlin/AGP wiring and the expo-modules-core dependency, so this file declares only what is ours.
+//
+// NO third-party dependency, deliberately. The notification listener is written directly against
+// `android.service.notification` and the framework's own `Notification.EXTRA_MESSAGES` layout,
+// because every library that wraps this (and androidx.core's MessagingStyle helper) wants the whole
+// StatusBarNotification handed to it — and the whole point of this module is that a non-allowlisted
+// notification never gets that far.
+
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.futurefounders.ffsnotify'
+version = '0.1.0'
+
+android {
+  namespace "expo.modules.ffsnotify"
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+  }
+  testOptions {
+    unitTests.returnDefaultValues = true
+  }
+}
+
+dependencies {
+  // Plain JVM unit tests (src/test) for the allowlist gate and the bounded store: both are pure
+  // data structures, so they run in seconds via `./gradlew :ffs-notify:test` with no device.
+  // They are the machine-checkable half of the privacy contract — see NotifyStoreTest.kt.
+  testImplementation 'junit:junit:4.13.2'
+}

@@ -35,6 +35,7 @@ import {
   type DashConfig,
 } from "../sdk/templates";
 import { theme } from "./theme";
+import { corruptFxp1CrcBase64 } from "./pushAck";
 import { Chips, Group, Row, SectionLabel, Tile, TileGrid } from "./ui";
 
 export type DashboardPanelProps = {
@@ -149,6 +150,23 @@ export function DashboardPanel({ disabled, status, onPush }: DashboardPanelProps
           disabled={disabled || !!invalid}
           onPress={() => push("DASHBOARD", "push_dashboard", () => buildDashboardPush(cfg))}
         />
+        {__DEV__ ? (
+          <Row
+            badge="CRC"
+            tint={theme.danger}
+            title="Prove rejected-push detection"
+            subtitle="Corrupts only the FXP1 CRC; loader must refuse before executing"
+            tag="safe reject"
+            tagTint={theme.danger}
+            divider
+            disabled={disabled || !!invalid}
+            onPress={() =>
+              push("CRC REJECTION PROBE", "push_crc_rejection_probe", () =>
+                corruptFxp1CrcBase64(buildDashboardPush(cfg)),
+              )
+            }
+          />
+        ) : null}
         <Row
           badge="↺"
           tint={theme.tint.grey}

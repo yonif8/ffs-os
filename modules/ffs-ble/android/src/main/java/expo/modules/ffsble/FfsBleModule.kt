@@ -86,6 +86,8 @@ class FfsBleModule : Module() {
       "onTxStall",
       "onTxResume",
       "onSubscribe",
+      // The glasses opened their own microphone. Metadata only -- never audio.
+      "onMicUnexpected",
       "onImgAck",
       // R1 ring (FUT-233). Ring gestures come through the shared "onGesture" event tagged
       // device:"ring"; these are the ring-specific lifecycle/raw channels.
@@ -336,15 +338,43 @@ class FfsBleModule : Module() {
           // probe needs the payload baked into a JS release first.
           PUSH_ACTION -> {
             val b64 = intent.getStringExtra("b64") ?: return
+            // `--es via svc` sends the SAME FXP1 bytes as a plain transport message on a custom
+            // service id instead of as an EvenHub image-container update.
+            //
+            // Why that is worth an option: an image container belongs to Even's EvenHub PAGE,
+            // and the page manager holds exactly one page. Anything that switches ui module
+            // evicts that page, and its lifecycle handler frees the very word the container
+            // lookup guards on -- after which every image push is refused by a lookup that
+            // allocates nothing. The transport route has no page to lose, so it is the only one
+            // that still delivers with our own shell in the foreground. It needs firmware that
+            // carries the FXP1 branch in ffs_msgrx_gate (S-FIX tier 3); on an image without it
+            // the message is simply queued for a service demux with no consumer, i.e. inert.
+            //   am broadcast -a com.futurefounders.ffs.PUSH_PAYLOAD --es b64 <b64>             //     --es via svc [--ei sid 144] -p <pkg>
+            val via = intent.getStringExtra("via")
+            val sid = intent.getIntExtra("sid", 0x90)
             sendEvent(
               "onLog",
-              mapOf("message" to "[android] debug payload push: ${b64.length} b64 chars")
+              mapOf(
+                "message" to "[android] debug payload push: ${b64.length} b64 chars via " +
+                  if (via == "svc") "svc 0x${sid.toString(16)}" else "evenHub image"
+              )
             )
-            ensureCentral()?.pushPayloadViaImage(b64)
+            if (via == "svc") ensureCentral()?.pushToService(sid, b64)
+            else ensureCentral()?.pushPayloadViaImage(b64)
           }
           // Ask the glasses for battery/firmware/CFW-loader diagnostics. The ⟨LOADER⟩ block in
           // the reply is how a pushed payload reports its ret= value back.
-          INFO_ACTION -> ensureCentral()?.requestDeviceInfo()
+          // `--es side L` (or R) addresses ONE lens, so its side-tagged answer is unambiguous.
+          // Without it the request goes to BOTH and, historically, only the right lens was ever
+          // seen answering -- which left the LEFT lens unobservable from this machine and is why
+          // two per-lens bugs could only be found by wearing the glasses. Every field we now ride
+          // in this reply (lens=, dash=, apps=, run=, src=, live=) is PER-LENS.
+          //   adb shell am broadcast -a com.futurefounders.ffs.DEVICE_INFO --es side L -p <pkg>
+          INFO_ACTION -> {
+            val side = intent.getStringExtra("side")
+            if (side.isNullOrBlank()) ensureCentral()?.requestDeviceInfo()
+            else ensureCentral()?.requestDeviceInfoSide(G2Side.parse(side))
+          }
           // HUD brightness. Also an INSTRUMENT control: a dimmer HUD is much easier for the
           // phone camera to focus on, so this is used to set up every visual proof.
           //   adb shell am broadcast -a com.futurefounders.ffs.BRIGHTNESS --ei level 20 -p <pkg>
@@ -381,6 +411,19 @@ class FfsBleModule : Module() {
               // so the default is 100 rather than a plausible-looking 50.
               //   am broadcast -a com.futurefounders.ffs.SETTING --es key imu --ei value 1
               "imu" -> c?.setImuStream(value != 0, intent.getIntExtra("hz", 100))
+              // ⛔ START/STOP THE MICROPHONE. value 1 = open, 0 = close.
+              //   am broadcast -a com.futurefounders.ffs.SETTING --es key mic --ei value 1
+              // `--ei cmd15 1` ALSO sends EvenHub Cmd 15/field 18 alongside, for comparing the
+              // secondary route; leave it off unless that is what you are testing.
+              // The proven opener is the even_ai CTRL ENTER this sends by default -- see
+              // G2Central.setMicStream for the log evidence.
+              // ⚠️ ALWAYS follow with value 0. The DMIC pair stays powered otherwise.
+              "mic" -> c?.setMicStream(value != 0, intent.getIntExtra("cmd15", 0) != 0)
+              // Mic packet counters -- COUNTS AND MILLISECONDS ONLY, never audio. This is the
+              // whole instrument for "did packets flow?", and it is numeric on purpose.
+              //   am broadcast -a com.futurefounders.ffs.SETTING --es key micstats
+              "micstats" -> c?.micLogStats()
+              "micreset" -> c?.micResetStats()
               // In-place text update (Cmd 5). `text` is the new content; `value` the container id
               // (default 1 = the SDK's header container).
               "uptext" -> c?.updateTextContainer(
@@ -672,6 +715,12 @@ class FfsBleModule : Module() {
     }
     c.onTxResume = { side, queueDepth ->
       sendEvent("onTxResume", mapOf("side" to side, "queueDepth" to queueDepth))
+    }
+    c.onMicUnexpected = { side, gapMs, requestedByUs ->
+      sendEvent(
+        "onMicUnexpected",
+        mapOf("side" to side, "gapMs" to gapMs, "requestedByUs" to requestedByUs)
+      )
     }
     c.onSubscribe = { side, characteristic, on ->
       sendEvent(

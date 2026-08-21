@@ -1,0 +1,61 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+  <!--
+    ⛔ THE PRIVACY SURFACE, STATED IN THE MANIFEST WHERE IT IS HARDEST TO MISS.
+
+    BIND_NOTIFICATION_LISTENER_SERVICE lets this service see EVERY notification on the phone —
+    banking alerts, 2FA codes, everything. That is not a filter problem, it is a design problem,
+    and the design is: Allowlist.isAllowed(pkg) is the FIRST statement in onNotificationPosted,
+    before `sbn.notification` is touched. A non-allowlisted notification is never read, never
+    encoded, never counted beyond a drop tally, never held in memory and never logged. Our code
+    cannot mishandle what it never had.
+
+    Android will not enable this service on its own: the user grants it once, by hand, in
+    Settings > Notifications > Device & app notifications. There is no way to request it
+    programmatically, which is exactly right for what it is.
+  -->
+  <application>
+    <service
+      android:name=".FfsNotificationListener"
+      android:exported="false"
+      android:label="FFS Glasses OS"
+      android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+      <intent-filter>
+        <action android:name="android.service.notification.NotificationListenerService" />
+      </intent-filter>
+      <!-- Ask the system for a redacted feed by default: FILTER_TYPES / no sensitive extras are
+           not available pre-33 in a way we can rely on, so the real reduction is ours (above). -->
+      <meta-data
+        android:name="android.service.notification.default_filter_types"
+        android:value="conversations|alerting" />
+    </service>
+  </application>
+
+  <!--
+    Android 11+ package visibility. `getInstalled()` answers "is Signal actually on this phone",
+    which the settings UI needs so the allowlist shows reality rather than a wish-list. We name
+    the packages one by one instead of taking QUERY_ALL_PACKAGES: the query surface should be
+    exactly the allowlist catalogue and nothing else.
+
+    ⚠️ KEEP IN SYNC with KNOWN_MESSAGING in src/notifications/allowlist.ts and with
+       Allowlist.DEFAULTS in Allowlist.kt. `notifications.test.ts` asserts the TS/Kotlin pair
+       match; this list is the third copy and the one a build cannot check for you.
+  -->
+  <queries>
+    <package android:name="com.google.android.apps.messaging" />
+    <package android:name="com.samsung.android.messaging" />
+    <package android:name="com.android.messaging" />
+    <package android:name="org.thoughtcrime.securesms" />
+    <package android:name="com.whatsapp" />
+    <package android:name="com.whatsapp.w4b" />
+    <package android:name="org.telegram.messenger" />
+    <package android:name="org.telegram.messenger.web" />
+    <package android:name="com.google.android.apps.dynamite" />
+    <package android:name="com.discord" />
+    <package android:name="com.Slack" />
+    <package android:name="com.facebook.orca" />
+    <package android:name="com.instagram.android" />
+    <package android:name="com.microsoft.teams" />
+  </queries>
+
+</manifest>
