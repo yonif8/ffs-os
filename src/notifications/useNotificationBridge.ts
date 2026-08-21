@@ -20,14 +20,17 @@ import FfsBle from "../../modules/ffs-ble";
 import { toBase64 } from "../sdk/base64";
 import { DataService } from "../data/service";
 import { notificationsSource } from "../data/sources/notifications";
+import { mediaSource } from "../data/sources/media";
 import {
   EMPTY_STATS,
   getCaptureEnabled,
   getStats,
   listenerConnected,
   listenerEnabled,
+  mediaNowElapsedMs,
   notifyAvailable,
   onNotifyChange,
+  readMediaSessions,
   readThreads,
   requestRebind,
   type NotifyStats,
@@ -87,6 +90,17 @@ export function useNotificationBridge(pairReady: boolean, loaderPresent: boolean
           read: readThreads,
           enabled: () => listenerEnabled() && getCaptureEnabled(),
         }),
+        // Data-plane integration (2026-08-21): now-playing rendered via the proven messages reader
+        // (appId 3). `media` only emits a frame when something is actually PLAYING (fetch throws
+        // otherwise → the pump skips the tick), so it does not fight the notifications source unless
+        // music is playing. For a clean on-glass proof, turn notification capture OFF so only media
+        // drives the channel. A dedicated now-playing app later gets its own appId (default 4).
+        mediaSource({
+          read: readMediaSessions,
+          nowElapsedMs: mediaNowElapsedMs,
+          appId: 3,
+          enabled: () => listenerEnabled(),
+        }),
       ],
       // Fire-and-forget: "sent" is not "landed" (the ⟨LOADER … ret=0x64…⟩ line is the truth).
       send: async (frame) => {
@@ -94,7 +108,10 @@ export function useNotificationBridge(pairReady: boolean, loaderPresent: boolean
         FfsBle.pushPayloadViaImage(toBase64(frame));
       },
       linkUp: () => linkRef.current,
-      tickMs: 30_000,
+      // 5 s so a live source (media now-playing, everyMs 5 s) actually refreshes its playhead
+      // instead of freezing between 30 s ticks. Sources that are unchanged still dedupe to silence
+      // in the pump, so notifications add no extra radio — only a changing frame is sent.
+      tickMs: 5_000,
       log: (ev) => {
         if (ev.kind === "breaker-tripped") setBreakerOpen(true);
         else if (ev.kind === "breaker-reset") setBreakerOpen(false);

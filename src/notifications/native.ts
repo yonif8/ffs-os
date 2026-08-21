@@ -13,6 +13,7 @@
 import { Platform } from "react-native";
 
 import type { FfsNotifyNativeModule, NotifyStats, NotifyThread } from "../../modules/ffs-notify";
+import type { MediaSnapshot } from "../data/sources/media";
 import { DEFAULT_ALLOW } from "./allowlist";
 
 let native: FfsNotifyNativeModule | null = null;
@@ -145,6 +146,27 @@ export function clearHeld(): void {
     native?.clear();
   } catch {
     /* nothing held is a fine outcome for "forget everything" */
+  }
+}
+
+// ── media / now-playing (MediaHub bridge) ─────────────────────────────────────────────────────
+// Raw active media sessions, pass-through (MediaSessionRaw is field-identical to MediaSnapshot).
+// ⛔ PRIVACY: title/artist are content — the result goes only to the FFSM encoder in
+//    src/data/sources/media.ts, never to a log or React state.
+export function readMediaSessions(): MediaSnapshot[] {
+  try {
+    return (native?.getMediaSessions() ?? []) as MediaSnapshot[];
+  } catch {
+    return [];
+  }
+}
+
+/** elapsedRealtime clock (same basis as a session's lastUpdateMs) for the playhead projection. */
+export function mediaNowElapsedMs(): number {
+  try {
+    return native?.mediaNowElapsedMs() ?? 0;
+  } catch {
+    return 0;
   }
 }
 
