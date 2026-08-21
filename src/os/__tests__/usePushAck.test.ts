@@ -216,3 +216,30 @@ describe("the loader-seen latch", () => {
     expect(c.loaderPresent(di("2.2.7.14"))).toBe(false);
   });
 });
+
+describe("recognising a freshly flashed image (⟨CAPS⟩ EVENCFW, no push receipt yet)", () => {
+  // A caps-only readback: the CFW advertises itself on every device-info read via ⟨CAPS=EVENCFW…⟩
+  // BEFORE any payload is pushed, so there is no ⟨LOADER⟩ receipt block. This is the exact state
+  // after a fresh firmware flash + fresh app install that made the Music app show "no music": the
+  // data-plane gate (canSend = pairReady && loaderPresent) refused to push media frames.
+  const caps = "2.2.7.14  ⟨CAPS=EVENCFW/1 img576 imgz xordelta stereo fontprobe rxok peer=1⟩";
+
+  it("loaderPresent is TRUE on a caps-only readback — media frames can flow", () => {
+    expect(caps.includes("LOADER")).toBe(false); // guard: genuinely receipt-free
+    expect(c.loaderPresent(di(caps))).toBe(true);
+  });
+
+  it("a caps-only readback latches loaderSeen (survives a later marker-less readback)", () => {
+    c.onDeviceInfo(caps, null);
+    expect(c.loaderSeen).toBe(true);
+    expect(c.loaderPresent(null)).toBe(true);
+    expect(c.loaderPresent(di("2.2.7.14"))).toBe(true); // latched
+  });
+
+  it("stays FALSE on stock firmware — the destructive-push guard is preserved", () => {
+    expect(c.loaderPresent(di("2.2.7.14"))).toBe(false);
+    c.onDeviceInfo("2.2.7.14", "2.2.7.14"); // a stock readback must never latch
+    expect(c.loaderSeen).toBe(false);
+    expect(c.loaderPresent(di("2.2.7.14"))).toBe(false);
+  });
+});

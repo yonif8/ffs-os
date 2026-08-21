@@ -20,7 +20,7 @@
 // between ack polls), same status strings, same telemetry events. Do not "improve" the
 // timing here without a deliberate decision; App used to depend on these exact numbers.
 
-import { base64ByteLength, loaderRecordFromVersions, verifyPushAck, type LoaderRecord } from "./pushAck";
+import { base64ByteLength, loaderMarkerPresent, loaderRecordFromVersions, verifyPushAck, type LoaderRecord } from "./pushAck";
 
 /** The two firmware-version strings a device-info readback carries (one per lens). */
 export type DeviceVersions = {
@@ -63,27 +63,30 @@ export class PushAckController {
   private pendingPush: { label: string; event: string; b64: string } | null = null;
   private ack: AckState | null = null;
   private token = 0;
-  // Loader presence cannot vanish without a reflash, so LATCH it: once a ⟨LOADER⟩ marker is
-  // seen in any readback it stays seen (a marker-less event no longer sends us down the
-  // "no loader" path and makes the user tap repeatedly).
+  // Loader presence cannot vanish without a reflash, so LATCH it: once a CFW marker (the ⟨CAPS⟩
+  // EVENCFW advertisement, or a ⟨LOADER⟩ receipt) is seen in any readback it stays seen (a
+  // marker-less event no longer sends us down the "no loader" path and makes the user tap
+  // repeatedly).
   private loaderSeenFlag = false;
   private readTries = 0;
 
   constructor(private readonly deps: PushAckDeps) {}
 
-  /** True once a ⟨LOADER⟩ marker has ever been seen (latched; can't un-see without reflash). */
+  /** True once a CFW marker has ever been seen (latched; can't un-see without reflash). */
   get loaderSeen(): boolean {
     return this.loaderSeenFlag;
   }
 
   /**
-   * Is the resident OTA loader present? The latch OR a live ⟨LOADER⟩ marker in the current
-   * readback. Pushing a payload with no loader is DESTRUCTIVE (the stock decoder parses our
-   * Thumb-2 as a bitmap → blank lens → watchdog reboot), so this gates every push.
+   * Is the resident OTA loader present? The latch OR a live CFW marker in the current readback —
+   * the ⟨CAPS⟩ EVENCFW advertisement (present on a freshly flashed image before any push) or a
+   * ⟨LOADER⟩ receipt. See `loaderMarkerPresent` for the full rationale and stock-safety argument.
+   * Pushing a payload with no loader is DESTRUCTIVE (the stock decoder parses our Thumb-2 as a
+   * bitmap → blank lens → watchdog reboot), so this gates every push and the data-plane frames.
    */
   loaderPresent(di: DeviceVersions | null | undefined): boolean {
     if (this.loaderSeenFlag) return true;
-    return `${di?.leftVersion ?? ""} ${di?.rightVersion ?? ""}`.includes("LOADER");
+    return loaderMarkerPresent(di?.leftVersion, di?.rightVersion);
   }
 
   /**
@@ -126,7 +129,7 @@ export class PushAckController {
     rightVersion: string | null | undefined,
   ): void {
     const loaderRecord = loaderRecordFromVersions(leftVersion, rightVersion);
-    if (`${leftVersion ?? ""} ${rightVersion ?? ""}`.includes("LOADER")) {
+    if (loaderMarkerPresent(leftVersion, rightVersion)) {
       this.loaderSeenFlag = true;
     }
     const ack = this.ack;

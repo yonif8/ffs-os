@@ -197,7 +197,9 @@ const LOADER_2_2_7_14_URL = `${FW_BASE}/g2_2.2.7.14_loader.bin`;
 // Prior image was 7e8422fa (goldenBig27, full-HUD 576x288 shell on P_FT).
 // 2026-08-21 (S-SHIP): + the phone->app data channel (FFSC / G2_ABI 2), S-FIX tier 3
 // (FXP1 consumed at the transport gate), and S-EYES's left-lens peer readback.
-const LOADER_2_2_7_14_SHA = "c5dfd200459fe5f0ff0e6721a5197105807e5eb6de7f77732a8edfda8d73eb24";
+// 2026-08-21 (Toolkit R1 — S2 input): + long-press delivered to the running app, double-tap
+// system-back with a "Close app?" modal (real 5x7 text). Not the gate — G2Flash.kt allGoldens is.
+const LOADER_2_2_7_14_SHA = "6288cd10a004f386cdbd1ed8f4a92c567acd6025ab47381c5bf0558d9f30a0e7";
 // Stock 2.2.7.14, kept as the restore-to-stock escape hatch for the current base.
 const STOCK_2_2_7_14_URL = `${FW_BASE}/g2_2.2.7.14_stock.bin`;
 const STOCK_2_2_7_14_SHA = "0fced0aebcc6c88db6f76dba34f91b805d842a5fc297bfd7fa6d6a34ec83cecb";
@@ -764,11 +766,16 @@ function AppInner() {
             HUD is a firmware answer, not an encoder bug. */}
         {bt.deviceInfo ? (
           <Text style={styles.headerCfw} numberOfLines={1}>
-            {cfwSeen?.ramexec ? (
+            {cfwSeen && (cfwSeen.caps.length || cfwSeen.ramexec || cfwSeen.loader) ? (
+              // CFW is PRESENT the moment any of its firmware-authored blocks appear — the
+              // ⟨CAPS⟩ advertisement (emitted on every read), a ⟨LOADER⟩ receipt, or the
+              // RAMEXEC probe. Keying only on RAMEXEC was wrong: the shipped image dropped that
+              // probe (its bytes paid for the peer= field), so a fully-advertised CFW read as
+              // "not advertised yet" while listing its own caps right beside the words.
               <Text
-                style={{ color: cfwSeen.ramexec === "EXEC_OK" ? theme.accent : theme.danger }}
+                style={{ color: cfwSeen.ramexec && cfwSeen.ramexec !== "EXEC_OK" ? theme.danger : theme.accent }}
               >
-                CFW {cfwSeen.ramexec}
+                CFW{cfwSeen.ramexec ? ` ${cfwSeen.ramexec}` : ""}
               </Text>
             ) : (
               // NOT "stock" — absence of blocks so far only means the lens that carries

@@ -36,6 +36,43 @@ export function loaderRecordFromVersions(
   return null;
 }
 
+/**
+ * Does a device-info readback prove OUR CFW is resident on the glasses? Pushing a native FXP1
+ * frame at STOCK firmware is destructive (the stock BMP decoder parses our Thumb-2 as a bitmap →
+ * blank lens → watchdog reboot), so this predicate gates every native push AND the data-plane
+ * media/notification frames. It must be FALSE on stock and TRUE on our CFW.
+ *
+ * Two independent, firmware-authored signals, EITHER of which is conclusive:
+ *
+ *   • "EVENCFW" — the magic of the CFW capability advertisement. `settings_ext.c` answers the
+ *     sid-0x09 device-info read with protobuf field 100 = "EVENCFW/<ver> <tokens…>", which
+ *     `G2Protocol.parseDeviceInfo` folds into the version string as ⟨CAPS=EVENCFW/1 img576 imgz
+ *     xordelta stereo fontprobe rxok peer=… ⟩. This is emitted on EVERY read, BEFORE any payload
+ *     is pushed — so it is the marker that recognises a FRESHLY FLASHED image. (The ⟨LOADER⟩
+ *     block below is only a push RECEIPT, so on a fresh flash with no push yet it is absent, and
+ *     the ⟨CAPS⟩ advertisement is the ONLY proof the loader is present. Gating media on ⟨LOADER⟩
+ *     alone was an unsatisfiable chicken-and-egg: no push without the loader, no ⟨LOADER⟩ receipt
+ *     without a push.)
+ *
+ *   • "LOADER" — the ⟨LOADER gen=… ran=… ⟩ receipt the loader appends after it has TAKEN a push.
+ *     Kept for backward compatibility and for a CFW build whose `settings_ext.c` is absent (no
+ *     ⟨CAPS⟩): once such an image has acked one frame it still reads as present.
+ *
+ * SAFETY on stock: stock firmware sends neither protobuf field 100 (so no ⟨CAPS⟩ / "EVENCFW") nor
+ * any ⟨LOADER⟩ block. A bare stock version string ("2.2.7.14") therefore contains neither token
+ * and reads as NOT present — the destructive push stays blocked. Both markers are magic strings
+ * our own firmware writes; nothing on a stock version line matches either.
+ */
+const CFW_PRESENT_MARKERS = ["EVENCFW", "LOADER"] as const;
+
+export function loaderMarkerPresent(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): boolean {
+  const text = `${left ?? ""} ${right ?? ""}`;
+  return CFW_PRESENT_MARKERS.some((marker) => text.includes(marker));
+}
+
 /** Decoded byte length without relying on atob/Buffer (both vary across RN runtimes). */
 export function base64ByteLength(value: string): number {
   const b64 = value.trim();

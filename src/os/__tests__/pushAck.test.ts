@@ -1,4 +1,4 @@
-import { base64ByteLength, corruptFxp1CrcBase64, loaderRecordFromVersions, verifyPushAck } from "../pushAck";
+import { base64ByteLength, corruptFxp1CrcBase64, loaderMarkerPresent, loaderRecordFromVersions, verifyPushAck } from "../pushAck";
 import { fromBase64, toBase64 } from "../../sdk/base64";
 
 describe("native push acknowledgement", () => {
@@ -44,6 +44,33 @@ describe("native push acknowledgement", () => {
     expect(base64ByteLength("AQID")).toBe(3);
     expect(() => base64ByteLength("abc")).toThrow(/canonical base64/);
     expect(() => base64ByteLength("ab=c")).toThrow(/canonical base64/);
+  });
+
+  // The CFW capability advertisement, EXACTLY as G2Protocol.parseDeviceInfo folds protobuf field
+  // 100 into the version string (⟨CAPS=EVENCFW/<ver> <tokens…>⟩). This is what a FRESHLY FLASHED
+  // image carries before any payload has been pushed — no ⟨LOADER⟩ receipt exists yet.
+  const capsLine =
+    "2.2.7.14  ⟨CAPS=EVENCFW/1 img576 imgz xordelta stereo fontprobe rxok peer=1⟩";
+
+  describe("recognising the resident CFW (loaderMarkerPresent)", () => {
+    it("recognises a freshly flashed image by its ⟨CAPS⟩ EVENCFW advertisement — no push needed", () => {
+      // The exact regression: after a fresh flash the readback is caps-only, with NO ⟨LOADER⟩ block.
+      expect(capsLine.includes("LOADER")).toBe(false); // guard: this really is receipt-free
+      expect(loaderMarkerPresent(capsLine, null)).toBe(true);
+      expect(loaderMarkerPresent(null, capsLine)).toBe(true); // either lens carries it
+    });
+
+    it("recognises a ⟨LOADER⟩ push receipt (backward compatible)", () => {
+      expect(loaderMarkerPresent(line(), null)).toBe(true);
+      expect(loaderMarkerPresent(null, line())).toBe(true);
+    });
+
+    it("stays FALSE on bare stock firmware so a destructive push is blocked", () => {
+      expect(loaderMarkerPresent("2.2.7.14", "2.2.7.14")).toBe(false);
+      expect(loaderMarkerPresent(null, null)).toBe(false);
+      expect(loaderMarkerPresent(undefined, undefined)).toBe(false);
+      expect(loaderMarkerPresent("", "")).toBe(false);
+    });
   });
 
   it("builds a same-length rejection probe by changing only the CRC header", () => {
