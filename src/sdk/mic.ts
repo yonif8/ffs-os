@@ -3,10 +3,11 @@
 // ══════════════════════════════════════════════════════════════════════════════════════════
 // ⛔ THE PRIVACY CONTRACT. READ THIS BEFORE YOU TOUCH ANYTHING BELOW.
 // ══════════════════════════════════════════════════════════════════════════════════════════
-// This module handles a live recording of the wearer. This repository is PUBLIC, it ships an
-// off-device telemetry pipe (`src/os/log.ts` → a Cloudflare tunnel → a collector on the dev box),
-// and our own tooling tails logcat continuously. So there are four rules, and they are structural
-// rather than advisory:
+// This module handles a live recording of the wearer. This repository is PUBLIC, it ships a
+// telemetry pipe (`src/os/log.ts` → a loopback collector on the dev box, reached via `adb
+// reverse`), and our own tooling tails logcat continuously. The pipe is on-desk now (not the
+// internet), but every rule below still holds: a log record still lands on a PC in the room, and
+// logcat is still grepped. So there are four rules, and they are structural rather than advisory:
 //
 //   1. AUDIO NEVER ENTERS A LOG. Not the LC3 bytes, not the decoded PCM, not base64 of either,
 //      not a "first 16 bytes for debugging". `glog` already declares `ble:notify` a hot category

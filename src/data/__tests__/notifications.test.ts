@@ -222,9 +222,9 @@ describe("the pipeline end to end", () => {
 describe("privacy", () => {
   it("NO message content reaches any log, event or telemetry record", async () => {
     // The whole pipeline runs with a marker string as the body. `src/os/log.ts` ships every
-    // structured record off-device to a Cloudflare collector and our tooling greps logcat
-    // constantly, so a body in a DataEvent is a body on a PC in another room. This test is the
-    // thing that notices.
+    // structured record to the on-desk loopback collector (via `adb reverse`) and our tooling
+    // greps logcat constantly, so a body in a DataEvent is a body on a PC in the room. This test
+    // is the thing that notices.
     const MARKER = "ZZ-MARKER-BODY-9f31c7-DO-NOT-LEAK";
     const SENDER = "ZZ-MARKER-SENDER-4b02de";
     const w = new World();
