@@ -6,10 +6,14 @@ import {
   brightness,
   encodeHeartbeat,
   encodeShutdown,
+  headUpAngle,
   heartbeat,
+  heyEven,
   imuControl,
   listPage,
   readStatus,
+  screenDepth,
+  screenHeight,
   shutdown,
   silentMode,
   updateText,
@@ -58,9 +62,22 @@ describe("channel routing", () => {
       silentMode(c, true),
       wearDetection(c, true),
       readStatus(c),
+      headUpAngle(c, 30),
+      screenHeight(c, 4),
+      screenDepth(c, 4),
     ]) {
       expect(parseFrame(m.frames[0]!).sid).toBe(0x09);
     }
+  });
+
+  it("Hey Even frames on sid 0x07 flag REQUEST and round-trips to a CONFIG pb", () => {
+    const c = new Counters(0, 0);
+    const m = heyEven(c, true);
+    const p = parseFrame(m.frames[0]!);
+    expect(p.sid).toBe(0x07);
+    expect(p.flag).toBe(0x20);
+    const pb = reassemble(m.frames)!;
+    expect(u32(parseFields(pb)!, 1)).toBe(10); // commandId = CONFIG
   });
 });
 

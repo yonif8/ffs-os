@@ -1258,6 +1258,35 @@ object G2EvenAI {
         w.writeMessageField(5, askW.data)
         return w.data
     }
+
+    /** eEvenAICommandId.CONFIG. */
+    private const val CMD_CONFIG: Int = 10
+
+    /** streamSpeed the official app always sends with a CONFIG; mirrored from MentraOS. */
+    const val HEY_EVEN_STREAM_SPEED: Int = 32
+
+    /**
+     * "Hey Even" WAKE WORD — enable/disable the on-glass hot-word detector. Byte-identical to
+     * MentraOS `EvenAIProto.setHeyEven` (reference/MentraOS/.../sgcs/G2.kt, MIT) and cross-checked
+     * against the generated schema (reference/g2-kit-unofficial/ble/gen/even_ai_pb.ts):
+     *
+     *     EvenAIConfig { voiceSwitch=1 (OMITTED when off), streamSpeed=2 (=32) }
+     *     EvenAIDataPackage { commandId=10 CONFIG, magicRandom, config=13 }
+     *
+     * ⚠️ Enabling makes the glasses LISTEN CONTINUOUSLY — this is not push-to-talk. See the privacy
+     * contract in `src/sdk/evenai.ts` / `src/sdk/mic.ts`; nothing derived from triggered audio may
+     * reach a log. DEVICE-PROOF-OWED on the takeover image.
+     */
+    fun setHeyEven(magicRandom: Int, enabled: Boolean): ByteArray {
+        val config = G2ProtobufWriter()
+        if (enabled) config.writeInt32Field(1, 1) // voiceSwitch (omitted when off, matching the app)
+        config.writeInt32Field(2, HEY_EVEN_STREAM_SPEED) // streamSpeed
+        val w = G2ProtobufWriter()
+        w.writeInt32Field(1, CMD_CONFIG)
+        w.writeInt32Field(2, magicRandom)
+        w.writeMessageField(13, config.data) // config (field 13)
+        return w.data
+    }
 }
 
 // MARK: - Device settings/info (service 0x09) -- battery + firmware version (FUT-169)
@@ -1385,6 +1414,31 @@ object G2Setting {
     /** Lens Y offset. See [setLensX]. */
     fun setLensY(magicRandom: Int, level: Int): ByteArray =
         infoEnvelope(magicRandom, 2, oneField(1, level))
+
+    /**
+     * Head-up TILT ANGLE (0..60) — how far up the wearer looks before the firmware's head-up
+     * dashboard appears. Same `deviceReceiveHeadUpSetting` sub-message (field 4) as
+     * [setHeadUpSwitch], but populates `headUpAngle` (field 2) instead of the switch. Cross-checked
+     * against MentraOS `G2SettingProto.setHeadUpAngle` (writes field 2 only, clamps 0..60).
+     * DEVICE-PROOF-OWED on our glasses.
+     */
+    fun setHeadUpAngle(magicRandom: Int, angle: Int): ByteArray =
+        infoEnvelope(magicRandom, 4, oneField(2, angle.coerceIn(0, 60)))
+
+    /**
+     * SCREEN HEIGHT — vertical position of the rendered image. Wire-identical to [setLensY]
+     * (`deviceReceiveYCoordinate` field 2, `yCoordinateLevel` field 1); provided under the MentraOS
+     * reference name (`G2SettingProto.setScreenHeight`).
+     */
+    fun setScreenHeight(magicRandom: Int, level: Int): ByteArray =
+        infoEnvelope(magicRandom, 2, oneField(1, level))
+
+    /**
+     * SCREEN DEPTH — horizontal / IPD-depth position of the rendered image. Wire-identical to
+     * [setLensX] (`deviceReceiveXCoordinate` field 3); MentraOS name `G2SettingProto.setScreenDepth`.
+     */
+    fun setScreenDepth(magicRandom: Int, level: Int): ByteArray =
+        infoEnvelope(magicRandom, 3, oneField(1, level))
 
     /**
      * PANIC RESET -- reboot the glasses when NOTHING ELSE CAN REACH THEM.

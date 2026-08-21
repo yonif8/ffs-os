@@ -77,6 +77,19 @@
 // deliberately stops at the packet boundary: sequencing, loss accounting, and session lifetime are
 // pure logic that can be tested on this box, and they are also the part that decides whether a
 // transcript was built from complete audio or from audio with a hole in it.
+//
+// ── INDEPENDENT CROSS-CHECK (2026-08-21 survey) ─────────────────────────────────────────────
+// MentraOS's own driver corroborates the framing from a second, unrelated implementation:
+//   • `G2.kt handleAudioData` takes `usableLength = min(data.size, 200)` and hands the decoder a
+//     frame size of **40** — i.e. it treats a notification as 5×40 = 200 bytes of LC3 and DISCARDS
+//     the trailing 5 (our [200..203] "not interpreted" + [204] seq counter). Same 40-byte frame,
+//     same 5-per-packet, arrived at with no shared code.
+//   • The men-g2-ble-gateway `constants.py` names the characteristic these ride:
+//     `AUDIO_NOTIFY = 00002760-08C2-11E1-9073-0E8AC72E6402` — the LEFT arm's …6402, matching the
+//     `AUDIO_NOTIFY` UUID our `G2Central` filters on. (Both MIT; cross-check only, nothing vendored.)
+// So the LC3 mic framing is triangulated: our on-glass capture (205 B, all side=L), faceclaw's
+// working decoder, and MentraOS's `min(_,200)`/40-byte handler all agree. The 205-vs-200 gap is
+// not a contradiction — MentraOS simply drops the 5 trailing bytes we account for explicitly.
 
 /** Sample rate of the G2 mic stream. `[proven-static]` from the firmware's own encoder params. */
 export const SAMPLE_RATE = 16000;

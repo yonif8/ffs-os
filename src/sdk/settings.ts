@@ -103,6 +103,48 @@ export const setHeadUpSwitch = (magic: number, on: boolean) =>
   infoEnvelope(magic, Sub.headUp, one(1, on ? 1 : 0));
 
 /**
+ * Head-up TILT ANGLE — how far up the wearer must look before the firmware's head-up dashboard
+ * appears. This is the SAME `deviceReceiveHeadUpSetting` sub-message (field 4) as
+ * {@link setHeadUpSwitch}, but populates `headUpAngle` (sub-field 2) instead of the switch.
+ *
+ *     DeviceReceive_Head_UP_Setting { headUpSwitch=1, headUpAngle=2, ... }   (g2_setting_pb.ts)
+ *
+ * Cross-checked against MentraOS `G2SettingProto.setHeadUpAngle` (reference/MentraOS/.../sgcs/G2.kt,
+ * MIT), which writes ONLY field 2 in the head-up sub-message and clamps the angle to 0..60 — its
+ * high-level `setHeadUpAngle` enables the head-up switch first, then sends the angle. We keep the
+ * wire encoder pure (angle only); the enable-first sequencing belongs to the caller.
+ *
+ * ⚠️ DEVICE-PROOF-OWED: the encoding is byte-checked against the schema + MentraOS, but the visible
+ * effect on the HUD trigger has not been seen on our glasses. The angle is a device UX code, not
+ * degrees in any obvious unit — 0..60 is the range both the schema-derived driver and MentraOS use.
+ */
+export const setHeadUpAngle = (magic: number, angle: number) =>
+  infoEnvelope(magic, Sub.headUp, one(2, Math.max(0, Math.min(60, Math.round(angle)))));
+
+/**
+ * SCREEN HEIGHT — the vertical position of the rendered image in the lens. This is wire-identical
+ * to {@link setLensY}: MentraOS's `setScreenHeight` and our `setLensY` both populate
+ * `deviceReceiveYCoordinate` (sub-field 2) with `yCoordinateLevel` (field 1). The two names are
+ * the same knob seen from two angles — MentraOS frames it as a user-facing "screen height" slider,
+ * we framed it as an IPD/rig-framing offset. Provided under the reference name for parity; prefer
+ * whichever reads better at the call site.
+ *
+ * Cross-check: MentraOS `G2SettingProto.setScreenHeight` (reference/MentraOS/.../sgcs/G2.kt, MIT).
+ */
+export const setScreenHeight = (magic: number, level: number) =>
+  infoEnvelope(magic, Sub.yCoordinate, one(1, level));
+
+/**
+ * SCREEN DEPTH — the horizontal position of the rendered image in the lens (the binocular-depth /
+ * IPD axis). Wire-identical to {@link setLensX}: both populate `deviceReceiveXCoordinate`
+ * (sub-field 3) with `xCoordinateLevel` (field 1).
+ *
+ * Cross-check: MentraOS `G2SettingProto.setScreenDepth` (reference/MentraOS/.../sgcs/G2.kt, MIT).
+ */
+export const setScreenDepth = (magic: number, level: number) =>
+  infoEnvelope(magic, Sub.xCoordinate, one(1, level));
+
+/**
  * Lens x/y offset — fine IPD centering, applied by the firmware to EVERY rendered frame, per arm.
  *
  * Also the only way to improve the camera rig's FRAMING without a human physically re-aiming the

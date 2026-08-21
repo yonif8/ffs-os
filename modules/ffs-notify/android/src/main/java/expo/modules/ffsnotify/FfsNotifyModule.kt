@@ -139,5 +139,31 @@ class FfsNotifyModule : Module() {
 
         /** Forget everything held in memory. Instant, and it is what the panel's button calls. */
         Function("clear") { NotifyStore.clear(); NotifyStore.revision() }
+
+        // ── MEDIA / now-playing (MediaHub — MIT port, see MediaHub.kt) ──────────────────────
+        /** Raw active media sessions; `src/data/sources/media.ts` picks and projects. Pull. */
+        Function("getMediaSessions") { MediaHub.sessions(ctx) }
+        /** The elapsedRealtime clock, same basis as a session's lastUpdateMs, for the projection. */
+        Function("mediaNowElapsedMs") { MediaHub.nowElapsedMs() }
+        /** Apply a transport control to a session. action: play|pause|playpause|next|prev|seek. */
+        Function("mediaControl") { pkg: String, action: String, argMs: Double ->
+            MediaHub.control(ctx, pkg, action, argMs.toLong())
+        }
+
+        // ── NAVIGATION (NavScanner — technique re-derived, see NavScanner.kt) ───────────────
+        /** The current ongoing nav notification's raw title/text, or null. `navigation.ts` parses. */
+        Function("scanNav") { NavScanner.scan() }
+
+        // ── ACT-BACK / reply (ReplyRegistry) ────────────────────────────────────────────────
+        /** Threads that expose a RemoteInput reply action right now (keys + pkg). Metadata only. */
+        Function("getReplyTargets") { ReplyRegistry.replyable() }
+        /** Reply to a thread via its own RemoteInput action (RCS-preserving). ⛔ text is content. */
+        Function("replyViaRemoteInput") { key: String, text: String -> ReplyRegistry.reply(ctx, key, text) }
+        /**
+         * Carrier-SMS fallback. Returns false unless SEND_SMS is granted — which this module does
+         * NOT request by default (a policy call that is Yoni's). Present so the data layer's
+         * fallback branch is real; inert until the permission exists. ⛔ text is content.
+         */
+        Function("sendSmsFallback") { address: String, text: String -> SmsFallback.send(ctx, address, text) }
     }
 }

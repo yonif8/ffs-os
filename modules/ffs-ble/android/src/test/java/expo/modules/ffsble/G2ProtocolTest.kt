@@ -284,6 +284,51 @@ class G2ProtocolTest {
         )
     }
 
+    // ---- settings / even-ai opcodes imported from the reference drivers (2026-08-21) ----
+    // Goldens are byte-identical to the pure-TS encoders in src/sdk (settings.ts / evenai.ts),
+    // which are in turn cross-checked against MentraOS + the generated schema. Same bytes on both
+    // sides is what keeps the Kotlin driver and the TS SDK from drifting.
+
+    @Test
+    fun `setHeadUpAngle writes headUp field 2 under sub-field 4`() {
+        // f1=deviceReceiveInfo(1), f2=magic=88(0x58), f3={ f4={ f2=25(0x19) } }
+        assertArrayEquals(
+            bytes(0x08, 0x01, 0x10, 0x58, 0x1A, 0x04, 0x22, 0x02, 0x10, 0x19),
+            G2Setting.setHeadUpAngle(magicRandom = 88, angle = 25)
+        )
+        // clamp high: angle 999 -> 60 (0x3C) in the same slot
+        assertArrayEquals(
+            bytes(0x08, 0x01, 0x10, 0x00, 0x1A, 0x04, 0x22, 0x02, 0x10, 0x3C),
+            G2Setting.setHeadUpAngle(magicRandom = 0, angle = 999)
+        )
+    }
+
+    @Test
+    fun `setScreenHeight and setScreenDepth are wire-identical to setLensY and setLensX`() {
+        assertArrayEquals(
+            G2Setting.setLensY(magicRandom = 7, level = 5),
+            G2Setting.setScreenHeight(magicRandom = 7, level = 5)
+        )
+        assertArrayEquals(
+            G2Setting.setLensX(magicRandom = 7, level = 5),
+            G2Setting.setScreenDepth(magicRandom = 7, level = 5)
+        )
+    }
+
+    @Test
+    fun `setHeyEven golden — CONFIG(10) with voiceSwitch omitted when off`() {
+        // enable: f1=10, f2=77(0x4d), f13={ f1=1, f2=32(0x20) }
+        assertArrayEquals(
+            bytes(0x08, 0x0A, 0x10, 0x4D, 0x6A, 0x04, 0x08, 0x01, 0x10, 0x20),
+            G2EvenAI.setHeyEven(magicRandom = 77, enabled = true)
+        )
+        // disable: voiceSwitch omitted, streamSpeed still sent
+        assertArrayEquals(
+            bytes(0x08, 0x0A, 0x10, 0x4D, 0x6A, 0x02, 0x10, 0x20),
+            G2EvenAI.setHeyEven(magicRandom = 77, enabled = false)
+        )
+    }
+
     // ---- inbound: reassembly ----
 
     /**

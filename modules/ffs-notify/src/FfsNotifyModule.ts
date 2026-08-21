@@ -69,6 +69,35 @@ export interface NotifyStats {
   lastAtMs: number;
 }
 
+/** One active media session, raw from `MediaHub` — interpreted in `src/data/sources/media.ts`. */
+export interface MediaSessionRaw {
+  pkg: string;
+  title: string;
+  artist: string;
+  album: string;
+  state: number;
+  positionMs: number;
+  lastUpdateMs: number;
+  speed: number;
+  durationMs: number;
+  lastActiveMs: number;
+}
+
+/** The current ongoing nav notification, raw from `NavScanner` — parsed in `navigation.ts`. */
+export interface NavNotificationRaw {
+  pkg: string;
+  title: string;
+  text: string;
+  sub: string;
+}
+
+/** A thread that exposes a RemoteInput reply action right now. Metadata only. */
+export interface ReplyTargetRaw {
+  key: string;
+  pkg: string;
+  canRemoteInput: boolean;
+}
+
 interface FfsNotifyNativeModule {
   /** Has the user granted the listener in Android settings? Only they can. */
   isListenerEnabled(): boolean;
@@ -99,6 +128,26 @@ interface FfsNotifyNativeModule {
 
   /** Forget everything held in memory. */
   clear(): number;
+
+  // ── media / now-playing (MediaHub — MIT port) ─────────────────────────────────────────────
+  /** Raw active media sessions. Pull; interpreted phone-side. */
+  getMediaSessions(): MediaSessionRaw[];
+  /** elapsedRealtime clock, same basis as a session's lastUpdateMs (for the playhead projection). */
+  mediaNowElapsedMs(): number;
+  /** Transport control. action: play|pause|playpause|next|prev|seek; argMs is the seek target. */
+  mediaControl(pkg: string, action: string, argMs: number): boolean;
+
+  // ── navigation (NavScanner — technique re-derived) ────────────────────────────────────────
+  /** The current ongoing nav notification, or null. Parsed phone-side. */
+  scanNav(): NavNotificationRaw | null;
+
+  // ── act-back / reply (ReplyRegistry) ──────────────────────────────────────────────────────
+  /** Threads that can be replied to via RemoteInput right now. Metadata only. */
+  getReplyTargets(): ReplyTargetRaw[];
+  /** Reply via the thread's own RemoteInput action (RCS-preserving). ⛔ text is content. */
+  replyViaRemoteInput(key: string, text: string): boolean;
+  /** Carrier-SMS fallback; false unless SEND_SMS is granted (not requested by default). */
+  sendSmsFallback(address: string, text: string): boolean;
 
   addListener(event: "onNotifyChange", listener: (payload: NotifyStats) => void): EventSubscription;
 }

@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.os.Parcelable
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import java.lang.ref.WeakReference
 
 /**
  * THE LISTENER. It is handed every notification on the phone and keeps almost none of them.
@@ -24,8 +25,18 @@ import android.service.notification.StatusBarNotification
  */
 class FfsNotificationListener : NotificationListenerService() {
 
+    companion object {
+        // The live listener, so NavScanner can enumerate active notifications through the same
+        // grant. A WeakReference: the service is owned by the OS, not by us, and outlives the UI.
+        private var live: WeakReference<FfsNotificationListener>? = null
+
+        /** The bound listener instance, or null when the service is not currently connected. */
+        fun instance(): FfsNotificationListener? = live?.get()
+    }
+
     override fun onListenerConnected() {
         super.onListenerConnected()
+        live = WeakReference(this)
         NotifyStore.noteListener(true)
         FfsNotifyModule.emitChange()
         // ⚠️ Deliberately NOT replaying getActiveNotifications() here. A fresh grant would
@@ -36,6 +47,7 @@ class FfsNotificationListener : NotificationListenerService() {
 
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
+        live = null
         NotifyStore.noteListener(false)
         FfsNotifyModule.emitChange()
     }
@@ -79,6 +91,12 @@ class FfsNotificationListener : NotificationListenerService() {
             NotifyStore.noteEmpty()
             return
         }
+
+        // ACT-BACK: remember this thread's own inline-reply action (RemoteInput), keyed exactly as
+        // NotifyStore keys the conversation, so a reply from the glasses lands on the shown thread
+        // and leaves over the source app's transport. Only reached for an allowlisted messaging
+        // notification — the gate above is still the first thing that runs. No content is stored.
+        ReplyRegistry.remember("$pkg|$key", pkg, n)
 
         if (NotifyStore.ingest(pkg, key, name, unread = true, incoming = msgs)) {
             FfsNotifyModule.emitChange()

@@ -37,6 +37,40 @@ export type { HeadlinesOptions, HnStory } from "./sources/headlines";
 // `src/data` stays pure and offline-testable; the panel injects `readThreads`.
 export { notificationsSource, threadsToFfsm, quantiseAgeMin } from "./sources/notifications";
 export type { NotificationsOptions } from "./sources/notifications";
+// ⭐ Media / now-playing — the phone's active media session on-glass. Ported from the MIT
+// takemotions-media-bridge (`MediaHub.kt`); the three documented fixes are the pure functions here.
+export {
+  mediaSource,
+  resolveNowPlaying,
+  nowPlayingToThreads,
+  projectPosition,
+  pickNowPlaying,
+  seekTarget,
+  PB_PLAYING,
+  PB_PAUSED,
+  PB_STOPPED,
+  PB_NONE,
+  STALE_PAUSE_MS,
+  SEEK_DEDUP_MS,
+} from "./sources/media";
+export type { MediaSnapshot, NowPlaying, MediaSourceOptions, SeekState } from "./sources/media";
+// ⭐ Navigation — turn-by-turn parsed out of the ongoing nav notification. Technique re-derived
+// (appsbridge is unlicensed); no code copied.
+export {
+  navigationSource,
+  parseNav,
+  parseDistance,
+  parseEta,
+  parseInstruction,
+  navToThreads,
+  isNavPackage,
+  NAV_PACKAGES,
+} from "./sources/navigation";
+export type { NavNotification, NavInfo, NavigationSourceOptions } from "./sources/navigation";
+// ⭐ Act-back — reply to a message from the glasses over the source app's own transport (RCS via
+// RemoteInput; SMS only as fallback). GOAL Plane 2, condition 8.
+export { ReplyDispatcher } from "./actions";
+export type { ReplyOutcome, ReplyTarget, ReplyVia, ReplyDispatcherDeps } from "./actions";
 
 /**
  * A tiny JSON fetcher with a timeout, for callers that do not already have one. Kept here

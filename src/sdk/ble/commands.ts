@@ -25,12 +25,16 @@ const CMD_HEARTBEAT = 12;
 import {
   querySettings,
   setBrightness,
+  setHeadUpAngle,
   setHeadUpSwitch,
+  setScreenDepth,
+  setScreenHeight,
   setSilentMode,
   setWearDetection,
   RequestType,
   SID_G2_SETTING,
 } from "../settings";
+import { setHeyEven, SID_EVEN_AI } from "../evenai";
 import { Counters, Flag, SID, frameMessage } from "./envelope";
 
 export interface FramedMessage {
@@ -74,6 +78,17 @@ export function frameSetting(pb: Uint8Array, counters: Counters, magic: number):
   const syncId = counters.nextSyncId();
   return {
     frames: frameMessage(pb, { syncId, sid: SID_G2_SETTING, flag: Flag.REQUEST }),
+    pb,
+    magic,
+    syncId,
+  };
+}
+
+/** Frame any pre-built sid-0x07 Even-AI inner pb (flag REQUEST). */
+export function frameEvenAi(pb: Uint8Array, counters: Counters, magic: number): FramedMessage {
+  const syncId = counters.nextSyncId();
+  return {
+    frames: frameMessage(pb, { syncId, sid: SID_EVEN_AI, flag: Flag.REQUEST }),
     pb,
     magic,
     syncId,
@@ -164,6 +179,38 @@ export function wearDetection(counters: Counters, on: boolean): FramedMessage {
 export function headUp(counters: Counters, on: boolean): FramedMessage {
   const magic = counters.nextMagic();
   return frameSetting(setHeadUpSwitch(magic, on), counters, magic);
+}
+
+/**
+ * Head-up TILT ANGLE (0..60). Only meaningful while the head-up switch is ON — send `headUp(true)`
+ * first if you also need to enable it (mirrors MentraOS's high-level `setHeadUpAngle`).
+ */
+export function headUpAngle(counters: Counters, angle: number): FramedMessage {
+  const magic = counters.nextMagic();
+  return frameSetting(setHeadUpAngle(magic, angle), counters, magic);
+}
+
+/** Vertical position of the rendered image in the lens (MentraOS "screen height" == lens Y). */
+export function screenHeight(counters: Counters, level: number): FramedMessage {
+  const magic = counters.nextMagic();
+  return frameSetting(setScreenHeight(magic, level), counters, magic);
+}
+
+/** Horizontal / depth position of the rendered image (MentraOS "screen depth" == lens X). */
+export function screenDepth(counters: Counters, level: number): FramedMessage {
+  const magic = counters.nextMagic();
+  return frameSetting(setScreenDepth(magic, level), counters, magic);
+}
+
+/**
+ * "Hey Even" WAKE WORD — enable/disable the on-glass hot-word detector (sid 0x07).
+ *
+ * ⚠️ Enabling makes the glasses listen continuously. Read the privacy note on
+ * `src/sdk/evenai.ts#setHeyEven` before wiring this to any UI: it is NOT push-to-talk.
+ */
+export function heyEven(counters: Counters, enabled: boolean): FramedMessage {
+  const magic = counters.nextMagic();
+  return frameEvenAi(setHeyEven(magic, enabled), counters, magic);
 }
 
 /** Ask the device for a settings/status snapshot (battery, FW, brightness, ...). */

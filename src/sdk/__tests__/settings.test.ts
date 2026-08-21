@@ -10,9 +10,12 @@ import {
   parseSettingsSnapshot,
   querySettings,
   setBrightness,
+  setHeadUpAngle,
   setHeadUpSwitch,
   setLensX,
   setLensY,
+  setScreenDepth,
+  setScreenHeight,
   setSilentMode,
   setWearDetection,
 } from "../settings";
@@ -66,6 +69,45 @@ describe("settings — sub-field routing", () => {
     expect(u32(b, 2)).toBe(15);
     expect(u32(parseFields(sub(info(setBrightness(1, 999)), 1)!), 2)).toBe(100); // clamped
     expect(u32(parseFields(sub(info(setBrightness(1, -5)), 1)!), 2)).toBe(0);
+  });
+
+  it("brightness with autoAdjust hands the level to the ambient sensor (field 1 = 1)", () => {
+    const b = parseFields(sub(info(setBrightness(1, 40, true)), 1)!)!;
+    expect(u32(b, 1)).toBe(1);
+    expect(u32(b, 2)).toBe(40);
+  });
+});
+
+describe("settings — new opcodes (MentraOS cross-checked)", () => {
+  /**
+   * Head-up ANGLE rides the SAME sub-field 4 as the switch, but writes headUpAngle (field 2), not
+   * headUpSwitch (field 1). MentraOS `setHeadUpAngle` writes field 2 only and clamps 0..60.
+   */
+  it("head-up angle populates headUp{field 2}, clamped 0..60, without the switch field", () => {
+    const hu = parseFields(sub(info(setHeadUpAngle(9, 30)), 4)!)!;
+    expect(u32(hu, 2)).toBe(30);
+    expect(sub(hu, 1)).toBeUndefined();       // no headUpSwitch field
+    expect(u32(parseFields(sub(info(setHeadUpAngle(9, 999)), 4)!), 2)).toBe(60); // clamp high
+    expect(u32(parseFields(sub(info(setHeadUpAngle(9, -5)), 4)!), 2)).toBe(0);   // clamp low
+  });
+
+  it("head-up angle is byte-identical to the hand-built headUp{f2} envelope", () => {
+    const hu = new ProtoWriter().int32(2, 25).data;
+    const inf = new ProtoWriter().message(4, hu).data;
+    const expected = new ProtoWriter().int32(1, 1).int32(2, 88).message(3, inf).data;
+    expect(Array.from(setHeadUpAngle(88, 25))).toEqual(Array.from(expected));
+  });
+
+  /**
+   * screenHeight == lensY and screenDepth == lensX on the wire — the MentraOS names for the same
+   * y/x coordinate knobs. Proven by byte-equality, not by re-deriving the envelope.
+   */
+  it("screenHeight is wire-identical to setLensY, screenDepth to setLensX", () => {
+    expect(Array.from(setScreenHeight(7, 5))).toEqual(Array.from(setLensY(7, 5)));
+    expect(Array.from(setScreenDepth(7, 5))).toEqual(Array.from(setLensX(7, 5)));
+    // and they land in the right sub-fields (2 = yCoordinate, 3 = xCoordinate)
+    expect(u32(parseFields(sub(info(setScreenHeight(1, 6)), 2)!), 1)).toBe(6);
+    expect(u32(parseFields(sub(info(setScreenDepth(1, 8)), 3)!), 1)).toBe(8);
   });
 });
 
