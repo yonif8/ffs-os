@@ -1,5 +1,10 @@
 <#
 .SYNOPSIS
+  ⛔ RETIRED (2026-08-22) — the phone-camera rig this drives is gone; a camera will never be pointed
+  at the glasses again. To see the HUD use the BLE screenshot instead:
+  `cd ../g2flash && bash tools/fb_shot_run.sh bleshot` -> obj/fbshot.png (~2s). See memory
+  `fast-onglass-screenshot` and g2flash/docs/FB-SHOT-runbook.md. Kept only for reference.
+
   One-call HUD probe: fire a debug broadcast, then photograph the glasses through the camera rig.
 
 .DESCRIPTION
