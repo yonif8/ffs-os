@@ -1776,12 +1776,22 @@ object G2Setting {
                         val srcName = when ((b7 shr 4) and 0x03) {
                             1 -> "ft"; 2 -> "glob"; else -> "-"
                         }
+                        // fgapp = the app_id of the RUNNING slot, so the phone can feed the FFSC
+                        // data channel that follows the foreground app instead of the two channels
+                        // fighting (ffs_data.h G2D_MAX_CH=2). run (ap[5]) is a slot INDEX; the
+                        // per-slot app_ids sit at AP01 offset 24 (ffs_appload_status), already on
+                        // the wire — this is a parse only, no firmware change. 0 = no app running.
+                        val runSlot = ap[5].toInt() and 0xFF
+                        val fgApp = if (runSlot < 4 && ap.size >= 24 + runSlot * 2 + 2) {
+                            val o = 24 + runSlot * 2
+                            (ap[o].toInt() and 0xFF) or ((ap[o + 1].toInt() and 0xFF) shl 8)
+                        } else 0
                         sb.append(
                             String.format(
-                                " dash=%s src=%s live=%d%s apps=%d run=%d",
+                                " dash=%s src=%s live=%d%s apps=%d run=%d fgapp=%d",
                                 dashName, srcName, (b7 shr 6) and 1,
                                 if ((b7 shr 7) and 1 == 1) " HIDDEN" else "",
-                                b7 and 0x0F, ap[5].toInt() and 0xFF
+                                b7 and 0x0F, runSlot, fgApp
                             )
                         )
                     }

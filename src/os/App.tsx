@@ -38,6 +38,7 @@ import { DashboardPanel } from "./dashboard";
 import { DevTelemetryPanel } from "./devtools/DevTelemetryPanel";
 import { NotificationsPanel } from "../notifications/NotificationsPanel";
 import { useNotificationBridge } from "../notifications/useNotificationBridge";
+import { startListening as startFbShot } from "../sdk/fbshot";
 import { attachOsCommandListener } from "./runtime";
 import { usePushAck } from "./usePushAck";
 
@@ -453,6 +454,11 @@ function AppInner() {
 
   // Ring events. Mounted unconditionally — NOT gated on the glasses link, because the
   // test that matters is performed with the glasses off (FUT-233).
+  // Developer screenshot: keep the fb_shot assembler armed app-wide so a pushed fb_shot
+  // payload's frames are captured whenever they arrive (harmless otherwise — it only reacts
+  // to "FBSH" frames, which the firmware sends only on an explicit screenshot push).
+  useEffect(() => startFbShot(), []);
+
   useEffect(() => {
     const subs = [
       // Bluetooth being off is the single most likely reason a scan finds nothing, and

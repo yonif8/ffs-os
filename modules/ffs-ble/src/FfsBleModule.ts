@@ -441,6 +441,11 @@ interface FfsBleNativeModule {
    */
   pushToService(serviceId: number, base64: string): void;
 
+  // ---- fb_shot: developer screenshot ----
+
+  /** Write assembled A4 framebuffer bytes (base64) to the app's files dir as `fbshot.a4`. */
+  writeFbShot(base64: string): void;
+
   // ---- the TypeScript SDK's transport (src/sdk) ----
 
   /**

@@ -267,6 +267,36 @@ class FfsBleModule : Module() {
       ensureCentral()?.startCfwFlash(url, sha256, dryRun)
     }
 
+    // ---- fb_shot: write assembled A4 screenshot to the app's files dir ----
+
+    /**
+     * Decode `base64` of the assembled A4 framebuffer (82944 B raw) and write it to the app's
+     * internal files dir as `fbshot.a4`, overwriting. The dev machine pulls it via `adb pull` and
+     * reconstructs the PNG with `g2flash/tools/fb_shot.py --raw-a4`.
+     *
+     * This is a developer instrument — not a user-facing feature — so it writes unconditionally
+     * and logs the path.
+     */
+    Function("writeFbShot") { base64: String ->
+      val bytes = try {
+        android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+      } catch (e: IllegalArgumentException) {
+        sendEvent("onLog", mapOf("message" to "[android] writeFbShot: bad base64 ($e)"))
+        return@Function
+      }
+      val ctx = appContext.reactContext ?: return@Function
+      val file = java.io.File(ctx.filesDir, "fbshot.a4")
+      try {
+        file.writeBytes(bytes)
+        sendEvent(
+          "onLog",
+          mapOf("message" to "[android] writeFbShot: wrote ${bytes.size} bytes to ${file.absolutePath}")
+        )
+      } catch (e: Exception) {
+        sendEvent("onLog", mapOf("message" to "[android] writeFbShot: write failed ($e)"))
+      }
+    }
+
     OnCreate { registerSimulationReceiver() }
 
     OnDestroy {
