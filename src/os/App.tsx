@@ -39,7 +39,7 @@ import { DevTelemetryPanel } from "./devtools/DevTelemetryPanel";
 import { NotificationsPanel } from "../notifications/NotificationsPanel";
 import { useNotificationBridge } from "../notifications/useNotificationBridge";
 import { attachOsCommandListener } from "./runtime";
-import { base64ByteLength, loaderRecordFromVersions, verifyPushAck, type LoaderRecord } from "./pushAck";
+import { usePushAck } from "./usePushAck";
 
 // Read the REAL shipped version rather than a hand-maintained copy. A hardcoded
 // "0.11.1" had drifted three releases behind app.json, so telemetry reported the
@@ -496,39 +496,25 @@ function AppInner() {
   const [warranty, setWarranty] = useState<string>("");
   const [textTest, setTextTest] = useState<string>("");
   const [precheck, setPrecheck] = useState<boolean[]>(() => PRECHECK_ITEMS.map(() => false));
-  // FUT-237 — the loader guard. Pushing a payload with no resident OTA loader is
-  // DESTRUCTIVE, not inert: the stock image decoder parses our Thumb-2 code as a bitmap
-  // → blank lens → watchdog reboot, identically for every payload. Cost on 2026-07-28:
-  // a whole session and three lens crashes. `pushMsg` is the refusal/confirmation line.
-  const [pushMsg, setPushMsg] = useState<string>("");
-
   // ⚠️ THE GLASSES CAN OPEN THEIR OWN MICROPHONE. Three of the eighteen audio bursts in the
   // 08-18/08-20 archive had no CTRL ENTER from this phone before them — the GX8002 wake word, or
   // a temple long-press into Even's stock voice flow. This banner is the only place that fact is
   // ever visible to the wearer, so it is pinned above the tabs' content rather than filed in a
   // panel, and it does not auto-dismiss. Metadata only: a side and a clock reading, never audio.
   const [micAlert, setMicAlert] = useState<{ side: string; at: number; n: number } | null>(null);
-  // FUT-237 fix: the guard demanded positive proof of the loader, but deviceInfo starts
-  // empty — so the first tap only fired the read and the user had to tap AGAIN (Yoni hit
-  // three taps). A guard that makes you repeat yourself is a bad guard. We now park the
-  // push here and fire it automatically the moment the readback lands.
-  const pendingPushRef = useRef<{ label: string; event: string; b64: string } | null>(null);
-  const pushAckRef = useRef<{
-    token: number; label: string; frameLen: number;
-    baseline: Pick<LoaderRecord, "gen" | "ran"> | null; tries: number; pollScheduled: boolean;
-  } | null>(null);
-  const pushTokenRef = useRef(0);
-  // FUT-237 fix #2. My first fix assumed the problem was "never read the firmware yet".
-  // WRONG — device-info arrives as SEVERAL events and only some carry the ⟨LOADER⟩ markers
-  // (they ride the L-lens version string), so a marker-less event pushed us down the
-  // blocked path and Yoni still had to tap repeatedly. Loader presence cannot vanish
-  // without a reflash, so LATCH it: once seen in any readback, it stays seen.
-  const loaderSeenRef = useRef<boolean>(false);
-  const readTriesRef = useRef<number>(0);
 
   // Live refs so the nav's context getters always read current session state.
   const btRef = useRef(bt);
   btRef.current = bt;
+
+  // FUT-237 — the native-push acknowledgement loop (guard on the OTA loader, park/send,
+  // poll device-info to attribution). Extracted from ~90 inline lines + five refs into a
+  // tested, dependency-injected controller — see usePushAck.ts. `getContext` reads live
+  // session state so a push fired from a debug button sees the current deviceInfo/pairReady.
+  const pushAck = usePushAck(() => ({
+    deviceInfo: btRef.current.deviceInfo,
+    pairReady: btRef.current.pairReady,
+  }));
 
   // One PhoneNav for the whole session. Its onChange re-asserts the current surface
   // through screenOwner (which serializes BLE writes so repaints never interleave).
@@ -582,14 +568,12 @@ function AppInner() {
   useEffect(() => {
     if (!bt.pairReady) {
       setCfwSeen(null);
-      const ack = pushAckRef.current;
-      if (ack) {
-        pushAckRef.current = null;
-        setPushMsg(`⛔ PUSH FAILED — ${ack.label}: glasses link dropped before loader acknowledgement`);
-        glog.emit("os", "push_failed", { label: ack.label, reason: "link_dropped_before_ack" });
-      }
-      pendingPushRef.current = null;
+      pushAck.onLinkDropped();
     }
+    // pushAck delegates to a stable controller; keeping it out of deps preserves the
+    // original "fire once per pairReady transition" behaviour (adding it would re-run on
+    // every status change while disconnected).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bt.pairReady]);
 
   // FUT-167 Stage 1: receive the zero-write flash-channel probe result.
@@ -630,58 +614,9 @@ function AppInner() {
         glog.emit("drv", "disconnected", { side: e.side, reason: e.reason ?? null, code: e.code, domain: e.domain })),
       FfsBle.addListener("onDeviceInfo", (e) => {
         glog.emit("drv", "device_info", { batt: e.battery, chg: e.charging, l: e.leftVersion, r: e.rightVersion });
-        const loaderRecord = loaderRecordFromVersions(e.leftVersion, e.rightVersion);
-        if (`${e.leftVersion ?? ""} ${e.rightVersion ?? ""}`.includes("LOADER")) {
-          loaderSeenRef.current = true;
-        }
-        const ack = pushAckRef.current;
-        if (ack) {
-          const verdict = verifyPushAck(ack.baseline, loaderRecord, ack.frameLen);
-          if (verdict.state === "accepted") {
-            pushAckRef.current = null;
-            setPushMsg(`✅ loader ran ${ack.label} (gen ${verdict.record.gen}, ${ack.frameLen} B attributed)`);
-            glog.emit("os", "push_acked", { label: ack.label, frameLen: ack.frameLen, gen: verdict.record.gen });
-          } else if (verdict.state === "failed") {
-            pushAckRef.current = null;
-            setPushMsg(`⛔ PUSH FAILED — ${ack.label}: ${verdict.reason}`);
-            glog.emit("os", "push_failed", { label: ack.label, reason: verdict.reason });
-          } else if (!ack.pollScheduled) {
-            ack.tries += 1;
-            if (ack.tries >= 4) {
-              pushAckRef.current = null;
-              setPushMsg(`⛔ PUSH UNCONFIRMED — ${ack.label}: ${verdict.reason}`);
-              glog.emit("os", "push_unconfirmed", { label: ack.label, reason: verdict.reason });
-            } else {
-              const token = ack.token;
-              ack.pollScheduled = true;
-              setTimeout(() => {
-                const current = pushAckRef.current;
-                if (current?.token === token) {
-                  current.pollScheduled = false;
-                  FfsBle.requestDeviceInfo();
-                }
-              }, 1200);
-            }
-          }
-        }
-        const p = pendingPushRef.current;
-        if (!p) return;
-        if (loaderSeenRef.current && loaderRecord) {
-          pendingPushRef.current = null;
-          glog.emit("os", p.event, {});
-          sendAwaitingAck(p.label, p.b64, loaderRecord);
-          return;
-        }
-        // Marker-less readback. Some events legitimately lack it, so try a few times
-        // before concluding the loader really is absent.
-        readTriesRef.current += 1;
-        if (readTriesRef.current >= 3) {
-          pendingPushRef.current = null;
-          setPushMsg("⛔ BLOCKED — no OTA loader on the glasses (stock firmware). Pushing would crash a lens. Flash g2_2.2.6.10_loader.bin first.");
-          glog.emit("os", "push_blocked", { label: p.label, reason: "no_loader" });
-        } else {
-          FfsBle.requestDeviceInfo();
-        }
+        // The whole loader-attribution state machine lives in usePushAck — feed it the
+        // readback and it advances any in-flight ack and fires any parked push.
+        pushAck.onDeviceInfo(e.leftVersion, e.rightVersion);
       }),
       // FUT-253 Step 3: native BLE link-level observability. cat:"ble" for link signals
       // (rssi/mtu/throughput/backpressure), cat:"drv" for the render-pipeline ack. All are
@@ -724,66 +659,12 @@ function AppInner() {
   // CFW and Restore Stock buttons gate on `armed`; there is no other arming path.
   const precheckDone = precheck.every(Boolean);
   const armed = warranty.trim() === WARRANTY_PHRASE && precheckDone;
-  // FUT-237 — GUARD: never push a payload unless the resident OTA loader has actually
-  // been SEEN in a device-info readback. The CFW appends ⟨LOADER gen=… ran=… ret=0x…⟩ to
-  // the firmware version string (G2Protocol.swift field 104); on stock that field is
-  // absent entirely, so the version line is a bare "2.2.6.10".
-  //
-  // We deliberately require POSITIVE evidence rather than trying to detect stock: an
-  // unread deviceInfo is treated as "not proven", which fails safe. First tap with no
-  // reading triggers the read; tap again once it lands.
-  const loaderPresent = (): boolean => {
-    if (loaderSeenRef.current) return true;
-    const di = bt.deviceInfo;
-    return `${di?.leftVersion ?? ""} ${di?.rightVersion ?? ""}`.includes("LOADER");
-  };
-
   // The notification → glasses bridge, at APP SCOPE so it forwards, auto-rebinds and runs its crash
   // breaker regardless of which tab is showing (it used to live inside NotificationsPanel and thus
   // only ran on the Drive tab — see useNotificationBridge). The panel is just its view.
-  const notifBridge = useNotificationBridge(bt.pairReady, loaderPresent());
-  const sendAwaitingAck = (label: string, b64: string, baselineOverride?: LoaderRecord | null) => {
-    let frameLen: number;
-    try {
-      frameLen = base64ByteLength(b64);
-    } catch (e) {
-      setPushMsg(`⛔ PUSH BLOCKED — ${label}: ${e instanceof Error ? e.message : String(e)}`);
-      return;
-    }
-    const di = bt.deviceInfo;
-    const baseline = baselineOverride ?? loaderRecordFromVersions(di?.leftVersion, di?.rightVersion);
-    const token = ++pushTokenRef.current;
-    pushAckRef.current = { token, label, frameLen, baseline, tries: 0, pollScheduled: true };
-    setPushMsg(`⏳ sent ${label}; waiting for attributed loader execution…`);
-    FfsBle.pushPayloadViaImage(b64);
-    setTimeout(() => {
-      const current = pushAckRef.current;
-      if (current?.token === token) {
-        current.pollScheduled = false;
-        FfsBle.requestDeviceInfo();
-      }
-    }, 2500);
-  };
-  const guardedPush = (label: string, event: string, b64: string) => {
-    if (!bt.pairReady) return;
-    if (pushAckRef.current || pendingPushRef.current) {
-      setPushMsg("⛔ PUSH BLOCKED — another payload is still awaiting loader attribution");
-      return;
-    }
-    const di = bt.deviceInfo;
-    const baseline = loaderRecordFromVersions(di?.leftVersion, di?.rightVersion);
-    if (loaderPresent() && baseline) {
-      loaderSeenRef.current = true;
-      glog.emit("os", event, {});
-      sendAwaitingAck(label, b64, baseline);
-      return;
-    }
-    // Not proven yet — park the push and let the readback fire it. ONE tap.
-    pendingPushRef.current = { label, event, b64 };
-    readTriesRef.current = 0;
-    setPushMsg("⏳ checking the glasses for the OTA loader… this push will go automatically.");
-    FfsBle.requestDeviceInfo();
-  };
+  // FUT-237 — the loader guard that gates it lives in usePushAck (never push with no resident
+  // OTA loader — the stock decoder parses our Thumb-2 as a bitmap → blank lens → watchdog reboot).
+  const notifBridge = useNotificationBridge(bt.pairReady, pushAck.loaderPresent());
 
   const startFlash = (url: string, sha: string, dryRun: boolean) => {
     if (!bt.pairReady || flashBusy) return;
@@ -1161,7 +1042,7 @@ function AppInner() {
             Drive, not Probes: the Probes grid is fifty FIXED blobs you tap to fire, this is
             a configuration you compose. It shares guardedPush, so the OTA-loader gate and
             the push status line are exactly the same ones the Probes tab shows. */}
-        <DashboardPanel disabled={!canAct} status={pushMsg} onPush={guardedPush} />
+        <DashboardPanel disabled={!canAct} status={pushAck.status} onPush={pushAck.guardedPush} />
 
         {/* The notification bridge: an allowlist-only Android listener feeding REAL messages to
             the on-glass `messages` app over the FFSC data channel. The allowlist lives on screen

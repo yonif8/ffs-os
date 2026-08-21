@@ -239,84 +239,34 @@ class G2Central(
      * word, or a temple long-press into Even's stock voice flow. An idle mic is not a closed one,
      * and nothing in the stack said so out loud.
      *
-     * Fired once per BURST (first packet after [MIC_BURST_GAP_MS] of silence), never per packet.
+     * Fired once per BURST (first packet after the mic burst-gap of silence), never per packet.
      * Carries no audio and nothing derived from audio -- a side, a gap in milliseconds, and
      * whether our own [setMicStream]/[aiSwirl] is what opened it.
      */
     var onMicUnexpected: ((String, Long, Boolean) -> Unit)? = null
 
-    // ── mic session counters ─────────────────────────────────────────────────────────
-    // ⛔ THE ONLY THING ABOUT A MIC SESSION THAT MAY BE LOGGED. Counts and clock readings,
-    // never a byte of audio. This is not squeamishness: `[proven]` from our own glog archive,
-    // 3,281 notifications of the audio characteristic were base64'd, written to the driver log
-    // and shipped off-device across four days before the guard above existed. The instrument
-    // that replaces them has to be numeric by construction, or the same thing happens again the
-    // first time somebody needs to know whether packets arrived.
-    private var micPkts = 0
-    private var micPktsRight = 0
-    private var micBad = 0
-    private var micFirstMs = 0L
-    private var micLastMs = 0L
-    /** Any audio notification, L or R, good or bad -- the clock burst detection runs on. */
-    private var micLastAnyMs = 0L
-    /** True between our own CTRL ENTER and CTRL EXIT. A burst outside that window is theirs. */
-    private var micRequestedByUs = false
-    private var micBursts = 0
-    private var micBurstsUnexpected = 0
-
     /**
-     * Silence, in ms, that separates one mic burst from the next. Packets arrive every ~50 ms, so
-     * anything past this is a new session rather than a dropped frame.
+     * All mic-session telemetry lives behind [G2MicStats] -- counts and clock readings only,
+     * never a byte of audio (see that class for the archive incident that made "numeric by
+     * construction" a hard requirement). Driven entirely on the serial queue, so it needs no
+     * lock of its own; its dependencies are the driver's own [log] sink and [onMicUnexpected]
+     * callback, read at call time so a callback wired after construction still fires.
      */
-    private val MIC_BURST_GAP_MS = 1_500L
+    private val micStats = G2MicStats(
+        log = { msg -> log(msg) },
+        onUnexpected = { side, gapMs, requestedByUs ->
+            onMicUnexpected?.invoke(side, gapMs, requestedByUs)
+        }
+    )
 
     /** Zero the counters. Call at the start of a capture, not at the end. */
-    fun micResetStats() = post {
-        micPkts = 0; micPktsRight = 0; micBad = 0; micFirstMs = 0L; micLastMs = 0L
-        log("mic stats reset")
-    }
+    fun micResetStats() = post { micStats.resetCounters() }
 
     /**
      * Emit the counters. Safe to log, safe to ship, and the ONLY answer to "did packets flow?"
      * that does not involve putting the wearer's voice in a file.
      */
-    fun micLogStats() = post {
-        val span = if (micFirstMs == 0L) 0L else micLastMs - micFirstMs
-        log(
-            "MICSTATS pkts=$micPkts (L) right=$micPktsRight bad=$micBad " +
-                "spanMs=$span audioMs=${micPkts * 50} " +
-                "expectedPkts=${if (span > 0) span / 50 else 0} " +
-                "bursts=$micBursts unrequested=$micBurstsUnexpected"
-        )
-    }
-
-    /** Count one audio notification. Length and side only -- never the contents. */
-    private fun micCountLocked(len: Int, side: String) {
-        val now = android.os.SystemClock.elapsedRealtime()
-
-        // Burst edge: the first packet after a gap of silence. This is the only moment worth
-        // reporting -- at ~20 packets/s a per-packet signal would be noise, and the question
-        // ("did the mic just open?") is a question about edges.
-        val gap = if (micLastAnyMs == 0L) Long.MAX_VALUE else now - micLastAnyMs
-        micLastAnyMs = now
-        if (gap > MIC_BURST_GAP_MS) {
-            micBursts++
-            if (!micRequestedByUs) {
-                micBurstsUnexpected++
-                // Metadata only, and deliberately loud: this line is the record that the glasses
-                // opened their own microphone. Never add the packet to it.
-                log("MIC-UNEXPECTED side=$side -- audio started and WE DID NOT ASK " +
-                    "(burst #$micBursts, $micBurstsUnexpected unrequested this session)")
-            }
-            onMicUnexpected?.invoke(side, if (gap == Long.MAX_VALUE) -1L else gap, micRequestedByUs)
-        }
-
-        if (len != 205) { micBad++; return }
-        if (side == "R") { micPktsRight++; return }
-        if (micFirstMs == 0L) micFirstMs = now
-        micLastMs = now
-        micPkts++
-    }
+    fun micLogStats() = post { micStats.logStats() }
     /** (name, side, reason?, code, domain) -- a lens disconnected. code=0 is a clean teardown. */
     var onDisconnected: ((String, String, String?, Int, String) -> Unit)? = null
 
@@ -1908,7 +1858,7 @@ class G2Central(
         // of that. Keep this the FIRST thing that happens after the flasher check, and never
         // "temporarily" add a log line inside it. See [onAudioPacket].
         if (uuid == AUDIO_NOTIFY) {
-            micCountLocked(data.size, s.raw)
+            micStats.count(data.size, s.raw)
             onAudioPacket?.invoke(data, s.raw)
             return
         }
@@ -2111,17 +2061,16 @@ class G2Central(
         }
         withSessionLocked {
             if (on) {
-                micPkts = 0; micPktsRight = 0; micBad = 0; micFirstMs = 0L; micLastMs = 0L
-                micLastAnyMs = 0L; micBursts = 0; micBurstsUnexpected = 0
+                micStats.resetSession()
                 // Claim the window BEFORE the open goes out, or our own first burst races the
                 // flag and gets reported as the glasses opening their own microphone.
-                micRequestedByUs = true
+                micStats.requestedByUs = true
                 sendEvenAILocked(
                     G2EvenAI.ctrl(G2EvenAI.STATUS_ENTER, counters.nextMagic()), G2Target.BOTH
                 )
                 log("setMicStream: OPEN -- evenAI CTRL ENTER -> both (NO ask; nothing goes to Even's cloud)")
             } else {
-                micRequestedByUs = false
+                micStats.requestedByUs = false
                 sendEvenAILocked(
                     G2EvenAI.ctrl(G2EvenAI.STATUS_EXIT, counters.nextMagic()), G2Target.BOTH
                 )
@@ -3036,7 +2985,7 @@ class G2Central(
                 // ⚠️ CTRL ENTER opens the MICROPHONE as well as the swirl -- `[proven]`, nine
                 // matched burst/ENTER pairs in the 08-18/08-20 archive. Claim the window here
                 // too, or every decorative swirl fires a false "the glasses opened their own mic".
-                micRequestedByUs = true
+                micStats.requestedByUs = true
                 sendEvenAILocked(
                     G2EvenAI.ctrl(G2EvenAI.STATUS_ENTER, counters.nextMagic()), G2Target.BOTH
                 )
@@ -3050,7 +2999,7 @@ class G2Central(
                     log("aiSwirl: ASK sustain")
                 }
             } else {
-                micRequestedByUs = false
+                micStats.requestedByUs = false
                 sendEvenAILocked(
                     G2EvenAI.ctrl(G2EvenAI.STATUS_EXIT, counters.nextMagic()), G2Target.BOTH
                 )
@@ -3345,37 +3294,4 @@ class G2Central(
 /** The domain string reported alongside a numeric GATT status (iOS reports an NSError domain). */
 private const val GATT_DOMAIN = "android.bluetooth.gatt"
 
-/** Which physical lens a peripheral is. */
-enum class G2Side(val raw: String) {
-    LEFT("L"),
-    RIGHT("R"),
-    UNKNOWN("?");
-
-    companion object {
-        fun parse(raw: String): G2Side = when (raw.uppercase()) {
-            "L" -> LEFT
-            "R" -> RIGHT
-            else -> UNKNOWN
-        }
-    }
-}
-
-/** Command target for a send: a single side or both lenses. */
-enum class G2Target { LEFT, RIGHT, BOTH }
-
-/** Parsed manufacturer-data record advertised by a G2 lens. */
-data class G2Manufacturer(
-    /** 14-char ASCII serial number. */
-    val sn: String,
-    /** "AA:BB:CC:DD:EE:FF" big-endian colon-hex. */
-    val mac: String
-)
-
-/** A discovered G2 lens (before/independent of a connection). */
-data class G2Discovery(
-    val device: BluetoothDevice,
-    val name: String,
-    val side: G2Side,
-    val rssi: Int,
-    val manufacturer: G2Manufacturer?
-)
+// G2Side, G2Target, G2Manufacturer and G2Discovery now live in G2Types.kt (same package).

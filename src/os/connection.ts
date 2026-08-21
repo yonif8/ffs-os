@@ -26,21 +26,24 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState, type AppStateStatus } from "react-native";
 import type { FfsGlassesSession } from "./useFfsBluetooth";
 import { screenOwner } from "./reclaim";
+import {
+  deriveHealth,
+  reduceConnection,
+  type ConnectionEvent,
+  type ConnectionHealth,
+} from "./connectionCore";
 
-/** Derived, human-meaningful connection health for the UI + diagnostics. */
-export type ConnectionHealth =
-  | "disconnected" // idle: not connected, no known link to recover (never connected / user disconnected)
-  | "connecting" //   first connect in flight (scanning / connecting)
-  | "reconnecting" // we had a link, it dropped unexpectedly — recovery pending (wake-nudge / FUT-162)
-  | "degraded" //     one lens up but pair not yet ready (radios still coming up)
-  | "healthy"; //     pair ready — the good state
-
-export type ConnectionEvent = {
-  at: number; // epoch ms
-  health: ConnectionHealth;
-  rawState: string; // underlying driver link state
-  note?: string; // e.g. "link dropped", "user disconnect", "reconnect-on-wake nudge"
-};
+// The health types + the pure derivation/reducer live in connectionCore.ts (no react-native,
+// so `bun test` can load them). Re-exported here so existing importers ("./connection") are
+// unaffected.
+export { deriveHealth, healthLabel, reduceConnection } from "./connectionCore";
+export type {
+  ConnectionEvent,
+  ConnectionHealth,
+  ConnTransition,
+  ConnTransitionInput,
+  ConnTransitionPrev,
+} from "./connectionCore";
 
 export type ConnectionSupervisor = {
   health: ConnectionHealth;
@@ -63,18 +66,6 @@ export type SupervisorOptions = {
 const DEFAULTS: Required<Omit<SupervisorOptions, "onEvent">> = {
   logCap: 200,
 };
-
-function deriveHealth(
-  connected: boolean,
-  ready: boolean,
-  rawState: string,
-  droppedUnexpectedly: boolean,
-): ConnectionHealth {
-  if (connected) return ready ? "healthy" : "degraded";
-  if (rawState === "scanning" || rawState === "connecting") return "connecting";
-  if (droppedUnexpectedly) return "reconnecting"; // recovery pending (wake-nudge / FUT-162)
-  return "disconnected";
-}
 
 /**
  * The all-day reliability supervisor. Layer it over a useFfsBluetooth session; it
@@ -118,33 +109,22 @@ export function useConnectionSupervisor(
     });
   }, []);
 
-  // React to every connection-state change: detect drops / recoveries, reclaim on ready.
+  // React to every connection-state change: detect drops / recoveries, reclaim on ready. The
+  // decision itself is the pure `reduceConnection` (tested in connectionCore); this effect only
+  // applies its result — advance the wasConnected latch, update the drop flag, append the event.
+  //
+  // ⛔ NOTE (2026-08-07): coming-ready no longer re-asserts the JS HUD surface. With the legacy
+  // phone-OS no longer owning the HUD (see App.tsx), re-claiming on every reconnect is precisely
+  // the behaviour that repainted over natively-declared pages — and because this link re-pairs on
+  // its own, it fired repeatedly without user action (it also made one connect produce TWO paints).
   useEffect(() => {
-    if (connected) {
-      const wasDown = !wasConnectedRef.current;
-      wasConnectedRef.current = true;
-      if (droppedUnexpectedly) setDroppedUnexpectedly(false);
-      if (wasDown) append(ready ? "healthy" : "degraded", "connected");
-      // ⛔ REMOVED 2026-08-07: this re-asserted the JS HUD surface the moment the pair went
-      // ready. With the legacy phone-OS no longer owning the HUD (see App.tsx), re-claiming on
-      // every reconnect is precisely the behaviour that repainted over natively-declared pages —
-      // and because this link re-pairs on its own, it fired repeatedly without user action.
-      // It is also why a single connect produced TWO paints ("created" then "rebuilt" text page).
-      return;
-    }
-
-    // Not connected.
-    const wasUp = wasConnectedRef.current;
-    wasConnectedRef.current = false;
-    if (wasUp && !userDisconnectedRef.current) {
-      // Unexpected drop from an established link. No native retry loop underneath us yet
-      // (FUT-162) — surface "reconnecting"; the foreground wake-nudge is the recovery.
-      setDroppedUnexpectedly(true);
-      append("reconnecting", "link dropped");
-    } else {
-      setDroppedUnexpectedly(false);
-      append(userDisconnectedRef.current ? "disconnected" : deriveHealth(false, false, rawState, false));
-    }
+    const t = reduceConnection(
+      { wasConnected: wasConnectedRef.current, droppedUnexpectedly },
+      { connected, ready, rawState, userDisconnected: userDisconnectedRef.current },
+    );
+    wasConnectedRef.current = t.wasConnected;
+    if (t.droppedUnexpectedly !== droppedUnexpectedly) setDroppedUnexpectedly(t.droppedUnexpectedly);
+    if (t.event) append(t.event.health, t.event.note);
   }, [connected, ready, rawState]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reconnect-on-wake: on foreground, if we're down (and the user didn't ask for that),
@@ -192,20 +172,4 @@ export function useConnectionSupervisor(
   );
 
   return { health, log, disconnect, reconnect };
-}
-
-/** Short human label for a health state (for the connection pill). */
-export function healthLabel(h: ConnectionHealth): string {
-  switch (h) {
-    case "healthy":
-      return "Connected";
-    case "degraded":
-      return "Booting…";
-    case "connecting":
-      return "Connecting…";
-    case "reconnecting":
-      return "Reconnecting…";
-    case "disconnected":
-      return "Disconnected";
-  }
 }
