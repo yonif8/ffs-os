@@ -252,12 +252,19 @@ export const FFSP_PANEL_H = 288;
 /** ON input classes. */
 export const ON_CLASS = {
   TAP: 0, DOUBLE: 1, SCROLL_FWD: 2, SCROLL_BACK: 3, RELEASE: 4, RAW: 5,
+  // ★ S2 (2026-08-21): the temple long-press as a first-class ON class. It reaches the hook only
+  // on an image carrying the 0x00442e70 shim (which POSTs LVGL_CODE.LONGPRESS = 0x60); on the OS
+  // shell long-press is the reserved "exit app" escape hatch and a hosted app is never offered it.
+  // See ffs_prog.h FFSP_ON_LONGPRESS. RAW stays 5; LONGPRESS is 6.
+  LONGPRESS: 6,
 } as const;
-const ON_CLASS_MAX = 5;
+const ON_CLASS_MAX = 6;
 
-/** LVGL codes, for `raw` handlers. Measured with a finger, not read off a disassembly. */
+/** LVGL codes, for `raw` handlers. Measured with a finger, not read off a disassembly.
+ *  LONGPRESS is SYNTHETIC (0x60) — never produced by the capacitive stack; the resident shim POSTs
+ *  it exactly as inputEventDataHandler POSTs 0x0A for a tap, matching ffs_dash_rt.c RT_G_LONG. */
 export const LVGL_CODE = {
-  TAP: 0x0a, DOUBLE: 0x48, UPROLL: 0x44, DOWNROLL: 0x45, RELEASE: 0x4a,
+  TAP: 0x0a, DOUBLE: 0x48, UPROLL: 0x44, DOWNROLL: 0x45, RELEASE: 0x4a, LONGPRESS: 0x60,
 } as const;
 
 export const DEV = { LEFT: 0, RIGHT: 1, RING: 4, ANY: 0xff } as const;
@@ -1939,6 +1946,11 @@ export interface Handlers {
    *  exists, so anything counting taps counts them right without knowing why. Declare this only
    *  if you actually want the lift. */
   release?: HandlerSpec;
+  /** ★ The temple LONG-PRESS (S2). Fires only on a patched image (the 0x00442e70 shim POSTs code
+   *  0x60); on the OS shell long-press is reserved as the universal "exit app" escape hatch, so a
+   *  shell-hosted app is never offered it — declare this for an app that OWNS its page (standalone
+   *  / the gesture-echo test). Carries no device, like the rolls. */
+  longPress?: HandlerSpec;
   /**
    * The `raw` byte carries the literal LVGL code.
    *
@@ -1959,6 +1971,7 @@ const CLASS_OF_KEY: Readonly<Record<string, number>> = {
   scrollFwd: ON_CLASS.SCROLL_FWD,
   scrollBack: ON_CLASS.SCROLL_BACK,
   release: ON_CLASS.RELEASE,
+  longPress: ON_CLASS.LONGPRESS,
 };
 
 function defaultDiv(cls: number): number {
