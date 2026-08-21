@@ -62,7 +62,8 @@
             "buildArchs": ["armeabi-v7a"]
           }
         }
-      ]
+      ],
+      "./plugins/withEmbedDebugBundle"
     ],
     "extra": {
       "eas": {
