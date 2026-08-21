@@ -21,20 +21,54 @@ import { toBase64 } from "../sdk/base64";
 import { DataService } from "../data/service";
 import { notificationsSource } from "../data/sources/notifications";
 import { mediaSource } from "../data/sources/media";
+import { navigationSource } from "../data/sources/navigation";
+import { weatherSource, type WeatherPlace } from "../data/sources/weather";
+import { ReplyDispatcher, type ReplyOutcome, type ReplyTarget } from "../data/actions";
 import {
   EMPTY_STATS,
   getCaptureEnabled,
   getStats,
   listenerConnected,
   listenerEnabled,
+  mediaControl,
   mediaNowElapsedMs,
   notifyAvailable,
   onNotifyChange,
   readMediaSessions,
+  readNav,
   readThreads,
+  replyViaRemoteInput,
   requestRebind,
   type NotifyStats,
 } from "./native";
+
+/**
+ * ── APP-ID MAP (must match each on-glass app's `@app id=` directive) ──────────────────────────
+ * Each source targets ONE app's data channel; the id is the same key `ffs_appload.h` slots use.
+ *   3 messages (apps/messages.c) · 4 music (apps/music.c) · 5 navigation · 6 weather (apps/weather.c)
+ * ⚠️ ffs_data.h holds G2D_MAX_CH = 2 channels at once (LRU-evicted). With more than two sources
+ *    emitting, the least-recently-pushed app's value is dropped on glass — for a clean two-app
+ *    proof (e.g. music + weather), keep only those two emitting (turn notification capture off,
+ *    and nav only emits while navigating).
+ */
+const APP_MESSAGES = 3;
+const APP_MUSIC = 4;
+const APP_NAV = 5;
+const APP_WEATHER = 6;
+
+/**
+ * A placeholder weather location so the source is self-contained for a desk/worn proof. It is NOT
+ * the wearer's location (that would be content in a PUBLIC repo) — the wearer configures a real
+ * place; this default just makes the weather channel produce a real, verifiable value on its own.
+ */
+const DEFAULT_WEATHER_PLACE: WeatherPlace = { name: "London", latitude: 51.51, longitude: -0.13 };
+
+/** A tiny keyless JSON GET for the weather source. Injected so the source stays offline-testable. */
+async function weatherFetchJson(url: string): Promise<unknown> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
 
 export interface NotificationBridge {
   /** Android with the native module present. iOS and web are false — the panel shows a stub. */
@@ -56,6 +90,18 @@ export interface NotificationBridge {
   pushNow: () => void;
   /** Re-read native state after the panel edits the allowlist or the capture switch. */
   refresh: () => void;
+  /**
+   * Act-back: reply to a message over the source app's own transport (RCS via RemoteInput).
+   * GOAL Plane 2, condition 8. ⚠️ There is no glass→phone wire that calls this yet (S6) — it is
+   * exposed so the worn proof of an on-glass reply is a one-line addition, not new plumbing.
+   * ⛔ `text` is content: passed straight to the native call, never logged.
+   */
+  reply: (target: ReplyTarget, text: string, requestId: string) => ReplyOutcome;
+  /**
+   * Act-back: drive the phone's active media session (play|pause|playpause|next|prev|seek).
+   * The phone half of a transport gesture from apps/music.c. Same S6 caveat as `reply`.
+   */
+  mediaControl: (pkg: string, action: string, argMs?: number) => boolean;
 }
 
 export function useNotificationBridge(pairReady: boolean, loaderPresent: boolean): NotificationBridge {
@@ -90,16 +136,36 @@ export function useNotificationBridge(pairReady: boolean, loaderPresent: boolean
           read: readThreads,
           enabled: () => listenerEnabled() && getCaptureEnabled(),
         }),
-        // Data-plane integration (2026-08-21): now-playing rendered via the proven messages reader
-        // (appId 3). `media` only emits a frame when something is actually PLAYING (fetch throws
-        // otherwise → the pump skips the tick), so it does not fight the notifications source unless
-        // music is playing. For a clean on-glass proof, turn notification capture OFF so only media
-        // drives the channel. A dedicated now-playing app later gets its own appId (default 4).
+        // ⭐ Music / now-playing — its OWN app now (apps/music.c, appId 4), no longer piggybacking
+        // on the messages reader. `media` only emits a frame while something is PLAYING (fetch
+        // throws otherwise → the pump skips the tick). The source's everyMs is 5 s and the pump
+        // ticks every 5 s (tickMs below), so the playhead is re-fetched and re-pushed each tick;
+        // apps/music.c re-reads ctx->api->data every draw, so the bar advances. (This is the fix
+        // for the old "stuck at 00:10", which was the 30 s pump tick, not the app.)
         mediaSource({
           read: readMediaSessions,
           nowElapsedMs: mediaNowElapsedMs,
-          appId: 3,
+          appId: APP_MUSIC,
           enabled: () => listenerEnabled(),
+        }),
+        // ⭐ Navigation — turn-by-turn parsed from the ongoing nav notification (appId 5). Emits
+        // only while a maps app is actively navigating (navToThreads throws otherwise). Same
+        // listener grant; no location permission. Ready for a worn proof — start navigation and
+        // launch the (future) nav app, or reuse the messages reader on appId 5.
+        navigationSource({
+          read: readNav,
+          appId: APP_NAV,
+          enabled: () => listenerEnabled(),
+        }),
+        // ⭐ Weather — a NON-notification live source (apps/weather.c, appId 6): the phone fetches
+        // keyless Open-Meteo, words it, encodes FFSM. This is the second half of GOAL Outcome B.7 —
+        // a DIFFERENT app reading a DIFFERENT live source with NO new wire code, just another
+        // declared DataSource on the same channel. Self-contained: it produces a real value from
+        // DEFAULT_WEATHER_PLACE with no live external event needed.
+        weatherSource({
+          place: DEFAULT_WEATHER_PLACE,
+          fetchJson: weatherFetchJson,
+          appId: APP_WEATHER,
         }),
       ],
       // Fire-and-forget: "sent" is not "landed" (the ⟨LOADER … ret=0x64…⟩ line is the truth).
@@ -154,6 +220,19 @@ export function useNotificationBridge(pairReady: boolean, loaderPresent: boolean
     if (available && granted && !bound) requestRebind();
   }, [available, granted, bound]);
 
+  // Act-back dispatcher — RemoteInput only (SEND_SMS not requested by default, so no `sms`).
+  // De-dup + validation live in ReplyDispatcher; this hook just owns the one instance.
+  const replier = useMemo(() => new ReplyDispatcher({ remoteInput: replyViaRemoteInput }), []);
+  const reply = useCallback(
+    (target: ReplyTarget, text: string, requestId: string): ReplyOutcome =>
+      replier.reply(target, text, requestId),
+    [replier],
+  );
+  const control = useCallback(
+    (pkg: string, action: string, argMs = 0): boolean => mediaControl(pkg, action, argMs),
+    [],
+  );
+
   const pushNow = useCallback(() => {
     const svc = svcRef.current;
     if (!svc) return;
@@ -165,5 +244,8 @@ export function useNotificationBridge(pairReady: boolean, loaderPresent: boolean
     void svc.tick();
   }, []);
 
-  return { available, canSend, pairReady, granted, bound, capture, stats, breakerOpen, pushNow, refresh };
+  return {
+    available, canSend, pairReady, granted, bound, capture, stats, breakerOpen, pushNow, refresh,
+    reply, mediaControl: control,
+  };
 }

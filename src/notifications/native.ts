@@ -14,6 +14,8 @@ import { Platform } from "react-native";
 
 import type { FfsNotifyNativeModule, NotifyStats, NotifyThread } from "../../modules/ffs-notify";
 import type { MediaSnapshot } from "../data/sources/media";
+import type { NavNotification } from "../data/sources/navigation";
+import type { ReplyTarget } from "../data/actions";
 import { DEFAULT_ALLOW } from "./allowlist";
 
 let native: FfsNotifyNativeModule | null = null;
@@ -167,6 +169,75 @@ export function mediaNowElapsedMs(): number {
     return native?.mediaNowElapsedMs() ?? 0;
   } catch {
     return 0;
+  }
+}
+
+/**
+ * Transport control — the phone half of act-back for music (GOAL Plane 2, condition 8).
+ * action: play|pause|playpause|next|prev|seek; argMs is the seek target. Returns false when
+ * the module is absent so the caller degrades to "no control" rather than throwing.
+ * ⚠️ There is no glass→phone wire that calls this yet (S6); it is exposed so the worn proof
+ *    of a transport gesture is a one-line addition, not a new plumbing job.
+ */
+export function mediaControl(pkg: string, action: string, argMs = 0): boolean {
+  try {
+    return native?.mediaControl(pkg, action, argMs) ?? false;
+  } catch {
+    return false;
+  }
+}
+
+// ── navigation (NavScanner — technique re-derived; native side implemented) ────────────────────
+/**
+ * The current ongoing nav notification, or null. The native scanner only ever inspects the
+ * fixed nav-package set (navigation.ts NAV_PACKAGES). Shape-mapped to the source's
+ * `NavNotification` (its `sub` is optional; the native raw always carries a string).
+ * ⛔ PRIVACY: title/text/sub are content — the result goes only to the FFSM encoder in
+ *    src/data/sources/navigation.ts, never to a log or React state.
+ */
+export function readNav(): NavNotification | null {
+  try {
+    const raw = native?.scanNav() ?? null;
+    if (!raw) return null;
+    return { pkg: raw.pkg, title: raw.title, text: raw.text, sub: raw.sub || undefined };
+  } catch {
+    return null;
+  }
+}
+
+// ── act-back / reply (ReplyRegistry — native side implemented) ─────────────────────────────────
+/** Threads that expose a RemoteInput reply action right now. Metadata only, no content. */
+export function replyTargets(): ReplyTarget[] {
+  try {
+    const raw = native?.getReplyTargets() ?? [];
+    return raw.map((r) => ({ key: r.key, canRemoteInput: r.canRemoteInput }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Fire a thread's own RemoteInput reply action (RCS-preserving; no SEND_SMS needed). Returns
+ * false when the module is absent. ⛔ `text` is content the wearer wrote — passed straight
+ * through, never logged or persisted here.
+ */
+export function replyViaRemoteInput(key: string, text: string): boolean {
+  try {
+    return native?.replyViaRemoteInput(key, text) ?? false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Carrier-SMS fallback for a plain SMS thread with no RemoteInput. False unless SEND_SMS is
+ * granted (this repo does not request it by default — Yoni's policy call). ⛔ `text` is content.
+ */
+export function sendSmsFallback(address: string, text: string): boolean {
+  try {
+    return native?.sendSmsFallback(address, text) ?? false;
+  } catch {
+    return false;
   }
 }
 
