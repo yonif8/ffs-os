@@ -15,6 +15,7 @@ import { SafeAreaView, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import FfsBle from "../../modules/ffs-ble";
 import { startListening as startFbShot } from "../sdk/fbshot";
+import { startFfsEvents } from "./ffsEvents";
 import { initLoggerCore, glog } from "./log";
 import { theme } from "./theme";
 import { useFfsBluetooth } from "./useFfsBluetooth";
@@ -92,6 +93,10 @@ function AppInner() {
   // Keep the fb_shot assembler armed app-wide so a Claude-driven screenshot push is
   // captured whenever its frames arrive (harmless otherwise — it only reacts to "FBSH").
   useEffect(() => startFbShot(), []);
+
+  // Arm the inbound FFS event bus (sid 0x91) so glasses → phone events (gestures, app
+  // selections, …) decode and land in the activity log the moment the CFW emits them.
+  useEffect(() => startFfsEvents(), []);
 
   // Boot the off-device logger (session id + the loopback collector socket).
   useEffect(() => {
