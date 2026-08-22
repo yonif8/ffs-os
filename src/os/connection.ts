@@ -25,7 +25,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState, type AppStateStatus } from "react-native";
 import type { FfsGlassesSession } from "./useFfsBluetooth";
-import { screenOwner } from "./reclaim";
+// NOTE: the reclaim-on-ready HUD re-assert was retired (see the 2026-08-07 note below) and
+// the render machinery (reclaim.ts) is now quarantined under legacy/. This supervisor is
+// pure connection state/health — no HUD import.
 import {
   deriveHealth,
   reduceConnection,

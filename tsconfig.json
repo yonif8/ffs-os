@@ -6,5 +6,7 @@
   // Test files are run by `bun test`, which supplies its own describe/it/expect globals.
   // tsc has no test-runner types configured, so it would report those globals as errors and
   // drown out real type errors in app code. Run the tests with `bun test src/sdk` instead.
-  "exclude": ["**/__tests__/**", "**/*.test.ts", "**/*.test.tsx"]
+  // "legacy" is quarantined phone-OS code (see docs/APK-CLEANUP-PLAN.md) — kept for the
+  // on-glass parity record but out of the build, so it is neither type-checked nor bundled.
+  "exclude": ["legacy", "**/__tests__/**", "**/*.test.ts", "**/*.test.tsx"]
 }

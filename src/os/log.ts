@@ -85,6 +85,47 @@ function pending(): number {
   return queue.length - head;
 }
 
+// ── UI live-tail tap ─────────────────────────────────────────────────────────
+// The status screen's ActivityLog widget renders a live tail of bridge events. This is
+// an additive, in-memory observer of the SAME records the collector receives — it does
+// NOT touch the WebSocket path or the loopback endpoint. Bounded and non-throwing so it
+// can never affect the transport or the app.
+export type LogTailRecord = { t: number; cat: string; event: string; text?: string };
+const TAIL_CAP = 120;
+let tail: LogTailRecord[] = [];
+const tailListeners = new Set<(recs: LogTailRecord[]) => void>();
+
+function pushTail(rec: Rec): void {
+  const entry: LogTailRecord = { t: rec.t, cat: rec.cat, event: rec.event };
+  tail.push(entry);
+  if (tail.length > TAIL_CAP) tail = tail.slice(tail.length - TAIL_CAP);
+  for (const fn of tailListeners) {
+    try {
+      fn(tail);
+    } catch {
+      /* a bad UI listener must never break logging */
+    }
+  }
+}
+
+/** Current in-memory tail (most-recent-last), for the ActivityLog widget's initial paint. */
+export function getLogTail(): LogTailRecord[] {
+  return tail;
+}
+
+/** Subscribe to the live tail. Returns an unsubscribe. Fires immediately with the tail. */
+export function subscribeLogTail(fn: (recs: LogTailRecord[]) => void): () => void {
+  tailListeners.add(fn);
+  try {
+    fn(tail);
+  } catch {
+    /* ignore */
+  }
+  return () => {
+    tailListeners.delete(fn);
+  };
+}
+
 function newSessionId(): void {
   const rnd = Math.random().toString(36).slice(2, 8);
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -234,6 +275,7 @@ export function emit(cat: string, event: string, data?: Record<string, unknown>)
       console.log(`[glog ${cat}] ${event}`, data ?? "");
     }
     queue.push(rec);
+    pushTail(rec); // additive UI tail — does not touch the collector transport
 
     // Bounded ring: if we're past cap, drop the OLDEST unsent by advancing head.
     const over = pending() - BUFFER_CAP;
