@@ -510,7 +510,36 @@ object G2Flash {
     val goldenShip27 = GoldenVector(
         "c5dfd200459fe5f0ff0e6721a5197105807e5eb6de7f77732a8edfda8d73eb24",
         3643874L, 0x007B19C2L, true,
-        "OS takeover + FFSC data channel + tier-3 gate + left-lens peer readback (2.2.7.14) [CURRENT]"
+        "OS takeover + FFSC data channel + tier-3 gate + left-lens peer readback (2.2.7.14)"
+    )
+
+    /**
+     * 2026-08-21 (Toolkit Round 1 — S2 input). goldenShip27 plus the input-completeness stream:
+     * long-press is delivered to the running app as a first-class event (synthetic LVGL code 0x60
+     * POSTed at inputEventDataHandler's eventID==3 arm), double-tap becomes shell-owned system-back
+     * that raises a "Close app?" modal at the app root (instead of an instant close), and that modal
+     * renders real 5x7 text (app name + "Close app?" + KEEP/CLOSE) via a shell-native blitter over
+     * the shared font5x7 table. S1 (icon font-chain) is app-SDK, not in this image; S4/S5 apps are
+     * DATA installed over BLE. Built in CI on the clang-18 pin (run 32502175184) from ffs/os-takeover;
+     * ps 3557884 -> 3640637, payload end MRAM 0x007B0D1D. selfTestGuard re-derives ps/progEnd from
+     * the image, so a mistyped constant here fails closed. Restore path = goldenStock27. */
+    val goldenR1input27 = GoldenVector(
+        "6288cd10a004f386cdbd1ed8f4a92c567acd6025ab47381c5bf0558d9f30a0e7",
+        3640637L, 0x007B0D1DL, true,
+        "OS takeover + long-press-to-app + double-tap back + Close-app modal (2.2.7.14)"
+    )
+
+    /** 2026-08-22 (S7 — cross-lens sync in the runtime). goldenR1input27 plus the ABI-3
+     * primitive: ffs_appload.c fills a master-owned ctx->frame + shared ctx->seed each tick over
+     * the peer channel FFS_PEER_CH(1), so a procedural app frame-locks in both eyes with no
+     * app-side sync code (G2_ABI 2->3, additive; pack_app emits abi 3). Built in CI on the
+     * clang-18 pin (run 32538944002) from ffs/os-takeover; ps 3557884 -> 3641097, payload end
+     * MRAM 0x007B0EE9. selfTestGuard re-derives ps/progEnd, so a mistyped constant fails closed.
+     * Restore path = goldenStock27. */
+    val goldenS7sync27 = GoldenVector(
+        "6bbef9e46e0edb5ea99de9eb88633a63b010d167344079ef76edbe0ff8ac079c",
+        3641097L, 0x007B0EE9L, true,
+        "OS takeover + S7 cross-lens sync (ABI 3: ctx->frame/seed) (2.2.7.14) [CURRENT]"
     )
 
     /** Every build this driver will consider flashing. Anything else is refused outright. */
@@ -520,7 +549,7 @@ object G2Flash {
         goldenFfsui, goldenRamexec, goldenLoader, goldenLoader27, goldenV3,
         goldenArena27, goldenInk27, goldenGif27, goldenSync27, goldenSyncDiag27,
         goldenTakeover27, goldenNav27, goldenNav27b, goldenApps27, goldenApps27b,
-        goldenShell27, goldenBig27, goldenShip27
+        goldenShell27, goldenBig27, goldenShip27, goldenR1input27, goldenS7sync27
     )
 
     /** Look up a build by the SHA-256 of its bytes. Null means "not a known build". */
