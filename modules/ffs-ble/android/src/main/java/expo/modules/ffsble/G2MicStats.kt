@@ -15,9 +15,9 @@ package expo.modules.ffsble
  * cluster of loose fields on [G2Central]: everything mic-session lives behind this boundary
  * hands out nothing but integers and log strings, it takes no [ByteArray], and it is
  * reachable from a plain-JVM unit test (`G2Central` needs a BluetoothManager, a Handler and a
- * live pair, so nothing inside it runs under `./gradlew :ffs-ble:test`). It mirrors
- * [EvenHubPageLatches]: cohesive state + rule, dependencies injected as lambdas, the tested
- * object is the same object the driver runs.
+ * live pair, so nothing inside it runs under `./gradlew :ffs-ble:test`). It follows the same
+ * shape the (now-quarantined) EvenHubPageLatches did: cohesive state + rule, dependencies
+ * injected as lambdas, the tested object is the same object the driver runs.
  *
  * [G2Central] owns one instance, drives it entirely on its serial queue (so no field here
  * needs its own lock), and keeps thin public `micResetStats()` / `micLogStats()` wrappers so

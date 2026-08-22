@@ -9,7 +9,7 @@ import android.bluetooth.BluetoothDevice
  * They lived at the tail of [G2Central] purely because that is where they were first written;
  * relocating them here (same package, same visibility) is a byte-for-byte behaviour-preserving
  * move that keeps [G2Central] to the driver logic and mirrors how [G2Protocol] keeps its own
- * value types (G2ImageAck, G2GestureDecode, ...) beside the code that uses them.
+ * value types (G2GestureDecode, ...) beside the code that uses them.
  */
 
 /** Which physical lens a peripheral is. */

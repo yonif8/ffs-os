@@ -9,30 +9,22 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
 /**
- * FfsBleModule -- Android side of the FFS G2 BLE driver.
+ * FfsBleModule -- Android side of the FFS G2 BLE BRIDGE.
  *
- * This is the Android twin of `ios/FfsBleModule.swift` and MUST expose exactly the same
- * function and event names, because `src/FfsBleModule.ts` is the single typed contract both
- * platforms satisfy and the whole `src/os` TypeScript OS is written against it. If you add a
- * capability on one platform, add its binding on the other in the same change -- a missing name
- * here is a runtime crash in shared JS, not a compile error. `scripts/check-native-parity.py`
- * enforces this.
+ * TRIMMED 2026-08-22 (docs/APK-CLEANUP-PLAN.md): the app is now a headless BLE bridge Claude
+ * drives + a thin status screen, NOT a phone-OS that renders onto the glasses. The EvenHub-page /
+ * render / animation / image / dashboard machinery, the SDK page transport, and the R1 ring were
+ * quarantined to `modules/ffs-ble/legacy/` (data-in retired too, see `modules/legacy/ffs-notify`).
  *
- * PHASE 1 (this file, current state): the radio is REAL. [G2Central] and [R1Central] are
- * written directly against `android.bluetooth`, and everything from `startScan` through
- * `showText`, gesture decode, the EvenHub session and the FUT-216 payload push is implemented.
+ * What this exposes now is the bridge surface: adapter/scan, connect/disconnect, per-lens
+ * readiness, `pushToService` (the sid-0x90 FXP1 payload route), device-info (battery/firmware),
+ * inbound gesture + `onServiceRaw` (the sid-0x30 framebuffer screenshot rides this), mic-open
+ * detection, HUD-setting instruments (brightness / silent / wear / lens-offset / IMU / mic), and
+ * the CFW flash hooks. Claude drives most of it over the exported adb broadcast control surface
+ * (PUSH_PAYLOAD / connect / DEVICE_INFO / FLASH / SETTING); the status screen binds connect,
+ * readiness, device-info and the `on*` events.
  *
- * Still stubbed, and each for a specific reason rather than for lack of time:
- *   - `playAnimation` / `showDashboard` / `hideDashboard` / `dashboardInput` / `setDashboardData`
- *     need a PIXEL RASTERIZER (`G2Anim` / `FfsDashboard` are CoreGraphics on iOS and become
- *     `android.graphics.Canvas` here). That is Phase 3 -- the transport those renderers feed is
- *     already live below, so it is genuinely just the frame generator that is missing.
- *   - `startCfwFlash` is Phase 4 and LAST by design: a botched DFU over an unproven BLE stack
- *     bricks the glasses. Flash from the iOS app until the Android link is boringly stable.
- *     `flashDryRun` is real, because it is a zero-write probe of already-discovered GATT.
- *
- * `getPref`/`setPref` are SharedPreferences (UserDefaults on iOS) -- the calibration flow
- * depends on them across launches.
+ * `getPref`/`setPref` are SharedPreferences (UserDefaults on iOS).
  *
  * Per cardinal rule 1, none of this counts as shipped until it is seen working on the glasses.
  */
@@ -43,13 +35,6 @@ class FfsBleModule : Module() {
    * the Bluetooth stack (or trip a permission prompt) at import time.
    */
   private var central: G2Central? = null
-
-  /**
-   * The R1 ring central (FUT-233) -- the SDK's input device. Created lazily and independently
-   * of [central]: the ring is usable with the glasses powered off, which is exactly the
-   * configuration the gesture-coverage test needs.
-   */
-  private var ring: R1Central? = null
 
   private val prefs by lazy {
     appContext.reactContext?.getSharedPreferences("ffs_prefs", Context.MODE_PRIVATE)
@@ -87,14 +72,7 @@ class FfsBleModule : Module() {
       "onTxResume",
       "onSubscribe",
       // The glasses opened their own microphone. Metadata only -- never audio.
-      "onMicUnexpected",
-      "onImgAck",
-      // R1 ring (FUT-233). Ring gestures come through the shared "onGesture" event tagged
-      // device:"ring"; these are the ring-specific lifecycle/raw channels.
-      "onRingConnected",
-      "onRingDisconnected",
-      "onRingRaw",
-      "onRingBattery"
+      "onMicUnexpected"
     )
 
     // ---- persistent key/value (FUT-236) ----
@@ -105,22 +83,6 @@ class FfsBleModule : Module() {
 
     Function("setPref") { key: String, value: String ->
       prefs?.edit()?.putString("ffs_pref_$key", value)?.apply()
-    }
-
-    // ---- R1 ring (FUT-233) ----
-
-    Function("ringScan") { ensureRing()?.startScan() }
-    Function("ringStopScan") { ring?.stopScan() }
-    Function("ringDisconnect") { ring?.disconnect() }
-    Function("ringForget") { ring?.forget() }
-    Function("ringReadBattery") { ring?.readBattery() }
-
-    /**
-     * Command the ring to ALSO connect to the glasses at `mac`. Not required for input (that
-     * comes over the phone link) -- this drives the ring<->glasses link.
-     */
-    Function("ringConnectToGlasses") { mac: String ->
-      ensureRing()?.connectToGlasses(mac) ?: false
     }
 
     // ---- glasses link ----
@@ -144,43 +106,6 @@ class FfsBleModule : Module() {
       central?.isSideReady(G2Side.parse(side)) ?: false
     }
 
-    // ---- render ----
-
-    // Run the auth handshake if needed, then render `text` on the HUD. Connect the pair first.
-    Function("showText") { text: String -> ensureCentral()?.showText(text) }
-
-    // Render a test image through our own raw-image path (FUT-153).
-    Function("showImage") { ensureCentral()?.showImage() }
-
-    // FUT-165: toggle the firmware's NATIVE Even-AI "thinking" swirl (GPU-smooth, dual-lens)
-    // via the even_ai session lifecycle.
-    Function("showAiSwirl") { on: Boolean -> ensureCentral()?.aiSwirl(on) }
-
-    // Phase 3: needs the G2Anim pixel rasterizer (android.graphics.Canvas). The mode-2
-    // transport it streams into is already live -- see sendAnimFrame in G2Central.kt.
-    Function("playAnimation") { _: String -> notYet("playAnimation", "Phase 3 (rasterizer)") }
-
-    Function("stopAnimation") { central?.stopAnimation() }
-
-    // ---- dashboards ----
-
-    // FUT-170 PoC: push custom text into the firmware's native head-up dashboard over BLE.
-    Function("pushDashboardDemo") { text: String -> ensureCentral()?.pushDashboardDemo(text) }
-
-    // FUT-170: reveal Even's OWN native head-up dashboard by releasing our EvenHub page.
-    Function("showStockDashboard") { ensureCentral()?.showStockDashboard() }
-
-    // FUT-194: drive the firmware's own dashboard entirely from our OS over BLE. No pixels.
-    Function("showNativeDashboard") { config: String ->
-      ensureCentral()?.showNativeDashboard(config)
-    }
-
-    // FUT-176: our OWN dashboard, rendered as our pixels. Phase 3 -- needs FfsDashboard.render.
-    Function("showDashboard") { notYet("showDashboard", "Phase 3 (rasterizer)") }
-    Function("hideDashboard") { notYet("hideDashboard", "Phase 3 (rasterizer)") }
-    Function("dashboardInput") { _: String -> notYet("dashboardInput", "Phase 3 (rasterizer)") }
-    Function("setDashboardData") { _: String -> notYet("setDashboardData", "Phase 3 (rasterizer)") }
-
     // ---- session / info ----
 
     // FUT-169 / FUT-167: real battery %, charging, per-lens firmware version. Async via
@@ -203,20 +128,6 @@ class FfsBleModule : Module() {
       ensureCentral()?.pushToService(serviceId and 0xFF, base64)
     }
 
-    // ---- the TypeScript SDK's transport ----
-    // Two calls and one event are the ENTIRE native surface the SDK needs: the encoders, the
-    // decoders, the screen stack and the page-slot bookkeeping all live in TypeScript.
-
-    /** Send one SDK-encoded EvenHub payload to the RIGHT lens (see sendEvenHubFromSdk). */
-    Function("sendEvenHub") { base64: String -> ensureCentral()?.sendEvenHubFromSdk(base64) }
-
-    /**
-     * Hand page ownership to the SDK; returns whether the firmware already holds a page so the
-     * SDK can seed its PageSlot. Without this the OS's first CREATE would be a silent no-op on a
-     * link where anything had already rendered.
-     */
-    Function("sdkTakeoverPage") { ensureCentral()?.sdkTakeoverPage() ?: false }
-
     // HUD brightness (sid 0x09). 0-100, nonlinear. autoAdjust hands control to the ambient-light
     // sensor -- pass false to hold a level for measurement.
     Function("setBrightness") { level: Int, autoAdjust: Boolean ->
@@ -231,10 +142,6 @@ class FfsBleModule : Module() {
       ensureCentral()?.querySettings(brightnessOnly)
     }
 
-    Function("pushPayloadViaImage") { base64: String ->
-      ensureCentral()?.pushPayloadViaImage(base64)
-    }
-
     // ---- test affordance ----
 
     /**
@@ -244,12 +151,12 @@ class FfsBleModule : Module() {
      * whether a real touch reaches us -- see the note on G2Central.simulateGesture.
      */
     Function("simulateGesture") { device: String, gesture: String ->
-      when (device.lowercase()) {
-        "ring" -> ensureRing()?.simulateGesture(gesture)
-        "glasses" -> ensureCentral()?.simulateGesture(gesture)
-        else -> sendEvent(
+      if (device.lowercase() == "glasses") {
+        ensureCentral()?.simulateGesture(gesture)
+      } else {
+        sendEvent(
           "onLog",
-          mapOf("message" to "[android] simulateGesture: device must be 'glasses' or 'ring', got '$device'")
+          mapOf("message" to "[android] simulateGesture: only 'glasses' supported (ring quarantined), got '$device'")
         )
       }
     }
@@ -303,8 +210,6 @@ class FfsBleModule : Module() {
       unregisterSimulationReceiver()
       central?.shutdown()
       central = null
-      ring?.shutdown()
-      ring = null
     }
   }
 
@@ -340,12 +245,8 @@ class FfsBleModule : Module() {
       override fun onReceive(ctx: Context?, intent: Intent?) {
         when (intent?.action) {
           SIMULATE_ACTION -> {
-            val device = intent.getStringExtra("device") ?: "glasses"
             val gesture = intent.getStringExtra("gesture") ?: return
-            when (device.lowercase()) {
-              "ring" -> ensureRing()?.simulateGesture(gesture)
-              else -> ensureCentral()?.simulateGesture(gesture)
-            }
+            ensureCentral()?.simulateGesture(gesture)
           }
           // Drives the OTA flasher from adb so the flash loop needs no UI navigation. Every
           // refusal gate in G2Flasher still applies -- this only chooses WHEN to run the chain,
@@ -368,29 +269,18 @@ class FfsBleModule : Module() {
           // probe needs the payload baked into a JS release first.
           PUSH_ACTION -> {
             val b64 = intent.getStringExtra("b64") ?: return
-            // `--es via svc` sends the SAME FXP1 bytes as a plain transport message on a custom
-            // service id instead of as an EvenHub image-container update.
-            //
-            // Why that is worth an option: an image container belongs to Even's EvenHub PAGE,
-            // and the page manager holds exactly one page. Anything that switches ui module
-            // evicts that page, and its lifecycle handler frees the very word the container
-            // lookup guards on -- after which every image push is refused by a lookup that
-            // allocates nothing. The transport route has no page to lose, so it is the only one
-            // that still delivers with our own shell in the foreground. It needs firmware that
-            // carries the FXP1 branch in ffs_msgrx_gate (S-FIX tier 3); on an image without it
-            // the message is simply queued for a service demux with no consumer, i.e. inert.
-            //   am broadcast -a com.futurefounders.ffs.PUSH_PAYLOAD --es b64 <b64>             //     --es via svc [--ei sid 144] -p <pkg>
-            val via = intent.getStringExtra("via")
+            // Deliver the FXP1-framed bytes as a plain transport message on a custom service id
+            // (default 0x90). The CFW's FXP1 gate (ffs_msgrx_gate) reassembles it and hands it to
+            // cfw_loader_ingest BEFORE any page exists -- the page-independent route, proven
+            // on-glass. The legacy EvenHub image-container route (`--es via svc` off) was retired
+            // with the render machinery (2026-08-22); `sid` still overrides the service id.
+            //   am broadcast -a com.futurefounders.ffs.PUSH_PAYLOAD --es b64 <b64> [--ei sid 144] -p <pkg>
             val sid = intent.getIntExtra("sid", 0x90)
             sendEvent(
               "onLog",
-              mapOf(
-                "message" to "[android] debug payload push: ${b64.length} b64 chars via " +
-                  if (via == "svc") "svc 0x${sid.toString(16)}" else "evenHub image"
-              )
+              mapOf("message" to "[android] debug payload push: ${b64.length} b64 chars via svc 0x${sid.toString(16)}")
             )
-            if (via == "svc") ensureCentral()?.pushToService(sid, b64)
-            else ensureCentral()?.pushPayloadViaImage(b64)
+            ensureCentral()?.pushToService(sid, b64)
           }
           // Ask the glasses for battery/firmware/CFW-loader diagnostics. The ⟨LOADER⟩ block in
           // the reply is how a pushed payload reports its ret= value back.
@@ -422,19 +312,7 @@ class FfsBleModule : Module() {
               // APP_REQUIRE_BRIGHTNESS_INFO and returns only the brightness block -- asking for
               // that and then wondering why `silent` reads null costs a whole verification cycle.
               "query" -> c?.querySettings(value == 0)
-              // Tier-1 render probes, driven from adb so they need no JS.
-              "image" -> c?.showImage()
-              // Geometry: value is a preset so one int extra is enough.
-              //   1 = top-left quarter, 2 = centred box, 3 = bottom strip, 0 = full canvas
-              "geo" -> when (value) {
-                1 -> c?.showTextAt("TOP-LEFT", 0, 0, 288, 144, 2)
-                2 -> c?.showTextAt("CENTRE BOX", 144, 72, 288, 144, 2)
-                3 -> c?.showTextAt("BOTTOM STRIP", 0, 216, 576, 72, 2)
-                else -> c?.showTextAt("FULL CANVAS", 0, 0, 576, 288, 2)
-              }
-              "header" -> c?.showListWithHeader(listOf("ONE", "TWO", "THREE", "FOUR"), "HEADER")
-              // The firmware's OWN swirl animation (even_ai service, not EvenHub). value!=0 = on.
-              "swirl" -> c?.aiSwirl(value != 0)
+              // (render probes image/geo/header/swirl retired 2026-08-22 with the render machinery)
               // Start/stop the head-motion (IMU) stream -- EvenHub Cmd 19, the one message that
               // opens the sensor hub. value 1 = start, 0 = stop. `--ei hz <pace>` overrides the
               // report pace; it is an ImuReportPace CODE (100..1000 step 100), NOT literal Hz,
@@ -486,22 +364,6 @@ class FfsBleModule : Module() {
               ensureCentral()?.setBrightness(level, auto)
             }
           }
-          // LIST-1: declare a native on-glass list. `items` is comma-separated; defaults to a
-          // numbered set so the probe can be fired with no arguments at all.
-          LIST_ACTION -> {
-            val raw = intent.getStringExtra("items")
-            val items = raw?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
-              ?: (0..7).map { "Item $it" }
-            // Optional `b64`: declare the list and push a payload at it as ONE atomic action.
-            // This exists because the two-broadcast form is unrunnable in practice -- the
-            // round trip between two external commands is tens of seconds, and in that window the
-            // link can drop, JS re-renders its home page on reconnect, and the list the
-            // payload was meant to find is gone. Sequencing them INSIDE the driver's serial
-            // queue removes the window entirely.
-            val b64 = intent.getStringExtra("b64")
-            if (b64 != null) ensureCentral()?.showListThenPush(items, b64)
-            else ensureCentral()?.showList(items)
-          }
           // Drive the TypeScript mini-OS. Unlike every other action here this one does NOT touch
           // the driver -- it just forwards the command to JS, because the OS lives entirely in
           // the SDK and the driver is only its transport.
@@ -524,7 +386,6 @@ class FfsBleModule : Module() {
     }
     val filter = IntentFilter(SIMULATE_ACTION).apply {
       addAction(FLASH_ACTION)
-      addAction(LIST_ACTION)
       addAction(PUSH_ACTION)
       addAction(INFO_ACTION)
       addAction(BRIGHTNESS_ACTION)
@@ -559,7 +420,6 @@ class FfsBleModule : Module() {
   private companion object {
     const val SIMULATE_ACTION = "com.futurefounders.ffs.SIMULATE_GESTURE"
     const val FLASH_ACTION = "com.futurefounders.ffs.FLASH"
-    const val LIST_ACTION = "com.futurefounders.ffs.SHOW_LIST"
     const val BRIGHTNESS_ACTION = "com.futurefounders.ffs.BRIGHTNESS"
     const val SETTING_ACTION = "com.futurefounders.ffs.SETTING"
     /** Boot/stop the TypeScript mini-OS: `--es cmd boot|stop`. */
@@ -568,62 +428,6 @@ class FfsBleModule : Module() {
     const val INJECT_ACTION = "com.futurefounders.ffs.INJECT"
     const val PUSH_ACTION = "com.futurefounders.ffs.PUSH_PAYLOAD"
     const val INFO_ACTION = "com.futurefounders.ffs.DEVICE_INFO"
-  }
-
-  /**
-   * Report an unimplemented binding to the JS log sink instead of throwing. The shared UI calls
-   * these from button handlers; a throw would surface as a redbox and stop the app dead.
-   */
-  private fun notYet(name: String, phase: String) {
-    sendEvent("onLog", mapOf("message" to "[android] $name: not implemented yet -- $phase"))
-  }
-
-  /** Lazily create the RING central (FUT-233) and wire its callbacks to sendEvent. */
-  private fun ensureRing(): R1Central? {
-    ring?.let { return it }
-    val context = appContext.reactContext ?: run {
-      sendEvent("onLog", mapOf("message" to "[android] ring: no React context yet"))
-      return null
-    }
-    val r = R1Central(context) { appContext.activityProvider?.currentActivity }
-
-    r.onLog = { message -> sendEvent("onLog", mapOf("message" to message)) }
-    r.onStateChange = { state -> sendEvent("onStateChange", mapOf("state" to state)) }
-    r.onDeviceFound = { name, rssi ->
-      sendEvent(
-        "onDeviceFound",
-        mapOf("name" to name, "side" to "ring", "rssi" to rssi, "sn" to null, "mac" to null)
-      )
-    }
-    r.onConnected = { name -> sendEvent("onRingConnected", mapOf("name" to name)) }
-    // Ring gestures ride the SHARED onGesture event tagged device:"ring", so JS treats glasses
-    // and ring input through one handler (see toNavGesture in FfsBleModule.ts).
-    r.onGesture = { gesture, rawHex ->
-      sendEvent(
-        "onGesture",
-        mapOf(
-          "gesture" to gesture,
-          "side" to "ring",
-          "source" to null,
-          "device" to "ring",
-          "raw" to rawHex
-        )
-      )
-    }
-    // Every inbound ring frame, decoded or not -- the evidence channel for the live
-    // gesture-coverage test. Deliberately unfiltered.
-    r.onRaw = { characteristic, hex ->
-      sendEvent("onRingRaw", mapOf("characteristic" to characteristic, "hex" to hex))
-    }
-    r.onBattery = { percent -> sendEvent("onRingBattery", mapOf("battery" to percent)) }
-    r.onDisconnected = { reason -> sendEvent("onRingDisconnected", mapOf("reason" to reason)) }
-
-    ring = r
-    // AFTER the callbacks are wired, never from the constructor -- the driver's queue thread is
-    // already running, so anything it emitted during construction would race these assignments
-    // and be dropped on the floor.
-    r.start()
-    return r
   }
 
   /** Lazily create the glasses central and wire its callbacks to sendEvent. */
@@ -758,15 +562,10 @@ class FfsBleModule : Module() {
         mapOf("side" to side, "characteristic" to characteristic, "on" to on)
       )
     }
-    c.onImgAck = { session, fragment, ok, timedOut ->
-      sendEvent(
-        "onImgAck",
-        mapOf("session" to session, "fragment" to fragment, "ok" to ok, "timedOut" to timedOut)
-      )
-    }
 
     central = c
-    // AFTER the callbacks are wired -- see the note in ensureRing().
+    // AFTER the callbacks are wired, never from the constructor -- the driver's queue thread is
+    // already running, so anything emitted during construction would race these assignments.
     c.start()
     return c
   }
