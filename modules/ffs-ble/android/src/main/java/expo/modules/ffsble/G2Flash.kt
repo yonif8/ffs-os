@@ -574,7 +574,18 @@ object G2Flash {
     val goldenEventBus27 = GoldenVector(
         "c61c570f7f409fb98c4fa8237f974f15b783e7b9b6bcb17d5a305df99dae016d",
         3641959L, 0x007B1247L, true,
-        "event bus: g2_emit + gesture tap on sid 0x91 (2.2.7.14) [CURRENT]"
+        "event bus: g2_emit + gesture tap on sid 0x91 (2.2.7.14)"
+    )
+
+    /** 2026-08-22 (S6 gesture INJECTION). goldenEventBus27 plus a "FGES"+code discriminator in the
+     * FXP1 gate (ffs_msgrx_gate.c ffs_ges_inject_hit): a pushed 5-byte frame stashes a gesture code
+     * in bidi_state_t.inject_ges (ffs_dash_rt.c ffs_gesture_inject) and the display tick applies it
+     * via rt_nav_apply — so the host can drive the on-glass UI with no finger. +1052 B over event
+     * bus. Built CI run 32556939005 from ffs/os-takeover. Restore path = goldenStock27. */
+    val goldenGestureInject27 = GoldenVector(
+        "9ad3c2b9c15960250ff4b8d53b14c33fa84292580a6d133e69e85d243ba21e1e",
+        3643011L, 0x007B1663L, true,
+        "gesture inject: FGES frame -> rt_nav_apply (2.2.7.14) [CURRENT]"
     )
 
     /** Every build this driver will consider flashing. Anything else is refused outright. */
@@ -585,7 +596,7 @@ object G2Flash {
         goldenArena27, goldenInk27, goldenGif27, goldenSync27, goldenSyncDiag27,
         goldenTakeover27, goldenNav27, goldenNav27b, goldenApps27, goldenApps27b,
         goldenShell27, goldenBig27, goldenShip27, goldenR1input27, goldenS7sync27,
-        goldenFade27, goldenEvenHubKill27, goldenEventBus27
+        goldenFade27, goldenEvenHubKill27, goldenEventBus27, goldenGestureInject27
     )
 
     /** Look up a build by the SHA-256 of its bytes. Null means "not a known build". */
