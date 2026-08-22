@@ -552,7 +552,18 @@ object G2Flash {
     val goldenFade27 = GoldenVector(
         "7e0b04ac8ecc7232cb030f58a36ffcb29121ff622e84ac54804c4e9900f55aeb",
         3641151L, 0x007B0F1FL, true,
-        "OS takeover + S7 sync + double-tap fade restored (2.2.7.14) [CURRENT]"
+        "OS takeover + S7 sync + double-tap fade restored (2.2.7.14)"
+    )
+
+    /** 2026-08-22 (de-Even Phase 1). goldenFade27 plus KILL EVENHUB: both EvenHub base-page ctors
+     * (list 0xE0 @0x006aa6b0, loading 0x0FFE @0x006aa6a0) redirected to our ffs_dash_rt_ctor, so an
+     * EvenHub page build renders OUR dashboard — EvenHub UI never shows. Two in-place ROM-word
+     * swaps, so ps/progEnd are unchanged from goldenFade27. Built CI run 32545854483 from
+     * ffs/os-takeover. Restore path = goldenStock27. */
+    val goldenEvenHubKill27 = GoldenVector(
+        "643d80a869a39a50756b0fc7da7bc939cc9855fa17bd19936bf71baabc722170",
+        3641151L, 0x007B0F1FL, true,
+        "de-Even P1: EvenHub killed + S7 sync + fade (2.2.7.14) [CURRENT]"
     )
 
     /** Every build this driver will consider flashing. Anything else is refused outright. */
@@ -563,7 +574,7 @@ object G2Flash {
         goldenArena27, goldenInk27, goldenGif27, goldenSync27, goldenSyncDiag27,
         goldenTakeover27, goldenNav27, goldenNav27b, goldenApps27, goldenApps27b,
         goldenShell27, goldenBig27, goldenShip27, goldenR1input27, goldenS7sync27,
-        goldenFade27
+        goldenFade27, goldenEvenHubKill27
     )
 
     /** Look up a build by the SHA-256 of its bytes. Null means "not a known build". */
