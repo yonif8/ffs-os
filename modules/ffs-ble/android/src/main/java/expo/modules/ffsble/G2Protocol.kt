@@ -376,7 +376,15 @@ object G2EvenHub {
             imageContainers = imageContainers,
             listContainers = listContainers
         )
-        return if (rebuild) {
+        // DE-EVEN (2026-08-22): never send CREATE_STARTUP_PAGE. Constructing Even's EvenHub page is
+        // exactly what the firmware-level EvenHub kill faults on (its base-page ctor is redirected),
+        // and our push transport no longer needs that page (page-independent FXP1 route, sid 0x90).
+        // Only a CREATE (cmd 0/subtype 3) constructs the page; a REBUILD (cmd 7) with no page is a
+        // harmless no-op. Downgrading CREATE->REBUILD means the glasses never construct EvenHub, so
+        // they stay on our dashboard and the kill firmware never crashes. Flip SEND_EVENHUB_CREATE
+        // to true only to restore Even's original summon behaviour.
+        val SEND_EVENHUB_CREATE = false
+        return if (rebuild || !SEND_EVENHUB_CREATE) {
             message(G2EvenHubCmd.REBUILD_PAGE, 7, page, magicRandom)
         } else {
             message(G2EvenHubCmd.CREATE_STARTUP_PAGE, 3, page, magicRandom)
