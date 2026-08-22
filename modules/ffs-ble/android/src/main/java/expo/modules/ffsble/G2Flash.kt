@@ -539,7 +539,20 @@ object G2Flash {
     val goldenS7sync27 = GoldenVector(
         "6bbef9e46e0edb5ea99de9eb88633a63b010d167344079ef76edbe0ff8ac079c",
         3641097L, 0x007B0EE9L, true,
-        "OS takeover + S7 cross-lens sync (ABI 3: ctx->frame/seed) (2.2.7.14) [CURRENT]"
+        "OS takeover + S7 cross-lens sync (ABI 3: ctx->frame/seed) (2.2.7.14)"
+    )
+
+    /** 2026-08-22 (fade fix). goldenS7sync27 plus the restored Even-style double-tap sleep: the
+     * dashboard hide is now a 250ms LVGL opacity fade on our lv_layer_top container (hand-built
+     * lv_anim_t at Even's proven field offsets, reusing exec_cb 0x004ec4b4) instead of an instant
+     * opacity toggle. Cosmetic-only patch to ffs_dash_rt.c; no ABI change. Built in CI on the
+     * clang-18 pin (run 32542797341) from ffs/os-takeover; ps 3557884 -> 3641151, payload end
+     * MRAM 0x007B0F1F. selfTestGuard re-derives ps/progEnd, so a mistyped constant fails closed.
+     * Restore path = goldenStock27. */
+    val goldenFade27 = GoldenVector(
+        "7e0b04ac8ecc7232cb030f58a36ffcb29121ff622e84ac54804c4e9900f55aeb",
+        3641151L, 0x007B0F1FL, true,
+        "OS takeover + S7 sync + double-tap fade restored (2.2.7.14) [CURRENT]"
     )
 
     /** Every build this driver will consider flashing. Anything else is refused outright. */
@@ -549,7 +562,8 @@ object G2Flash {
         goldenFfsui, goldenRamexec, goldenLoader, goldenLoader27, goldenV3,
         goldenArena27, goldenInk27, goldenGif27, goldenSync27, goldenSyncDiag27,
         goldenTakeover27, goldenNav27, goldenNav27b, goldenApps27, goldenApps27b,
-        goldenShell27, goldenBig27, goldenShip27, goldenR1input27, goldenS7sync27
+        goldenShell27, goldenBig27, goldenShip27, goldenR1input27, goldenS7sync27,
+        goldenFade27
     )
 
     /** Look up a build by the SHA-256 of its bytes. Null means "not a known build". */

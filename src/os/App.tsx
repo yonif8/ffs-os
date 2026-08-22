@@ -200,7 +200,7 @@ const LOADER_2_2_7_14_URL = `${FW_BASE}/g2_2.2.7.14_loader.bin`;
 // (FXP1 consumed at the transport gate), and S-EYES's left-lens peer readback.
 // 2026-08-21 (Toolkit R1 — S2 input): + long-press delivered to the running app, double-tap
 // system-back with a "Close app?" modal (real 5x7 text). Not the gate — G2Flash.kt allGoldens is.
-const LOADER_2_2_7_14_SHA = "6bbef9e46e0edb5ea99de9eb88633a63b010d167344079ef76edbe0ff8ac079c";
+const LOADER_2_2_7_14_SHA = "7e0b04ac8ecc7232cb030f58a36ffcb29121ff622e84ac54804c4e9900f55aeb";
 // Stock 2.2.7.14, kept as the restore-to-stock escape hatch for the current base.
 const STOCK_2_2_7_14_URL = `${FW_BASE}/g2_2.2.7.14_stock.bin`;
 const STOCK_2_2_7_14_SHA = "0fced0aebcc6c88db6f76dba34f91b805d842a5fc297bfd7fa6d6a34ec83cecb";
