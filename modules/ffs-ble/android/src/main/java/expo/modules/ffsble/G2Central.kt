@@ -2887,14 +2887,23 @@ class G2Central(
     }
 
     /**
-     * LIVE OTA delivery: push a base64 native-code payload to the resident CFW loader over the
-     * evenHub IMAGE channel (service 0xE0). The blob ALREADY begins with the "FXP1" magic
-     * (baked in at build time) and is sent AS-IS -- the CFW strips exactly one FXP1, so a
-     * second prefix would leave "FXP1" as the code's first bytes and `blx` would execute the
-     * magic as garbage instructions (crash -> blank -> reboot).
+     * ⚠️ LEGACY TRANSPORT (quarantined 2026-08-22) — deliver a base64 native-code payload to the
+     * resident CFW loader over the evenHub IMAGE channel (service 0xE0). The blob ALREADY begins
+     * with the "FXP1" magic (baked in at build time) and is sent AS-IS -- the CFW strips exactly
+     * one FXP1, so a second prefix would leave "FXP1" as the code's first bytes and `blx` would
+     * execute the magic as garbage instructions (crash -> blank -> reboot).
      *
-     * This REPLACES the dead svc-0x90 push: local_dispatch keys on inner 16-bit command codes,
-     * not the transport serviceId, so a svc-0x90 message never reached the CFW.
+     * THE OLD DOC HERE WAS INVERTED. It claimed this "REPLACES the dead svc-0x90 push". The
+     * opposite is now true: the CFW's FXP1 transport gate (`ffs_msgrx_gate.c`, S-FIX 2026-08-21)
+     * reassembles a service message and hands it to `cfw_loader_ingest` BEFORE any page exists,
+     * so a plain transport message on sid 0x90 IS the proven, page-independent delivery path
+     * (proven on-glass: reads + a multi-fragment app install, both while sitting on our own
+     * dashboard). This 0xE0 image channel only ever worked because it forced an EvenHub page into
+     * existence to host the bytes; it dies with the EvenHub-page machinery.
+     *
+     * KEEP until the runtime push (usePushAck / notifications / telemetry) is repointed at
+     * [pushToService] (0x90) and that render path is re-proven on-glass. Until then this is the
+     * fallback the app still calls; do NOT delete it yet.
      */
     fun pushPayloadViaImage(base64: String) = post { pushPayloadViaImageLocked(base64) }
 
