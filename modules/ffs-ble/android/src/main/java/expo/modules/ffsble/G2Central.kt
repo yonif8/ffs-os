@@ -1844,39 +1844,21 @@ class G2Central(
         onServiceRaw?.invoke(svc, encodeBase64(payload))
         when (svc) {
             G2ServiceID.EVEN_HUB -> {
-                val gesture = G2EvenHub.parseGesture(payload)
-                if (gesture != null) {
-                    handleGestureLocked(gesture.name, s, gesture.source)
-                    // THE SAME FRAME carries the structured event. Observed on-glass 2026-08-07:
-                    // a temple tap on a declared list arrives as gesture AND as
-                    // Cmd=2 / DevEvent(13) / ListEvent(1){ContainerID=3, ContainerName="ffs-list",
-                    // CurrentSelectItemIndex=1}. Decoding it here (not only in the else branch)
-                    // is what turns "a tap happened" into "the user chose row 1".
-                    G2EvenHub.decodeEvent(payload)?.let { evt ->
-                        log("GLASSES EVENT: ${evt.describe()}")
-                        onGlassesEvent?.invoke(
-                            evt.kind, evt.containerId, evt.containerName,
-                            evt.itemIndex, evt.itemName, evt.eventType, evt.eventSource
-                        )
-                    }
-                    if (dumpInbound) log("EvenHub event fields:\n" + G2EvenHub.describePayload(payload))
-                } else {
-                    // Image-fragment ACKs were handled here for the (quarantined) image-transfer
-                    // path; the bridge no longer streams images. What remains is the return path.
-                    val evt = G2EvenHub.decodeEvent(payload)
-                    if (evt != null) {
-                        // THE RETURN PATH of the hybrid architecture: the glasses owned the
-                        // interaction and are telling us only what the user chose.
-                        log("GLASSES EVENT: ${evt.describe()}")
-                        onGlassesEvent?.invoke(
-                            evt.kind, evt.containerId, evt.containerName,
-                            evt.itemIndex, evt.itemName, evt.eventType, evt.eventSource
-                        )
-                    } else if (dumpInbound) {
-                        // Anything the decoders did not recognise. Silence here is how a new
-                        // message shape stays invisible.
-                        log("EvenHub UNDECODED (${payload.size}B):\n" + G2EvenHub.describePayload(payload))
-                    }
+                // EvenHub (0xE0) GESTURE decode RETIRED 2026-08-22: real touchpad gestures now
+                // ride our OWN FFS inbound event bus (sid 0x91 -> src/os/ffsEvents.ts), proven
+                // on-glass, so the phone no longer turns EvenHub frames into gestures. The old
+                // parseGesture -> handleGestureLocked -> onGesture path is dead (see P3-gesture-
+                // emit-plan.md §7). Non-gesture 0xE0 handling — the structured ListEvent return
+                // path -> onGlassesEvent — is kept until those event types migrate to the bus too.
+                val evt = G2EvenHub.decodeEvent(payload)
+                if (evt != null) {
+                    log("GLASSES EVENT: ${evt.describe()}")
+                    onGlassesEvent?.invoke(
+                        evt.kind, evt.containerId, evt.containerName,
+                        evt.itemIndex, evt.itemName, evt.eventType, evt.eventSource
+                    )
+                } else if (dumpInbound) {
+                    log("EvenHub UNDECODED (${payload.size}B):\n" + G2EvenHub.describePayload(payload))
                 }
             }
             G2ServiceID.G2_SETTING -> {
