@@ -563,7 +563,18 @@ object G2Flash {
     val goldenEvenHubKill27 = GoldenVector(
         "643d80a869a39a50756b0fc7da7bc939cc9855fa17bd19936bf71baabc722170",
         3641151L, 0x007B0F1FL, true,
-        "de-Even P1: EvenHub killed + S7 sync + fade (2.2.7.14) [CURRENT]"
+        "de-Even P1: EvenHub killed + S7 sync + fade (2.2.7.14)"
+    )
+
+    /** 2026-08-22 (S6 inbound event bus). goldenEvenHubKill27 plus the FFS inbound event bus:
+     * g2_emit (g2_api ABI 4) + ffs_event_emit send on sid 0x91, and ffs_gesture_tap trampolines
+     * the recognizer seam @0x00443fb0 so real touchpad gestures emit FFS_EVT_SYS_GESTURE on 0x91
+     * (master lens only). +808 B over fade (g2_emit 594 + tap 184 + wiring). Built CI run
+     * 32554047620 from ffs/os-takeover. Restore path = goldenStock27. */
+    val goldenEventBus27 = GoldenVector(
+        "c61c570f7f409fb98c4fa8237f974f15b783e7b9b6bcb17d5a305df99dae016d",
+        3641959L, 0x007B1247L, true,
+        "event bus: g2_emit + gesture tap on sid 0x91 (2.2.7.14) [CURRENT]"
     )
 
     /** Every build this driver will consider flashing. Anything else is refused outright. */
@@ -574,7 +585,7 @@ object G2Flash {
         goldenArena27, goldenInk27, goldenGif27, goldenSync27, goldenSyncDiag27,
         goldenTakeover27, goldenNav27, goldenNav27b, goldenApps27, goldenApps27b,
         goldenShell27, goldenBig27, goldenShip27, goldenR1input27, goldenS7sync27,
-        goldenFade27, goldenEvenHubKill27
+        goldenFade27, goldenEvenHubKill27, goldenEventBus27
     )
 
     /** Look up a build by the SHA-256 of its bytes. Null means "not a known build". */
