@@ -24,6 +24,7 @@ import { Link } from "./status/Link";
 import { Device, parseCfw } from "./status/Device";
 import { ActivityLog } from "./status/ActivityLog";
 import { MicLight, type MicAlert } from "./status/MicLight";
+import { Flash } from "./status/Flash";
 
 // Read the REAL shipped version rather than a hand-maintained copy (a hardcoded string had
 // drifted three releases behind app.json, so telemetry reported the wrong build).
@@ -161,6 +162,7 @@ function AppInner() {
           onConnect={() => sup.reconnect()}
           onDisconnect={() => sup.disconnect()}
         />
+        <Flash />
         <Device deviceInfo={bt.deviceInfo} cfwSeen={cfwSeen} />
         <ActivityLog />
         <MicLight alert={micAlert} onDismiss={() => setMicAlert(null)} />
