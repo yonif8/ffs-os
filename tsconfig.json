@@ -8,5 +8,7 @@
   // drown out real type errors in app code. Run the tests with `bun test src/sdk` instead.
   // "legacy" is quarantined phone-OS code (see docs/APK-CLEANUP-PLAN.md) — kept for the
   // on-glass parity record but out of the build, so it is neither type-checked nor bundled.
-  "exclude": ["legacy", "**/__tests__/**", "**/*.test.ts", "**/*.test.tsx"]
+  // "src/data" is retired data-in; all of it moved to legacy/ except sources/weather.ts, which
+  // another session was mid-edit on — excluded here rather than moved under its uncommitted change.
+  "exclude": ["legacy", "src/data", "**/__tests__/**", "**/*.test.ts", "**/*.test.tsx"]
 }

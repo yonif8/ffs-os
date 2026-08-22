@@ -59,7 +59,8 @@ export function startListening(): () => void {
   console.log("[fbshot] armed (onServiceRaw sid 0x30)");
   unsub?.();
   reset();
-  unsub = FfsBle.addListener("onServiceRaw", onServicePayload);
+  const sub = FfsBle.addListener("onServiceRaw", onServicePayload);
+  unsub = () => sub.remove();
   return () => { unsub?.(); unsub = null; };
 }
 

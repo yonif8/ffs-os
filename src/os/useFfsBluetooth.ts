@@ -14,7 +14,6 @@ import FfsBle, {
   type G2Side,
   type G2ConnectSide,
   type G2GestureName,
-  type R1GestureName,
   type OnDeviceFoundEvent,
 } from "../../modules/ffs-ble";
 
@@ -44,16 +43,13 @@ export interface FfsGlassesSession {
   /** Discovered lenses (deduped by side), newest RSSI wins. */
   devices: OnDeviceFoundEvent[];
   /**
-   * Most recent decoded gesture (for the launcher's input routing). Since FUT-233
-   * this can come from the R1 ring as well as the glasses' touchpads, so it carries
-   * `device`; `gesture` is the raw device-native name (use `toNavGesture` to collapse
-   * it to the nav vocabulary).
+   * Most recent decoded touchpad gesture (activity-log / debug only — the on-glass OS
+   * owns input natively now). `gesture` is the raw device-native name.
    */
   lastGesture:
     | {
-        gesture: G2GestureName | R1GestureName;
-        side: G2Side | "ring";
-        device: "glasses" | "ring";
+        gesture: G2GestureName;
+        side: G2Side;
         at: number;
       }
     | null;
@@ -66,8 +62,6 @@ export interface FfsGlassesSession {
   connect: () => void;
   connectSide: (side: G2ConnectSide) => void;
   disconnect: () => void;
-  showText: (text: string) => void;
-  showImage: () => void;
   /** Ask the glasses for real battery + firmware version (answer lands in deviceInfo). */
   requestDeviceInfo: () => void;
 }
@@ -119,7 +113,6 @@ export function useFfsBluetooth(options: { autoScan?: boolean } = {}): FfsGlasse
         setLastGesture({
           gesture: g.gesture,
           side: g.side,
-          device: g.device,
           at: Date.now(),
         });
       }),
@@ -157,8 +150,6 @@ export function useFfsBluetooth(options: { autoScan?: boolean } = {}): FfsGlasse
     setPairReady(false);
     setSides({ L: false, R: false });
   }, []);
-  const showText = useCallback((text: string) => FfsBle.showText(text), []);
-  const showImage = useCallback(() => FfsBle.showImage(), []);
   const requestDeviceInfo = useCallback(() => FfsBle.requestDeviceInfo(), []);
 
   const state = useMemo<FfsLinkState>(() => {
@@ -180,8 +171,6 @@ export function useFfsBluetooth(options: { autoScan?: boolean } = {}): FfsGlasse
     connect,
     connectSide,
     disconnect,
-    showText,
-    showImage,
     requestDeviceInfo,
   };
 }
