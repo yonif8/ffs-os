@@ -155,18 +155,21 @@ const SYS_TYPE_NAME: Record<number, string> = {
 
 /** A short readable one-liner for an event, for the activity log. */
 export function describeFfsEvent(evt: FfsEvent): string {
+  // flags bit0 = which physical lens the event originated on (the master stamps it): R=master/right,
+  // L=slave/left relayed over the peer link. Surfaced so left-vs-right input is observable in the log.
+  const lens = evt.flags & FFS_EVT_F_LENS_R ? "R" : "L";
   if (evt.src === FFS_EVT_SRC_SYS) {
     const typeName = SYS_TYPE_NAME[evt.type] ?? `0x${evt.type.toString(16)}`;
     if (evt.type === FFS_EVT_SYS_GESTURE) {
       const g = decodeGesture(evt);
       if (g) {
         const name = GESTURE_NAME[g.code] ?? "?";
-        return `src=0 type=GESTURE code=0x${g.code.toString(16)}(${name}) x=${g.x} y=${g.y} seq=${evt.seq}`;
+        return `src=0 type=GESTURE code=0x${g.code.toString(16)}(${name}) x=${g.x} y=${g.y} lens=${lens} seq=${evt.seq}`;
       }
     }
-    return `src=0 type=${typeName} len=${evt.payload.length} seq=${evt.seq}`;
+    return `src=0 type=${typeName} len=${evt.payload.length} lens=${lens} seq=${evt.seq}`;
   }
-  return `src=${evt.src} type=0x${evt.type.toString(16)} len=${evt.payload.length} seq=${evt.seq}`;
+  return `src=${evt.src} type=0x${evt.type.toString(16)} len=${evt.payload.length} lens=${lens} seq=${evt.seq}`;
 }
 
 // ── Dispatch ───────────────────────────────────────────────────────────────
