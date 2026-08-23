@@ -612,7 +612,18 @@ object G2Flash {
     val goldenWake27 = GoldenVector(
         "42e76a71b688e03291431410ab1483a9e86164dc79eb79f939eb8ba7a4674889",
         3646255L, 0x007B230FL, true,
-        "cold-wake: FWAK -> RequestDisplayStartUp(1) (2.2.7.14) [CURRENT]"
+        "cold-wake: FWAK -> RequestDisplayStartUp(1) (2.2.7.14)"
+    )
+
+    /** 2026-08-23 — SWIRL-FREE MIC + long-press→0x91 proven on-glass. goldenWake27 plus the FMIC
+     * mic gate (`AUDM_appAcquire`) that opens the mic without the audio-swirl artifact, and the
+     * long-press gesture emitting on sid 0x91. Built CI from ffs/os-takeover; ps 3557884 -> 3646435,
+     * payload end MRAM 0x007B23C3. selfTestGuard re-derives ps/progEnd, so a mistyped constant here
+     * fails closed. Restore path = goldenStock27. */
+    val goldenFmic27 = GoldenVector(
+        "1d9df8374decf5fea792b0adebc12da953a24212fd47ce4ca0e1fb4aadead8eb",
+        3646435L, 0x007B23C3L, true,
+        "swirl-free mic (FMIC/AUDM_appAcquire) + long-press-0x91 (2.2.7.14) [CURRENT]"
     )
 
     val allGoldens: List<GoldenVector> = listOf(
@@ -623,7 +634,7 @@ object G2Flash {
         goldenTakeover27, goldenNav27, goldenNav27b, goldenApps27, goldenApps27b,
         goldenShell27, goldenBig27, goldenShip27, goldenR1input27, goldenS7sync27,
         goldenFade27, goldenEvenHubKill27, goldenEventBus27, goldenGestureInject27,
-        goldenSyncPaint27, goldenWake27
+        goldenSyncPaint27, goldenWake27, goldenFmic27
     )
 
     /** Look up a build by the SHA-256 of its bytes. Null means "not a known build". */
