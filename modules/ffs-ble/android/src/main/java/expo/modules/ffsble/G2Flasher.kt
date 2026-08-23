@@ -115,6 +115,7 @@ class G2Flasher(
         urlStr: String,
         expectedSha256: String,
         dryRun: Boolean,
+        allowUnknownGolden: Boolean,
         onFinished: () -> Unit
     ) {
         if (thread?.isAlive == true) {
@@ -123,7 +124,7 @@ class G2Flasher(
         }
         val t = Thread({
             try {
-                run(targets, urlStr, expectedSha256, dryRun)
+                run(targets, urlStr, expectedSha256, dryRun, allowUnknownGolden)
             } catch (e: Throwable) {
                 // Never let this thread die silently -- an unexplained stop mid-flash is the
                 // worst possible state to leave the operator guessing about.
@@ -137,7 +138,7 @@ class G2Flasher(
         t.start()
     }
 
-    private fun run(targets: List<Target>, urlStr: String, expectedSha256: String, dryRun: Boolean) {
+    private fun run(targets: List<Target>, urlStr: String, expectedSha256: String, dryRun: Boolean, allowUnknownGolden: Boolean) {
         progress(if (dryRun) "validating (dry-run, no writes)..." else "preparing flash...", 0.02)
 
         // ---- 1. download ----------------------------------------------------------------
@@ -177,26 +178,44 @@ class G2Flasher(
         }
 
         // ---- 5. known build? ------------------------------------------------------------
+        // The golden allowlist is a CONVENIENCE gate, not the safety boundary — the SHA match
+        // (step 2: we flash exactly the bytes whose SHA the operator passed) and the MRAM
+        // brick-guard (step 4) are. Requiring every build to be pre-registered here coupled
+        // firmware iteration to an APK rebuild, which contradicts "flashing is free". So an
+        // explicit operator override (FLASH --ez allowUnknownGolden true) flashes a SHA-verified,
+        // brick-guard-passing image WITHOUT pre-registration. Default stays strict.
         val gv = G2Flash.goldenFor(sha)
         if (gv == null) {
+            if (!allowUnknownGolden) {
+                progress(
+                    "not a known golden build -- refusing. Pass allowUnknownGolden=true to flash a " +
+                        "SHA-verified image without pre-registering it. sha=$sha",
+                    0.0, done = true, ok = false
+                )
+                return
+            }
             progress(
-                "not a known golden build -- refusing. sha=$sha", 0.0, done = true, ok = false
+                String.format(
+                    "⚠ UNKNOWN golden -- proceeding on SHA-match + brick-guard only " +
+                        "(allowUnknownGolden). prog_end 0x%08x, %d KB under ceiling.",
+                    g.progEnd, (G2Flash.APP_MAX_END - g.progEnd) / 1024
+                ),
+                0.18
             )
-            return
+        } else {
+            // ---- 6. is the guard itself still working? ----------------------------------
+            val selfTest = G2Flash.selfTestGuard(img, gv)
+            if (selfTest != null) {
+                progress("SELF-TEST FAILED: $selfTest -- refusing", 0.0, done = true, ok = false); return
+            }
+            progress(
+                String.format(
+                    "guard + self-test PASSED: %s (prog_end 0x%08x, %d KB under ceiling)",
+                    gv.label, g.progEnd, (G2Flash.APP_MAX_END - g.progEnd) / 1024
+                ),
+                0.18
+            )
         }
-
-        // ---- 6. is the guard itself still working? --------------------------------------
-        val selfTest = G2Flash.selfTestGuard(img, gv)
-        if (selfTest != null) {
-            progress("SELF-TEST FAILED: $selfTest -- refusing", 0.0, done = true, ok = false); return
-        }
-        progress(
-            String.format(
-                "guard + self-test PASSED: %s (prog_end 0x%08x, %d KB under ceiling)",
-                gv.label, g.progEnd, (G2Flash.APP_MAX_END - g.progEnd) / 1024
-            ),
-            0.18
-        )
 
         // ---- 7. channels ----------------------------------------------------------------
         if (targets.isEmpty()) {

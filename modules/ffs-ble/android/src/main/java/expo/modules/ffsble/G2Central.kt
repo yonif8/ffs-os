@@ -2506,7 +2506,7 @@ class G2Central(
      * characteristic and be lost — which presents as a begin-ack timeout and looks exactly like
      * a dead OTA channel.
      */
-    fun startCfwFlash(urlStr: String, expectedSha256: String, dryRun: Boolean) = post {
+    fun startCfwFlash(urlStr: String, expectedSha256: String, dryRun: Boolean, allowUnknownGolden: Boolean = false) = post {
         if (flasher.active) {
             log("startCfwFlash ignored -- a flash is already running")
             return@post
@@ -2548,7 +2548,7 @@ class G2Central(
         // Let the CCCD writes land before the first ack can arrive (iOS sleeps 2.5s here).
         log("startCfwFlash: ${targets.size} lens(es) ready, dryRun=$dryRun -- settling subscriptions")
         schedule(2500) {
-            flasher.start(targets, urlStr, expectedSha256, dryRun) {
+            flasher.start(targets, urlStr, expectedSha256, dryRun, allowUnknownGolden) {
                 // Back on the flasher's thread; hop home before touching driver state.
                 post {
                     log("flash finished -- restoring session")

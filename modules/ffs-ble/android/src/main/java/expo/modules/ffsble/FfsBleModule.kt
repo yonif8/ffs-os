@@ -414,11 +414,15 @@ class FfsBleModule : Module() {
             val url = intent.getStringExtra("url") ?: return
             val sha = intent.getStringExtra("sha") ?: return
             val dry = intent.getBooleanExtra("dry", true)
+            // Convenience override: flash a SHA-verified, brick-guard-passing image whose golden
+            // isn't pre-registered in G2Flash. Decouples firmware iteration from an APK rebuild.
+            // SHA-match + MRAM brick-guard still apply; only the known-golden allowlist is waived.
+            val allowUnknownGolden = intent.getBooleanExtra("allowUnknownGolden", false)
             sendEvent(
               "onLog",
-              mapOf("message" to "[android] debug flash request: dry=$dry sha=${sha.take(12)}... url=$url")
+              mapOf("message" to "[android] debug flash request: dry=$dry allowUnknownGolden=$allowUnknownGolden sha=${sha.take(12)}... url=$url")
             )
-            ensureCentral()?.startCfwFlash(url, sha, dry)
+            ensureCentral()?.startCfwFlash(url, sha, dry, allowUnknownGolden)
           }
           "connect" -> ensureCentral()?.connectPair()
           // Push an FXP1-framed native payload to the resident CFW loader. This is what makes

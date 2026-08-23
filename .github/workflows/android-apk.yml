@@ -1,0 +1,70 @@
+name: Android APK (debug)
+
+# Builds the debug APK in CI and uploads it as an artifact to `adb install`.
+#
+# WHY: the fast APK loop used to be local (Windows box -> adb), but gradle's JVM on the dev box
+# cannot always see the Android SDK (it lives only inside the bash sandbox's filesystem view), so
+# a local `assembleDebug` fails with "SDK location not found". CI has a real SDK. This decouples
+# getting a new APK onto the phone from the local build environment.
+#
+# On-demand only (workflow_dispatch): an APK build is needed when the NATIVE/Kotlin side changes
+# (e.g. the flasher, the wire protocol). JS-only changes ship via the embedded bundle on the
+# existing local install; they don't need this.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache bun install cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install JS deps
+        run: bun install
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Gradle (with cache)
+        uses: gradle/actions/setup-gradle@v4
+
+      # android/ is gitignored and generated, so CI produces it the same way the local box does.
+      - name: Expo prebuild (generate native android project)
+        run: npx expo prebuild -p android --no-install --clean
+
+      # Debug build embeds a fresh JS bundle (config plugin withEmbedDebugBundle). buildArchs is
+      # pinned to armeabi-v7a in app.json for the 32-bit test phone.
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew :app:assembleDebug --console=plain
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
