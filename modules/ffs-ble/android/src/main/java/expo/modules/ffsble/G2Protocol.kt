@@ -1342,12 +1342,29 @@ object G2Setting {
                             val o = 24 + runSlot * 2
                             (ap[o].toInt() and 0xFF) or ((ap[o + 1].toInt() and 0xFF) shl 8)
                         } else 0
+                        // ★ skew= is the ONE number that says whether the two lenses actually
+                        // rendered together. A BLE screenshot is one eye (the master answers
+                        // for the pair), so until this existed "are they synced?" could only be
+                        // answered by the wearer looking through both lenses -- a perception
+                        // judgement at a tens-of-ms threshold, not a measurement.
+                        //
+                        // It is the WORST |skew| in ms since boot, saturating at 255, measured
+                        // by the slave reporting the clock reading at which it actually
+                        // revealed and the master expressing that in its own time through the
+                        // NTP-style offset (g2flash/patches/ffs_syncpaint.h).
+                        //
+                        // ⚠️ The valid bit matters: 0 ms means "perfectly locked" and no
+                        // measurement ALSO means 0, and those two are opposite verdicts. `-`
+                        // is printed when nothing has been measured yet.
+                        val skewSeen = (ap[6].toInt() and 0x10) != 0
+                        val skewMax = ap[23].toInt() and 0xFF
                         sb.append(
                             String.format(
-                                " dash=%s src=%s live=%d%s apps=%d run=%d fgapp=%d",
+                                " dash=%s src=%s live=%d%s apps=%d run=%d fgapp=%d skew=%s",
                                 dashName, srcName, (b7 shr 6) and 1,
                                 if ((b7 shr 7) and 1 == 1) " HIDDEN" else "",
-                                b7 and 0x0F, runSlot, fgApp
+                                b7 and 0x0F, runSlot, fgApp,
+                                if (skewSeen) "${skewMax}ms" else "-"
                             )
                         )
                     }
