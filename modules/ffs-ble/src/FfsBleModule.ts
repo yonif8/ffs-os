@@ -56,6 +56,63 @@ export interface OnServicesDiscoveredEvent {
  */
 export type OnPairReadyEvent = Record<string, never>;
 
+// ---- S-VOICE payload types ------------------------------------------------
+
+/**
+ * The whole of what the phone will say out loud about a microphone session: counts, clock
+ * readings and queue depths. ⛔ There is deliberately no field here carrying audio, and adding
+ * one would defeat the native privacy guard that keeps the recording off this bridge.
+ */
+export interface VoiceStatus {
+  running: boolean;
+  sessionId: string;
+  /** 205-byte notifications accepted. */
+  packets: number;
+  /** Dropped as the other lens's copy — BOTH lenses notify the same audio. */
+  duplicates: number;
+  /** Notifications that were not 205 bytes. */
+  malformed: number;
+  /** 10 ms frames synthesised by packet-loss concealment to bridge a small gap. */
+  concealedFrames: number;
+  /** Gaps too large to conceal. Audio is genuinely missing here. */
+  resyncs: number;
+  /** Packets the firmware dropped, counted from the mod-256 counter at byte 204. */
+  lostPackets: number;
+  /** Packets the decode queue had to evict because it was full. */
+  decodeOverruns: number;
+  /** Packets the archive queue had to evict. Non-zero means the master has holes. */
+  archiveOverruns: number;
+  archivedPackets: number;
+  /** Clips waiting for a transcript. Grows forever while no provider is configured — by design. */
+  sttPending: number;
+  /** "none" | "mock" | the configured provider's display name. */
+  sttProvider: string;
+  /** False means liblc3 failed to load — audio would be archived but never decoded. */
+  decoderAvailable: boolean;
+}
+
+export interface VoiceSearchHit {
+  sessionId: string;
+  /** Offset from the start of the session. */
+  startMs: number;
+  endMs: number;
+  text: string;
+  /** `text` with the matched terms wrapped in `[` `]`. */
+  snippet: string;
+  /** Which provider produced this transcript — `"mock"` is never mistaken for real. */
+  provider: string;
+  confidence: number | null;
+  sessionStartedAt: number;
+}
+
+export interface VoiceSessionInfo {
+  id: string;
+  startedAt: number;
+  endedAt: number | null;
+  packets: number;
+  durationMs: number;
+}
+
 export interface OnNotifyEvent {
   /** Base64-encoded notification payload. */
   base64: string;
@@ -406,6 +463,47 @@ interface FfsBleNativeModule {
    * tap | double_tap | swipe_up | swipe_down.
    */
   simulateGesture(device: "glasses", gesture: string): void;
+
+  // ---- S-VOICE ------------------------------------------------------------
+  //
+  // ⛔ NO AUDIO CROSSES THIS BRIDGE. The microphone stream is diverted in native code
+  // (`G2Central.onAudioPacket`) and decoded, archived and transcribed there. What these
+  // functions return is counts, session ids, and — only in answer to a query the wearer
+  // typed — transcript text. See `docs/S-VOICE-PIPELINE.md`.
+
+  /**
+   * Start a capture session; returns the session id.
+   *
+   * ⚠️ This starts the PHONE side. Opening the glasses' microphone is the on-glass stream's
+   * job, and the glasses can open it themselves (see `onMicUnexpected`) — so a running
+   * session with zero packets is a normal, meaningful state, not a bug.
+   */
+  voiceStart(): string;
+
+  /** Stop capturing. The upload queue keeps draining — the last clips are still owed. */
+  voiceStop(): void;
+
+  /** Counts and milliseconds only. Safe to render and safe to log. */
+  voiceStatus(): VoiceStatus;
+
+  /** Full-text search over the permanent transcript archive. Nothing is ever deleted. */
+  voiceSearch(query: string, limit: number): VoiceSearchHit[];
+
+  /** Every session ever recorded, newest first. */
+  voiceSessions(limit: number): VoiceSessionInfo[];
+
+  /**
+   * Install the STT provider configuration (JSON — the shape is documented in
+   * `docs/S-VOICE-STT-PROVIDER.md`). Pass `""` to clear it back to
+   * archive-but-do-not-transcribe.
+   *
+   * ⛔ This carries a CREDENTIAL. It is written to app-private storage, is never logged, is
+   * never echoed back by `voiceGetSttConfig`, and must never be committed to this repo.
+   */
+  voiceSetSttConfig(json: string): boolean;
+
+  /** A human-readable summary of the config in force, with header values REDACTED. */
+  voiceGetSttConfig(): string;
 
   /**
    * Tiny persistent key/value store (FUT-236) — used so the calibration run knows

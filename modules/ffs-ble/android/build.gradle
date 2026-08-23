@@ -22,6 +22,47 @@ android {
   defaultConfig {
     versionCode 1
     versionName '0.1.0'
+
+    // S-VOICE: liblc3 (Apache-2.0, vendored under src/main/cpp/third_party) behind our own JNI
+    // shim. Android has NO usable LC3 codec reachable from app code -- there is no `audio/lc3`
+    // MediaFormat MIME and no ENCODING_LC3; LC3 lives inside the LE Audio stack. Bundling the
+    // codec is not a preference, it is the only option.
+    //
+    // Pure C, so nothing links an STL.
+    externalNativeBuild {
+      cmake {
+        arguments '-DANDROID_STL=none'
+      }
+    }
+    ndk {
+      // The dev phone is a 32-bit-only ROM (see scripts/android-env.ps1); ship both so a build
+      // that leaves this machine is not silently armeabi-only.
+      abiFilters 'arm64-v8a', 'armeabi-v7a'
+    }
+  }
+
+  externalNativeBuild {
+    cmake {
+      path 'src/main/cpp/CMakeLists.txt'
+      version '3.22.1'
+    }
+  }
+
+  testOptions {
+    unitTests {
+      includeAndroidResources = true
+      all {
+        // The plain-JVM tests in src/test get no `.so` from the APK, so the REAL liblc3 is
+        // reached through a HOST build of the same shim (`bash tools/lc3fixture/build-jni-host.sh`
+        // -> tools/lc3fixture/out/ffslc3.dll, gitignored). When it is absent the decoder-backed
+        // tests skip and the pure-logic ones still run -- so a fresh clone is green, and this box
+        // additionally proves the actual codec.
+        def hostLc3 = project.file('../../../tools/lc3fixture/out/ffslc3.dll')
+        if (hostLc3.exists()) {
+          systemProperty 'ffs.lc3.library', hostLc3.absolutePath
+        }
+      }
+    }
   }
 }
 
@@ -30,4 +71,19 @@ dependencies {
   // G2Protocol.kt is pure byte manipulation, so its golden vectors run in seconds via
   // `./gradlew :ffs-ble:test`. See G2ProtocolTest.kt for why those vectors matter.
   testImplementation 'junit:junit:4.13.2'
+
+  // LIVE (word-by-word) STT needs a WEBSOCKET, and HttpURLConnection has none. React Native
+  // already puts OkHttp 4.9.2 on this app's runtime classpath, so we compile against it and
+  // ship NOTHING extra -- `compileOnly`, not `implementation`. LiveSttStream.available checks
+  // for the class at runtime and degrades to the durable batch path if a future RN drops it,
+  // which is the concrete answer to the version-drift objection in HttpSttProvider's header.
+  compileOnly 'com.squareup.okhttp3:okhttp:4.9.2'
+  testImplementation 'com.squareup.okhttp3:okhttp:4.9.2'
+
+  // S-VOICE: the transcript archive is a real SQLite database with a real FTS index, and
+  // "full-text search finds the sentence" is the definition of done -- so the test has to
+  // exercise SQLite itself, not a stand-in. Robolectric supplies android.database.sqlite on
+  // the desktop JVM, which keeps the whole archive layer verifiable without a phone.
+  testImplementation 'org.robolectric:robolectric:4.13'
+  testImplementation 'androidx.test:core:1.6.1'
 }

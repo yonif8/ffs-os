@@ -40,6 +40,53 @@ class FfsBleModule : Module() {
     appContext.reactContext?.getSharedPreferences("ffs_prefs", Context.MODE_PRIVATE)
   }
 
+  /**
+   * S-VOICE. Built lazily: it opens a SQLite database and a file archive, and an app that never
+   * captures should pay for neither.
+   *
+   * ⛔ Everything audio-shaped stops inside this object. The functions below hand JavaScript
+   * COUNTS, session ids, and -- only when the wearer asks for it by typing a query -- transcript
+   * text. Never a sample, never a packet, never a base64 blob.
+   */
+  private val voice: expo.modules.ffsble.voice.VoiceService? by lazy {
+    val ctx = appContext.reactContext ?: return@lazy null
+    // Named argument deliberately: the last parameter is the decoder factory, so a trailing
+    // lambda here would silently bind to the wrong seam.
+    expo.modules.ffsble.voice.VoiceService(
+      context = ctx,
+      // BOTH sinks on purpose. The JS event is what the app UI shows; the logcat line is what
+      // is readable from a shell during an on-glass test, and a pipeline whose only voice is a
+      // JS event is a pipeline you cannot debug when JS is not attached. Counts only, either
+      // way -- VoiceService and its parts never put a transcript in a log line.
+      log = { message ->
+        android.util.Log.i(VOICE_TAG, message)
+        sendEvent("onLog", mapOf("message" to message))
+      }
+    )
+  }
+
+  /**
+   * LIVE TRANSCRIPTION ON GLASS. Mirrors each transcript that lands onto the on-glass reader
+   * app (`g2flash/apps/livetext.c`, app_id 14) over the FFSC data channel, so the whole loop
+   * is glasses -> phone -> STT -> phone -> glasses with no PC in it.
+   *
+   * ⛔ The sink logs COUNTS only; the words go to the face and to the index, nowhere else.
+   */
+  private val liveText: expo.modules.ffsble.voice.LiveTextSink by lazy {
+    expo.modules.ffsble.voice.LiveTextSink(
+      send = { frame ->
+        ensureCentral()?.pushToService(
+          expo.modules.ffsble.voice.FfscFrame.SID_FXP1,
+          android.util.Base64.encodeToString(frame, android.util.Base64.NO_WRAP)
+        )
+      },
+      log = { message ->
+        android.util.Log.i(VOICE_TAG, message)
+        sendEvent("onLog", mapOf("message" to message))
+      }
+    )
+  }
+
   override fun definition() = ModuleDefinition {
     Name("FfsBleModule")
 
@@ -142,6 +189,92 @@ class FfsBleModule : Module() {
       ensureCentral()?.querySettings(brightnessOnly)
     }
 
+    // ---- S-VOICE: capture -> archive -> transcribe -> search ----
+    //
+    // ⛔ The ONLY audio-adjacent things that cross this bridge are counts, session ids, and
+    // transcript text the wearer asked for by typing a query. See docs/S-VOICE-PIPELINE.md.
+
+    /**
+     * Start capturing. Returns the session id. This starts the PHONE side only -- opening the
+     * glasses' microphone is the on-glass stream's job, and the glasses can also open it on
+     * their own (`onMicUnexpected`).
+     */
+    Function("voiceStart") { ensureCentral(); voice?.start() ?: "" }
+
+    /** Stop capturing. The upload queue keeps running -- the last clips are still owed. */
+    Function("voiceStop") { voice?.stop() }
+
+    /** Counts and milliseconds only. Safe to render, safe to log. */
+    Function("voiceStatus") { voice?.status() ?: mapOf("running" to false) }
+
+    /**
+     * Full-text search over the permanent archive. Returns the matching transcript spans --
+     * this is the wearer asking to read their own archive, which is the whole point of it.
+     */
+    Function("voiceSearch") { query: String, limit: Int ->
+      (voice?.search(query, limit) ?: emptyList()).map { hit ->
+        mapOf(
+          "sessionId" to hit.segment.sessionId,
+          "startMs" to hit.segment.startMs,
+          "endMs" to hit.segment.endMs,
+          "text" to hit.segment.text,
+          "snippet" to hit.snippet,
+          "provider" to hit.segment.provider,
+          "confidence" to hit.segment.confidence,
+          "sessionStartedAt" to hit.sessionStartedAtEpochMs
+        )
+      }
+    }
+
+    /** Every session ever recorded, newest first. Nothing is ever deleted. */
+    Function("voiceSessions") { limit: Int ->
+      (voice?.sessions(limit) ?: emptyList()).map { s ->
+        mapOf(
+          "id" to s.id,
+          "startedAt" to s.startedAtEpochMs,
+          "endedAt" to s.endedAtEpochMs,
+          "packets" to s.packets,
+          "durationMs" to s.durationMs
+        )
+      }
+    }
+
+    /**
+     * Write the STT provider configuration (a JSON document -- see docs/S-VOICE-STT-PROVIDER.md).
+     *
+     * ⛔ This is where a credential enters the app. It is written to app-private storage and is
+     * NEVER logged, never echoed back by `voiceGetSttConfig`, and never committed. Passing an
+     * empty string clears the configuration back to "archive but do not transcribe".
+     */
+    Function("voiceSetSttConfig") { json: String ->
+      val v = voice ?: return@Function false
+      v.configStore.save(expo.modules.ffsble.voice.SttConfig.fromJson(json))
+      true
+    }
+
+    /** The configuration in force, with every header value REDACTED. */
+    Function("voiceGetSttConfig") { voice?.configStore?.load()?.toString() ?: "none" }
+
+    /**
+     * Which arm to capture from. Defaults to "L".
+     *
+     * ★ The RIGHT arm's encoder runs and ships ~20 packets/s of statistically pure noise
+     * (`[proven]` on hardware 2026-08-23), so a right-arm capture looks perfectly healthy and
+     * decodes to nothing. Read `VoiceService.DEFAULT_CAPTURE_SIDE` before setting this to "R".
+     */
+    Function("voiceSetCaptureSide") { side: String -> voice?.captureSide = side; side }
+
+    /**
+     * ⛔ DEBUG: copy a session's raw master (and a decoded WAV) to the app's EXTERNAL files
+     * directory so it can be `adb pull`ed. This moves a RECORDING somewhere less private, on
+     * purpose and only when asked. Pass "" for the most recent session. Returns the paths.
+     */
+    Function("voiceExport") { sessionId: String ->
+      val v = voice
+      val id = if (sessionId.isNotBlank()) sessionId else v?.latestSessionId()
+      if (v == null || id == null) emptyList() else v.exportSession(id)
+    }
+
     // ---- test affordance ----
 
     /**
@@ -235,6 +368,31 @@ class FfsBleModule : Module() {
    * reliably track the consuming app's variant). A release build never registers it and there
    * is nothing to reach.
    */
+  /**
+   * Say something about a VOICE command, on BOTH channels.
+   *
+   * ⚠️ `sendEvent` alone is not enough for this one. Every other adb affordance here is fired by
+   * somebody already watching the app; a VOICE capture is fired by somebody who then has to know
+   * WHEN it is safe to `adb pull`, and the JS bridge is exactly the part that may not be running
+   * (no React context yet, a reloading bundle, the app backgrounded). So the same line also goes
+   * to logcat under a fixed tag, which needs nothing but adb:
+   *
+   * ```sh
+   *   adb logcat -s FFSVOICE:V
+   * ```
+   *
+   * ⛔ PRIVACY: callers pass counts, ids and paths. No audio, no PCM, no transcript text ever
+   * reaches this method -- see VoiceService's logging contract.
+   */
+  private fun voiceReport(message: String) {
+    android.util.Log.i(VOICE_TAG, message)
+    try {
+      sendEvent("onLog", mapOf("message" to "[android] $message"))
+    } catch (_: Throwable) {
+      // No React context / no listener. The logcat line above is the one that always lands.
+    }
+  }
+
   private fun registerSimulationReceiver() {
     val context = appContext.reactContext ?: return
     val debuggable =
@@ -371,6 +529,75 @@ class FfsBleModule : Module() {
             val cmd = intent.getStringExtra("cmd") ?: "boot"
             sendEvent("onOsCommand", mapOf("cmd" to cmd))
           }
+          // ⛔ S-VOICE CAPTURE. THIS TURNS ON A MICROPHONE. Debug builds only, off by default,
+          // and every sub-command has to be asked for by name.
+          //
+          //   adb shell am broadcast -a com.futurefounders.ffs.VOICE --es cmd start \
+          //     -p com.futurefounders.glassesos
+          //   adb shell am broadcast -a com.futurefounders.ffs.VOICE --es cmd status ...
+          //   adb shell am broadcast -a com.futurefounders.ffs.VOICE --es cmd stop ...
+          //   adb shell am broadcast -a com.futurefounders.ffs.VOICE --es cmd export ...
+          //   adb pull /sdcard/Android/data/com.futurefounders.glassesos/files/voice-export/
+          //
+          // `--es side R` on `start` overrides the left-arm default -- read
+          // VoiceService.DEFAULT_CAPTURE_SIDE before you do, because the right arm ships
+          // healthy-looking noise and it will read as a decoder bug.
+          VOICE_ACTION -> {
+            val v = voice
+            if (v == null) {
+              voiceReport("VOICE: no React context yet")
+            } else when (intent.getStringExtra("cmd") ?: "status") {
+              "start" -> {
+                intent.getStringExtra("side")?.let { v.captureSide = it }
+                ensureCentral()
+                // `--es live 0` captures and archives without painting the words on the face.
+                if (intent.getStringExtra("live") == "0") {
+                  v.onTranscript = null
+                  v.onLiveText = null
+                } else {
+                  liveText.reset()
+                  liveText.start()
+                  // WORD-BY-WORD when a streaming endpoint is configured: revisions replace the
+                  // tail, settled text appends. Fired on the websocket thread -- the sink only
+                  // sets state and wakes its own pusher, so this never blocks the socket.
+                  v.onLiveText = { text, settled ->
+                    if (settled) liveText.commit(text) else liveText.setPending(text)
+                  }
+                  // The durable path still feeds the face when streaming is NOT configured, so
+                  // a phone with only a batch endpoint still shows the words -- a sentence at a
+                  // time instead of a word at a time. With streaming on, the socket has already
+                  // committed the same text and the sink's identical-bytes check drops it.
+                  v.onTranscript = { _, text ->
+                    if (!v.streamingConfigured) liveText.commit(text)
+                  }
+                }
+                val id = v.start()
+                voiceReport("VOICE capture STARTED session=$id side=${v.captureSide} live=${v.onLiveText != null} streaming=${v.streamingConfigured}")
+              }
+              // Wipe the face without touching the archive.
+              "clear" -> {
+                liveText.reset()
+                voiceReport("VOICE livetext cleared")
+              }
+              "stop" -> {
+                v.stop()
+                // After v.stop(), so the socket's last words are on the face before it parks.
+                liveText.stop()
+                voiceReport("VOICE capture stopped -- ${v.status()}")
+              }
+              "status" -> voiceReport("VOICE ${v.status()}")
+              "export" -> {
+                val id = intent.getStringExtra("session") ?: v.latestSessionId()
+                if (id == null) {
+                  voiceReport("VOICE export: no session on disk")
+                } else {
+                  val paths = v.exportSession(id)
+                  voiceReport("VOICE exported ${paths.size} file(s): ${paths.joinToString(" ")}")
+                }
+              }
+              else -> voiceReport("VOICE: cmd must be start|stop|status|export|clear")
+            }
+          }
           // Replay a captured inbound event vector. Synthetic INPUT, real RENDER -- see
           // G2Central.injectInboundEvenHub for exactly what that does and does not prove.
           INJECT_ACTION -> {
@@ -392,6 +619,7 @@ class FfsBleModule : Module() {
       addAction(SETTING_ACTION)
       addAction(OS_ACTION)
       addAction(INJECT_ACTION)
+      addAction(VOICE_ACTION)
       addAction("connect")
     }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -426,6 +654,16 @@ class FfsBleModule : Module() {
     const val OS_ACTION = "com.futurefounders.ffs.OS"
     /** Replay a captured inbound event vector: `--es b64 <payload>`. */
     const val INJECT_ACTION = "com.futurefounders.ffs.INJECT"
+
+    /**
+     * S-VOICE capture control from adb. ⛔ DEBUG BUILDS ONLY (the receiver is only registered
+     * when the app is debuggable) and capture is OFF until this asks for it -- this is a
+     * microphone. See `docs/S-VOICE-PIPELINE.md`.
+     */
+    const val VOICE_ACTION = "com.futurefounders.ffs.VOICE"
+
+    /** Fixed logcat tag for VOICE command feedback -- `adb logcat -s FFSVOICE:V`. */
+    const val VOICE_TAG = "FFSVOICE"
     const val PUSH_ACTION = "com.futurefounders.ffs.PUSH_PAYLOAD"
     const val INFO_ACTION = "com.futurefounders.ffs.DEVICE_INFO"
   }
@@ -454,6 +692,12 @@ class FfsBleModule : Module() {
       sendEvent("onServicesDiscovered", mapOf("side" to side, "characteristics" to charUUIDs))
     }
     c.onPairReady = { sendEvent("onPairReady", emptyMap<String, Any>()) }
+
+    // S-VOICE. ⛔ THE ONE PLACE MICROPHONE AUDIO IS ALLOWED TO GO, and it goes there in NATIVE
+    // code only: never base64, never a log line, never the JS bridge. `submit` is non-blocking
+    // and hands the packet to the decode and archive threads. See G2Central.onAudioPacket and
+    // docs/S-VOICE-PIPELINE.md.
+    c.onAudioPacket = { raw, side -> voice?.submit(raw, side) }
     c.onNotify = { base64, characteristic, side ->
       sendEvent(
         "onNotify",

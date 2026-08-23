@@ -68,3 +68,33 @@ android/app/src/main/assets/index.android.bundle.map
 *.webp
 !assets/**
 !tools/g2sim/**
+
+# ⛔ NO RECORDINGS IN THIS REPO EITHER. IT IS PUBLIC.
+#
+# S-VOICE captures everyone near the wearer, permanently. A leaked photograph is bad; a leaked
+# recording of a conversation is worse, and it cannot be un-published (a force-push does NOT
+# finish the job -- GitHub keeps orphaned blobs fetchable by SHA). Same shape of rule as the
+# image denylist above: deny the whole file type, then except exactly what is safe.
+#
+# The ONLY excepted path holds SYNTHETIC generated signals containing no human voice, reproducible
+# from tools/lc3fixture/. If you are about to add another `!` line for audio, you are about to
+# publish a recording -- keep it in C:\Users\Yoni\Desktop\ffs-glasses-captures\ instead.
+*.wav
+*.g2a
+*.pcm
+*.lc3
+*.opus
+*.m4a
+*.mp3
+*.flac
+*.ogg
+!modules/ffs-ble/android/src/test/resources/voice/**
+
+# Host build output of the LC3 fixture tools (binaries, generated audio).
+tools/lc3fixture/out/
+tools/lc3fixture/build/
+
+# ⛔ STT provider credentials. Config is written at RUNTIME into app-private storage and must
+# never be committed; this catches a stray copy dropped in the tree during development.
+stt-config.json
+**/stt-config.json

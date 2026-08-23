@@ -1595,6 +1595,21 @@ class G2Central(
                     "will be truncated"
             )
         }
+        // S-VOICE: the microphone notifies 205-byte packets ~20 times a second on AUDIO_NOTIFY,
+        // and a notification larger than the ATT payload is FRAGMENTED, not rejected -- the
+        // reassembled result looks like a decoder bug rather than a link problem, which is
+        // exactly the kind of failure that costs days. 247 covers it (205 + 3 ATT bytes with
+        // room to spare); the warning above already fires if we got less.
+        //
+        // High connection priority shortens the connection interval, which is what keeps a
+        // 32.8 kbps continuous notify stream ahead of the firmware's tx queue -- it drops frames
+        // SILENTLY once that queue is half full, so headroom here shows up directly as fewer
+        // gaps in the audio. Best-effort: a stack that refuses it still works, with more loss.
+        try {
+            gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
+        } catch (e: Exception) {
+            log("requestConnectionPriority(HIGH) refused side=${lens.side.raw}: ${e.message}")
+        }
         gatt.discoverServices()
     }
 
