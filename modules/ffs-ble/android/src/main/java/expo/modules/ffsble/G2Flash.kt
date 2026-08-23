@@ -585,10 +585,26 @@ object G2Flash {
     val goldenGestureInject27 = GoldenVector(
         "9ad3c2b9c15960250ff4b8d53b14c33fa84292580a6d133e69e85d243ba21e1e",
         3643011L, 0x007B1663L, true,
-        "gesture inject: FGES frame -> rt_nav_apply (2.2.7.14) [CURRENT]"
+        "gesture inject: FGES frame -> rt_nav_apply (2.2.7.14)"
     )
 
     /** Every build this driver will consider flashing. Anything else is refused outright. */
+    /** ⛔ STEREO REVEAL: data from the phone is held in ffs_data.h's pending buffer and is
+     * NOT visible to any app until BOTH lenses have agreed an instant to reveal it
+     * (patches/ffs_syncpaint.h — NTP-style clock exchange, absolute deadlines). A push is
+     * two independent BLE writes measured up to 336 ms apart, so revealing on arrival means
+     * one eye shows content the other does not; a person looks through both at once, so that
+     * is a torn render, not a fast one. There is no opt-out anywhere by design.
+     *
+     * Also carries skew= on the ⟨LOADER⟩ line: the worst measured inter-lens skew since boot,
+     * so the question stops needing the wearer's eyes. +~1.6 KB over gesture inject. Built CI
+     * run 32615627020 from ffs/os-takeover. Restore path = goldenStock27. */
+    val goldenSyncPaint27 = GoldenVector(
+        "7bd9859b593d09e3b94df61ccd30cdeb00746a714a9b6e7e495db7d982e090c0",
+        3646159L, 0x007B22AFL, true,
+        "stereo reveal: no lens renders before the other (2.2.7.14) [CURRENT]"
+    )
+
     val allGoldens: List<GoldenVector> = listOf(
         goldenCFW, goldenStock, goldenStock27, goldenCanary,
         goldenFontpeek, goldenBidiOnly, goldenHebrewFull, goldenHebrewProbe,
@@ -596,7 +612,8 @@ object G2Flash {
         goldenArena27, goldenInk27, goldenGif27, goldenSync27, goldenSyncDiag27,
         goldenTakeover27, goldenNav27, goldenNav27b, goldenApps27, goldenApps27b,
         goldenShell27, goldenBig27, goldenShip27, goldenR1input27, goldenS7sync27,
-        goldenFade27, goldenEvenHubKill27, goldenEventBus27, goldenGestureInject27
+        goldenFade27, goldenEvenHubKill27, goldenEventBus27, goldenGestureInject27,
+        goldenSyncPaint27
     )
 
     /** Look up a build by the SHA-256 of its bytes. Null means "not a known build". */
