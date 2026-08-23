@@ -2008,33 +2008,39 @@ class G2Central(
      *   is the SECONDARY experiment (see G2EvenHub.audioControl) and mixing it into the proven
      *   route would make a success unattributable.
      */
-    fun setMicStream(on: Boolean, alsoCmd15: Boolean = false) = post {
+    fun setMicStream(on: Boolean, alsoCmd15: Boolean = false, evenAi: Boolean = true) = post {
         if (!pairReadyLocked()) {
             log("setMicStream ignored -- pair not ready (connect both lenses first)")
             return@post
         }
         withSessionLocked {
-            if (on) {
-                micStats.resetSession()
-                // Claim the window BEFORE the open goes out, or our own first burst races the
-                // flag and gets reported as the glasses opening their own microphone.
-                micStats.requestedByUs = true
-                sendEvenAILocked(
-                    G2EvenAI.ctrl(G2EvenAI.STATUS_ENTER, counters.nextMagic()), G2Target.BOTH
-                )
-                log("setMicStream: OPEN -- evenAI CTRL ENTER -> both (NO ask; nothing goes to Even's cloud)")
+            if (on) micStats.resetSession()
+            // Claim the window BEFORE any open goes out, or our own first burst races the
+            // flag and gets reported as the glasses opening their own microphone.
+            micStats.requestedByUs = on
+            if (evenAi) {
+                if (on) {
+                    sendEvenAILocked(
+                        G2EvenAI.ctrl(G2EvenAI.STATUS_ENTER, counters.nextMagic()), G2Target.BOTH
+                    )
+                    log("setMicStream: OPEN -- evenAI CTRL ENTER -> both (NO ask; nothing goes to Even's cloud)")
+                } else {
+                    sendEvenAILocked(
+                        G2EvenAI.ctrl(G2EvenAI.STATUS_EXIT, counters.nextMagic()), G2Target.BOTH
+                    )
+                    log("setMicStream: CLOSE -- evenAI CTRL EXIT -> both")
+                }
             } else {
-                micStats.requestedByUs = false
-                sendEvenAILocked(
-                    G2EvenAI.ctrl(G2EvenAI.STATUS_EXIT, counters.nextMagic()), G2Target.BOTH
-                )
-                log("setMicStream: CLOSE -- evenAI CTRL EXIT -> both")
+                // No-swirl experiment: skip Even's AI session entirely and rely on AudioControl
+                // alone (below) to acquire the codec. Tests whether the mic can open with NO
+                // EvenAI popup on-glass. If g_audm never acquires, AudioControl alone is insufficient.
+                log("setMicStream: ${if (on) "OPEN" else "CLOSE"} -- EvenAI ${if (on) "ENTER" else "EXIT"} SKIPPED (no-swirl); AudioControl only")
             }
             if (alsoCmd15) {
                 sendEvenHubLocked(
                     G2EvenHub.audioControl(on, counters.nextMagic()), G2Target.RIGHT
                 )
-                log("setMicStream: ALSO sent EvenHub Cmd 15/field 18 -> right (secondary route under test)")
+                log("setMicStream: EvenHub AudioControl (Cmd 15/field 18) ${if (on) "ON" else "OFF"} -> right")
             }
         }
     }

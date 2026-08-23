@@ -490,7 +490,13 @@ class FfsBleModule : Module() {
               // The proven opener is the even_ai CTRL ENTER this sends by default -- see
               // G2Central.setMicStream for the log evidence.
               // ⚠️ ALWAYS follow with value 0. The DMIC pair stays powered otherwise.
-              "mic" -> c?.setMicStream(value != 0, intent.getIntExtra("cmd15", 0) != 0)
+              // `--ei noai 1` SKIPS the EvenAI CTRL ENTER (the on-glass swirl popup) and relies on
+              // AudioControl alone (use with cmd15 1) -- the no-swirl acquisition test.
+              "mic" -> c?.setMicStream(
+                value != 0,
+                intent.getIntExtra("cmd15", 0) != 0,
+                evenAi = intent.getIntExtra("noai", 0) == 0
+              )
               // Mic packet counters -- COUNTS AND MILLISECONDS ONLY, never audio. This is the
               // whole instrument for "did packets flow?", and it is numeric on purpose.
               //   am broadcast -a com.futurefounders.ffs.SETTING --es key micstats
