@@ -602,7 +602,17 @@ object G2Flash {
     val goldenSyncPaint27 = GoldenVector(
         "7bd9859b593d09e3b94df61ccd30cdeb00746a714a9b6e7e495db7d982e090c0",
         3646159L, 0x007B22AFL, true,
-        "stereo reveal: no lens renders before the other (2.2.7.14) [CURRENT]"
+        "stereo reveal: no lens renders before the other (2.2.7.14)"
+    )
+
+    /** FWAK cold-wake: a "FWAK"+<ui_module_id> frame at the FXP1 gate calls RequestDisplayStartUp
+     * (id 1 = our base page) INLINE on the BLE thread, which stays alive while the loader is parked
+     * (dash=none) — so the host can build the dashboard from cold over BLE, no finger. +96 B over
+     * goldenSyncPaint27. Built CI run 32635165842 from ffs/os-takeover. Restore path = goldenStock27. */
+    val goldenWake27 = GoldenVector(
+        "42e76a71b688e03291431410ab1483a9e86164dc79eb79f939eb8ba7a4674889",
+        3646255L, 0x007B230FL, true,
+        "cold-wake: FWAK -> RequestDisplayStartUp(1) (2.2.7.14) [CURRENT]"
     )
 
     val allGoldens: List<GoldenVector> = listOf(
@@ -613,7 +623,7 @@ object G2Flash {
         goldenTakeover27, goldenNav27, goldenNav27b, goldenApps27, goldenApps27b,
         goldenShell27, goldenBig27, goldenShip27, goldenR1input27, goldenS7sync27,
         goldenFade27, goldenEvenHubKill27, goldenEventBus27, goldenGestureInject27,
-        goldenSyncPaint27
+        goldenSyncPaint27, goldenWake27
     )
 
     /** Look up a build by the SHA-256 of its bytes. Null means "not a known build". */
