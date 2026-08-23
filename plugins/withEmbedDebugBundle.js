@@ -22,7 +22,10 @@ const withEmbedDebugBundle = (config) => {
     if (process.env.FFS_METRO_DEBUG === "1") return cfg; // opt out: load from Metro
     if (cfg.modResults.language !== "groovy") return cfg;
     let src = cfg.modResults.contents;
-    if (src.includes("debuggableVariants")) return cfg; // already set
+    // Skip only if there's a REAL (uncommented) assignment. The RN template ships a
+    // commented `// debuggableVariants = ["liteDebug", ...]`, so a plain includes() check
+    // matched that comment and bailed -> the bundle never embedded -> Metro red screen.
+    if (/^\s*debuggableVariants\s*=/m.test(src)) return cfg; // already set
     // Insert into the react { ... } block so the RN gradle plugin sees it.
     src = src.replace(
       /(\n\s*)react\s*\{/,
