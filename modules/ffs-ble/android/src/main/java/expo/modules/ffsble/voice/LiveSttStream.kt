@@ -64,11 +64,22 @@ class LiveSttStream(
     private var messages = 0L
     private var reconnects = 0L
 
+    /* Provider round trip, ms: from the moment audio last went out to the moment a
+     * transcript came back. NOT a precise measure of Deepgram's think time -- audio is
+     * continuous, so it is really "how stale is the newest audio when a result lands" --
+     * but it is the number that separates "our pipeline is slow" from "the provider is",
+     * and until it is measured every latency fix downstream is a guess. Counts only. */
+    @Volatile private var lastFeedAtMs = 0L
+    private var rttSum = 0L
+    private var rttN = 0L
+    private var rttMax = 0L
+
     /** Set while a connect is in flight, so audio is buffered rather than thrown away. */
     @Volatile private var connecting = false
 
     fun stats(): String =
-        "live-stt: opened=$opened reconnects=$reconnects sent=${sentBytes / 1024}KB msgs=$messages"
+        "live-stt: opened=$opened reconnects=$reconnects sent=${sentBytes / 1024}KB msgs=$messages" +
+            " provider_ms avg=${if (rttN > 0) rttSum / rttN else 0} max=$rttMax n=$rttN"
 
     /**
      * Open the socket. Safe to call when streaming is not configured or OkHttp is missing --
@@ -118,7 +129,7 @@ class LiveSttStream(
         for (b in out) {
             val s = socket ?: break
             try {
-                if (s.send(okio.ByteString.of(*b))) sentBytes += b.size
+                if (s.send(okio.ByteString.of(*b))) { sentBytes += b.size; lastFeedAtMs = System.currentTimeMillis() }
             } catch (t: Throwable) {
                 log?.invoke("live-stt: send failed (${t.javaClass.simpleName})")
                 break
@@ -226,6 +237,11 @@ class LiveSttStream(
         val root = MiniJson.parseOrNull(json) ?: return
         val text = MiniJson.pathString(root, cfg.streamTextPath)?.trim() ?: return
         if (text.isEmpty()) return
+        val fed = lastFeedAtMs
+        if (fed > 0L) {
+            val dt = System.currentTimeMillis() - fed
+            if (dt in 0..10_000) { rttSum += dt; rttN++; if (dt > rttMax) rttMax = dt }
+        }
         val fin = when (val v = MiniJson.path(root, cfg.streamFinalPath)) {
             is Boolean -> v
             is String -> v == "true"

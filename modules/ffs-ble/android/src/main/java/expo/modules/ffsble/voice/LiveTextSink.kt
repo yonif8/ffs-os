@@ -48,6 +48,15 @@ class LiveTextSink(
     companion object {
         const val DEFAULT_APP_ID = 14
         const val DEFAULT_WINDOW = 880
+        /**
+         * Floor on the gap between pushes. Every millisecond here is latency the wearer
+         * sees, so it is set from what the radio can actually carry rather than from
+         * caution. It was briefly cut to 150 ms to shave latency, and put back: the two
+         * lenses only paint on AGREEMENT (g2flash/apps/livetext.c -- no lens ever paints
+         * alone), and agreement takes ~180 ms, so pushing faster than that just means the
+         * pair is still negotiating value N when N+1 lands and the newest text is never
+         * the one being agreed on. The push rate has to sit above the agreement time.
+         */
         const val DEFAULT_MIN_INTERVAL_MS = 300L
     }
 
