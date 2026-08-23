@@ -411,7 +411,9 @@ class FfsBleModule : Module() {
           // never what it is allowed to accept. `dry` defaults to TRUE: the destructive form
           // has to be asked for explicitly, so a malformed command validates instead of writes.
           FLASH_ACTION -> {
-            val url = intent.getStringExtra("url") ?: return
+            // `path` (a local file pushed via `adb push`) is the simple loop -- no HTTP server,
+            // no adb reverse. `url` (http://...) still works for the legacy served path.
+            val url = intent.getStringExtra("path") ?: intent.getStringExtra("url") ?: return
             val sha = intent.getStringExtra("sha") ?: return
             val dry = intent.getBooleanExtra("dry", true)
             // Convenience override: flash a SHA-verified, brick-guard-passing image whose golden
@@ -420,7 +422,7 @@ class FfsBleModule : Module() {
             val allowUnknownGolden = intent.getBooleanExtra("allowUnknownGolden", false)
             sendEvent(
               "onLog",
-              mapOf("message" to "[android] debug flash request: dry=$dry allowUnknownGolden=$allowUnknownGolden sha=${sha.take(12)}... url=$url")
+              mapOf("message" to "[android] debug flash request: dry=$dry allowUnknownGolden=$allowUnknownGolden sha=${sha.take(12)}... src=$url")
             )
             ensureCentral()?.startCfwFlash(url, sha, dry, allowUnknownGolden)
           }

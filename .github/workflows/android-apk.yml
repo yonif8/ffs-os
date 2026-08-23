@@ -61,6 +61,22 @@ jobs:
         working-directory: android
         run: ./gradlew :app:assembleDebug --console=plain
 
+      # Guard: a debug APK without an embedded bundle boots to the Metro red screen and the
+      # flasher never runs. withEmbedDebugBundle.js is supposed to embed it; prove it did,
+      # here in CI, instead of discovering it on the phone.
+      - name: Verify JS bundle is embedded
+        working-directory: android
+        run: |
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          if unzip -l "$APK" | grep -q 'assets/index.android.bundle'; then
+            echo "OK: embedded JS bundle present in $APK"
+          else
+            echo "FAIL: $APK has NO assets/index.android.bundle -- it would boot to the Metro red screen."
+            echo "Check plugins/withEmbedDebugBundle.js applied (grep debuggableVariants in app/build.gradle):"
+            grep -n "debuggableVariants" app/build.gradle || echo "  (debuggableVariants NOT in build.gradle -> plugin did not apply)"
+            exit 1
+          fi
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:

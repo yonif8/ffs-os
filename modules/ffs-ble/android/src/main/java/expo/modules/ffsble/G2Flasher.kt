@@ -141,17 +141,14 @@ class G2Flasher(
     private fun run(targets: List<Target>, urlStr: String, expectedSha256: String, dryRun: Boolean, allowUnknownGolden: Boolean) {
         progress(if (dryRun) "validating (dry-run, no writes)..." else "preparing flash...", 0.02)
 
-        // ---- 1. download ----------------------------------------------------------------
-        val url = try {
-            URL(urlStr)
-        } catch (e: Exception) {
-            progress("bad image URL: $urlStr", 0.0, done = true, ok = false); return
-        }
-        val img = download(url)
+        // ---- 1. load image (local file OR http) -----------------------------------------
+        // Prefer a local path pushed via `adb push` -- no HTTP server / adb reverse needed.
+        // http(s):// still works for the legacy served path.
+        val img = loadImage(urlStr)
         if (img == null || img.isEmpty()) {
-            progress("image download failed", 0.0, done = true, ok = false); return
+            progress("image load failed: $urlStr", 0.0, done = true, ok = false); return
         }
-        progress("downloaded ${img.size} bytes", 0.06)
+        progress("loaded ${img.size} bytes", 0.06)
 
         // ---- 2. SHA-256 -----------------------------------------------------------------
         val sha = G2Flash.sha256Hex(img)
@@ -245,6 +242,25 @@ class G2Flasher(
             else "FLASH FAILED -- see log; run Restore Stock if a lens is half-flashed",
             if (okAll) 1.0 else 0.0, done = true, ok = okAll
         )
+    }
+
+    // ---- image source ------------------------------------------------------------------
+
+    /**
+     * Load the firmware image. A bare path or file:// URL is read straight off disk -- the
+     * flash loop is `adb push cfw.bin /sdcard/.../files/ ; broadcast --es path ...`, no HTTP
+     * server and no `adb reverse`. http(s):// still downloads (legacy served path).
+     */
+    private fun loadImage(src: String): ByteArray? = try {
+        if (src.startsWith("http://") || src.startsWith("https://")) {
+            download(URL(src))
+        } else {
+            val path = if (src.startsWith("file://")) URL(src).path else src
+            java.io.File(path).readBytes()
+        }
+    } catch (e: Exception) {
+        log("flash: image load error: ${e.message}")
+        null
     }
 
     // ---- download ----------------------------------------------------------------------
