@@ -226,7 +226,7 @@ class G2Flasher(
         // ---- 8. dry run stops here ------------------------------------------------------
         if (dryRun) {
             progress(
-                "DRY-RUN OK -- ${gv.label} validated, ${targets.size} lens(es) ready; NO writes performed",
+                "DRY-RUN OK -- ${gv?.label ?: "unknown golden (allowUnknownGolden)"} validated, ${targets.size} lens(es) ready; NO writes performed",
                 1.0, done = true, ok = true
             )
             return
