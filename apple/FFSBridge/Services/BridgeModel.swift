@@ -20,6 +20,7 @@ struct ActivityEntry: Identifiable {
 final class BridgeModel: ObservableObject {
     let link = GlassesLink()
     let flasher: FirmwareFlasher
+    let paired = PairedCommands()
     let library: AppLibrary
     let voice: VoiceService
     let buzzer: BuzzerAudio
@@ -38,6 +39,7 @@ final class BridgeModel: ObservableObject {
     private var subscriptions = Set<AnyCancellable>()
     private var commandBusy = false
     private var librarySynced = false
+    private var automaticLibrarySync = true
     private var fbFlush: Task<Void, Never>?
     init() {
         #if os(macOS)
@@ -56,20 +58,21 @@ final class BridgeModel: ObservableObject {
         link.audio = { [weak self] data, side in self?.voice.submit(data, side: side) }
         link.serviceMessage = { [weak self] sid, data, side in
             guard let self else { return }
-            if sid == 0x91 { self.library.receive(data); self.buzzer.receive(data); self.decodeEvent(data, side: side) }
+            if sid == 0x91 { self.paired.receive(data); self.library.receive(data); self.buzzer.receive(data); self.decodeEvent(data, side: side) }
             if sid == 0x30, self.fb.feed(data) {
                 self.fbFlush?.cancel()
                 if self.fb.complete { self.finishScreenshot() }
                 else { self.fbFlush = Task { [weak self] in try? await Task.sleep(for: .milliseconds(900)); guard !Task.isCancelled else { return }; self?.finishScreenshot() } }
             }
         }
-        library.send = { [weak self] d in guard let self else { throw BridgeError.unavailable("Bridge closed") }; try await self.link.send(d) }
+        paired.transport = { [weak self] d in guard let self else { throw BridgeError.unavailable("Bridge closed") }; try await self.link.send(d) }
+        library.send = { [weak self] d in guard let self else { throw BridgeError.unavailable("Bridge closed") }; try await self.paired.send(d) }
         library.available = { [weak self] in self?.link.pairReady == true && self?.flasher.active == false }
         library.setting = { [weak self] key, value in
             guard let self else { return }; try await self.link.settings(key, value: value)
             try await Task.sleep(for: .milliseconds(200)); try await self.link.settings("info")
         }
-        voice.send = { [weak self] d in guard let self else { throw BridgeError.unavailable("Bridge closed") }; try await self.link.send(d) }
+        voice.send = { [weak self] d in guard let self else { throw BridgeError.unavailable("Bridge closed") }; if PairedCommands.accepts(d) { try await self.paired.send(d) } else { try await self.link.send(d) } }
         developer.command = { [weak self] name, args in guard let self else { throw BridgeError.unavailable("Bridge closed") }; return try await self.command(name, args) }
     }
     func perform(_ action: @escaping () async throws -> Void) {
@@ -85,9 +88,9 @@ final class BridgeModel: ObservableObject {
         if developer.enabled { developer.stop() } else { do { try developer.start() } catch { errorMessage = error.localizedDescription } }
     }
     private func record(_ name: String, _ details: [String: Any]) {
-        if name == "disconnected" { librarySynced = false }
+        if name == "disconnected" { librarySynced = false; paired.disconnected(); library.disconnected() }
         if name == "pairReady", !flasher.active { perform { try await self.link.settings(self.library.entries.isEmpty ? "info" : "wake", value: 1) } }
-        if name == "deviceInfo", details["side"] as? String == "R", !flasher.active, link.pairReady,
+        if automaticLibrarySync, name == "deviceInfo", details["side"] as? String == "R", !flasher.active, link.pairReady,
            link.lenses["R"]?.diagnostics["loader"]?.contains("shell=2") == true,
            let values = link.lenses["R"]?.settingsSnapshot, !values.isEmpty {
             if !librarySynced { librarySynced = true; library.sync() }
@@ -143,7 +146,7 @@ final class BridgeModel: ObservableObject {
                      "battery": l.battery as Any? ?? NSNull(), "rssi": l.rssi as Any? ?? NSNull(), "writeLimit": l.writeLimit, "receiveCount":l.receiveCount, "diagnostics": l.diagnostics,
                      "infoReceivedAt": l.infoReceivedAt?.timeIntervalSince1970 as Any? ?? NSNull(), "settings": l.settingsSnapshot]
          }, "flash": ["active": flasher.active, "message": flasher.message, "progress": flasher.progress, "ok": flasher.success as Any? ?? NSNull()],
-         "library": library.status(), "voice": voice.status(), "buzzer": ["state": buzzer.state, "message": buzzer.detail]]
+         "pairedBusy": paired.busy, "library": library.status(), "voice": voice.status(), "buzzer": ["state": buzzer.state, "message": buzzer.detail]]
     }
     func command(_ name: String, _ args: [String: Any]) async throws -> [String: Any] {
         if name == "status" { return status() }
@@ -163,6 +166,7 @@ final class BridgeModel: ObservableObject {
             guard let encoded = args["base64"] as? String, let frame = Data(base64Encoded: encoded) else { throw BridgeError.invalid("Native app frame required") }
             try library.add(frame)
             return library.status()
+        case "libraryAutoSync": automaticLibrarySync = args["enabled"] as? Bool ?? true; return ["enabled": automaticLibrarySync]
         case "librarySync": library.sync(); return library.status()
         case "connect": try link.connect(side)
         case "disconnect": try link.disconnect()
@@ -172,12 +176,18 @@ final class BridgeModel: ObservableObject {
         case "setting": try await link.settings(args["key"] as? String ?? "query", value: args["value"] as? Int ?? 0, side: side, auto: args["auto"] as? Bool ?? false)
         case "push":
             guard let b64 = args["base64"] as? String, let data = Data(base64Encoded: b64), !data.isEmpty, let sid = UInt8(exactly: args["serviceId"] as? Int ?? 0x90) else { throw BridgeError.invalid("Invalid payload") }
+            if sid == 0x90 && PairedCommands.accepts(data) {
+                guard side == nil else { throw BridgeError.invalid("App and data commands require both lenses") }
+                try await paired.send(data)
+                return ["written": data.count, "executed": true, "paired": true]
+            }
+            guard !paired.busy else { throw BridgeError.unavailable("A paired command still owns the loader") }
             try await link.send(data, sid: sid, side: side)
             return ["written": data.count, "executed": false, "note": "Bluetooth write only; verify loader execution and pixels separately"]
         case "appData":
             guard let id = args["appId"] as? Int, let seq = args["seq"] as? Int else { throw BridgeError.invalid("appId and seq required") }
             let blob = (args["text"] as? String).map { Data($0.utf8) } ?? Data(base64Encoded: args["base64"] as? String ?? "") ?? Data()
-            try await link.send(Wire.appData(id: id, seq: seq, blob: blob, clear: args["clear"] as? Bool ?? false))
+            try await paired.send(Wire.appData(id: id, seq: seq, blob: blob, clear: args["clear"] as? Bool ?? false))
         case "screenshotReset": fb.reset(); screenshot = nil; screenshotDescription = "Waiting for a new framebuffer"
         case "screenshot":
             guard fb.received > 0 else { throw BridgeError.unavailable("No framebuffer received; push the current fb_shot payload first") }

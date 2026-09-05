@@ -68,9 +68,17 @@ pairing key over the trusted device connection without printing it.
 `voiceConfig`, `voiceConfigStatus`, `voiceSearch`, `voiceSessions`, `voiceExport`,
 `voiceClear`, `buzzerSpeak`, `buzzerPlay`, `buzzerStop`.
 
-Arguments are JSON objects; see `BridgeModel.command` for the exact contract. A push
-acknowledges Bluetooth writes, **not execution**. Attribute results using fresh loader
-generation, executed generation, payload/frame lengths and return code, then pixels.
+Arguments are JSON objects; see `BridgeModel.command` for the exact contract.
+FFSA app commands and FFSC data now use the paired command queue: `push` requires
+both lenses and returns `executed: true` only after firmware acknowledges the same
+command on both lenses. This requires firmware supporting FFSQ/event 0x25; it does
+not fall back to the old right-only ACK. Other payload pushes still acknowledge
+Bluetooth writes only. Verify their execution with fresh loader diagnostics and pixels.
+
+A paired delivery timeout stops queued writes because one lens may still own its
+command buffer. Restart both glasses and the bridge before resuming; reconnecting
+Bluetooth alone does not establish which command ran. Command identity, retries and
+frame semantics are described in `docs/PAIRED_COMMANDS.md`.
 `events` preserves non-microphone service payloads for diagnostics. Microphone packets
 are routed only into the voice recorder and never into generic command logs.
 

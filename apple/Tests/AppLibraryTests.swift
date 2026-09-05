@@ -19,8 +19,7 @@ import Foundation
         lib.send={ f in
             let image=Data(f.dropFirst(12));let op=Int(image[4]);operations.append(op)
             precondition(Wire.crc32(image)==f.u32(8))
-            var a=Data([UInt8(op),0]);a.le16(image.u16(8));a.le32(0);a.le32(0)
-            lib.receive(event(0x24,a))
+
         }
         lib.sync();try await Task.sleep(for:.milliseconds(100));precondition(operations==[5])
         var saved=Data();saved.le16(1);saved.le32(crc);saved.append(contentsOf:[5,0,0,0])
@@ -32,13 +31,11 @@ import Foundation
         let reopened=AppLibrary(root:root);precondition(reopened.entries.count==1 && reopened.entries[0].saved)
         var request=Data();request.le16(1);request.le16(7);lib.receive(event(0x20,request))
         try await Task.sleep(for:.milliseconds(100));precondition(operations.last==8)
+        lib.receive(event(0x20,request));try await Task.sleep(for:.milliseconds(20));precondition(operations.filter{$0==8}.count==1)
         let encoded=app.frame(op:8,token:7);precondition(encoded.u16(46)==7 && encoded.count==frame.count)
         lib.receive(event(0x21,Data(saved.prefix(6))));precondition(!lib.entries[0].saved)
         let cleared=AppLibrary(root:root);precondition(!cleared.entries[0].saved)
-        lib.send={f in
-            let image=Data(f.dropFirst(12));var a=Data([image[4],9]);a.le16(image.u16(8));a.le32(0);a.le32(0)
-            lib.receive(event(0x24,a))
-        }
+        lib.send={_ in throw BridgeError.unavailable("Glasses refused command") }
         lib.sync();try await Task.sleep(for:.milliseconds(100));precondition(lib.message.contains("refused"))
         print("App library: corruption refusal, catalog ACK, durable save/reload, token load, and clear passed")
     }

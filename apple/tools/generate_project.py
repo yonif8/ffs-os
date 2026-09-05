@@ -35,7 +35,7 @@ main=obj('main', isa='PBXGroup', children=refs+[products], sourceTree='<group>')
 sources=obj('sources', isa='PBXSourcesBuildPhase', buildActionMask=2147483647, files=builds, runOnlyForDeploymentPostprocessing=0)
 frameworks=obj('frameworks', isa='PBXFrameworksBuildPhase', buildActionMask=2147483647, files=[], runOnlyForDeploymentPostprocessing=0)
 seed_builds = []
-for file in sorted((APP/'SeedApps.local').glob('*.ffsa')):
+for file in ([] if '--no-local-seeds' in sys.argv else sorted((APP/'SeedApps.local').glob('*.ffsa'))):
     path = str(file.relative_to(ROOT))
     ref = obj(path, isa='PBXFileReference', lastKnownFileType='file', path=path, sourceTree='<group>')
     refs.append(ref)

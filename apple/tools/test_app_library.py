@@ -5,6 +5,9 @@ import subprocess,tempfile
 root=Path(__file__).resolve().parents[1]
 with tempfile.TemporaryDirectory(prefix='ffs-library-test-') as d:
     binary=str(Path(d)/'test')
-    sources=['FFSBridge/Core/Wire.swift','FFSBridge/Core/AppPackage.swift','FFSBridge/Services/AppLibrary.swift','Tests/AppLibraryTests.swift']
-    subprocess.run(['swiftc','-parse-as-library',*[str(root/p)for p in sources],'-o',binary],check=True)
-    subprocess.run([binary],check=True,timeout=15)
+    for name in ['AppLibrary', 'PairedCommands']:
+        sources=['FFSBridge/Core/Wire.swift','FFSBridge/Core/AppPackage.swift',
+                 'FFSBridge/Services/AppLibrary.swift','FFSBridge/Services/PairedCommands.swift',
+                 f'Tests/{name}Tests.swift']
+        subprocess.run(['swiftc','-parse-as-library',*[str(root/p)for p in sources],'-o',binary],check=True)
+        subprocess.run([binary],check=True,timeout=15)

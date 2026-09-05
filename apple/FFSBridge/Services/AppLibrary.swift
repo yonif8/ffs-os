@@ -9,9 +9,8 @@ final class AppLibrary: ObservableObject {
     @Published private(set) var busy = false
     private let directory: URL
     private var packages: [Int: AppPackage] = [:]
+    private var recentLoadRequests: [UInt32] = []
     private var queue: Task<Void, Never>?
-    private var ack: (op: Int, id: Int, continuation: CheckedContinuation<Void, Error>)?
-    private var timeout: Task<Void, Never>?
     var send: ((Data) async throws -> Void)?
     var setting: ((String, Int) async throws -> Void)?
     var available: (() -> Bool)?
@@ -49,20 +48,9 @@ final class AppLibrary: ObservableObject {
     }
     private func transmit(_ frame: Data) async throws {
         guard let send else { throw BridgeError.unavailable("App library transport unavailable") }
-        let op = Int(frame[16]), id = frame.u16(20)
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            ack = (op, id, continuation)
-            timeout = Task { [weak self] in
-                do { try await Task.sleep(for: .seconds(4)) } catch { return }
-                guard let self, let a = self.ack else { return }; self.ack = nil
-                a.continuation.resume(throwing: BridgeError.unavailable("Glasses did not acknowledge the app operation"))
-            }
-            Task { [weak self] in
-                do { try await send(frame) }
-                catch { guard let self, let a = self.ack else { return }; self.ack = nil; self.timeout?.cancel(); a.continuation.resume(throwing: error) }
-            }
-        }
+        try await send(frame)
     }
+
     func sync() {
         enqueue { [weak self] in
             guard let self else { return }
@@ -79,18 +67,17 @@ final class AppLibrary: ObservableObject {
             try await self?.transmit(AppPackage.settingsFrame(brightness: values["brightness"], wear: values["wearDetection"], headup: values["headUp"]))
         }
     }
+    func disconnected() { recentLoadRequests.removeAll() }
     func receive(_ d: Data) {
         guard d.count >= 8, d[0] == 1, d[1] == 0, d[3] & 1 != 0, d.count == 8+d.u16(6) else { return }
         let p = Data(d.dropFirst(8))
         switch d[2] {
-        case 0x24:
-            guard p.count == 12, let a = ack, a.op == Int(p[0]), a.id == p.u16(2) else { return }
-            ack=nil; timeout?.cancel()
-            if p[1] == 0 { a.continuation.resume() }
-            else { a.continuation.resume(throwing: BridgeError.unavailable("Glasses refused app operation (\(p[1]))")) }
         case 0x20:
             guard p.count == 4, let app = packages[p.u16(0)] else { return }
-            let token = p.u16(2)
+            let token = p.u16(2), request = p.u32(0)
+            guard !recentLoadRequests.contains(request) else { return }
+            recentLoadRequests.append(request)
+            if recentLoadRequests.count > 32 { recentLoadRequests.removeFirst() }
             enqueue { [weak self] in
                 guard let self else { return }; self.message = "Opening \(app.name)"
                 try await self.transmit(app.frame(op: 8, token: token)); self.message = "\(app.name) is open"
