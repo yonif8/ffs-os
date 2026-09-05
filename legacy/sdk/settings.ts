@@ -87,7 +87,7 @@ export function setBrightness(
   return infoEnvelope(magic, Sub.brightness, b.data);
 }
 
-/** Suppress the audio cue on container pushes and notifications. */
+/** Stock silent mode blocks app/display startup; this is not an audio-mute control. */
 export const setSilentMode = (magic: number, on: boolean) =>
   infoEnvelope(magic, Sub.silentMode, one(1, on ? 1 : 0));
 

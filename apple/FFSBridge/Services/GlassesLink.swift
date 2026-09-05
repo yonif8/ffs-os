@@ -8,6 +8,11 @@ struct LensStatus: Identifiable {
     var ready = false, battery: Int?, charging: Bool?, rssi: Int?, writeLimit = 0
     var diagnostics: [String: String] = [:]
     var receiveCount = 0
+    var infoReceivedAt: Date?
+    var settingsSnapshot: [String: Int] = [:]
+    mutating func invalidateReadback() {
+        diagnostics = [:]; settingsSnapshot = [:]; version = "—"; battery = nil; charging = nil; infoReceivedAt = nil
+    }
 }
 
 @MainActor
@@ -139,7 +144,7 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
         } else {
             recovery.reset(); recoveryTask?.cancel()
             scanning = false; connecting = nil; connectingGeneration = UUID()
-            for s in ["L", "R"] { lenses[s]?.ready = false; lenses[s]?.state = "disconnected" }
+            for s in ["L", "R"] { lenses[s]?.ready = false; lenses[s]?.state = "disconnected"; lenses[s]?.invalidateReadback() }
             failJobs(BridgeError.unavailable(bluetooth))
         }
         event?("bluetooth", ["state": bluetooth])
@@ -166,6 +171,7 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
     }
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         guard let s = sideOf(peripheral) else { return }
+        lenses[s]?.invalidateReadback()
         lenses[s]?.state = "discovering"; peripheral.delegate = self
         peripheral.discoverServices(nil); log("\(s): connected; discovering channels")
     }
@@ -177,7 +183,7 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
     }
     private func dropped(_ p: CBPeripheral, error: Error?, retry: Bool) {
         guard let s = sideOf(p) else { return }
-        lenses[s]?.ready = false; lenses[s]?.state = "disconnected"; chars[s] = [:]; assemblers[s] = Reassembler()
+        lenses[s]?.ready = false; lenses[s]?.state = "disconnected"; lenses[s]?.invalidateReadback(); chars[s] = [:]; assemblers[s] = Reassembler()
         if connecting == s { connecting = nil; connectingGeneration = UUID() }
         event?("disconnected", ["side": s, "code": (error as NSError?)?.code ?? 0])
         log("\(s): disconnected"); observeRecovery()
@@ -260,6 +266,9 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
     }
     private func decodeInfo(_ d: Data, side s: String) {
         guard let f = try? Proto.fields(d) else { return }
+        if f.bytes(104) != nil || f.string(100) != nil || f.bytes(4) != nil { lenses[s]?.infoReceivedAt = Date() }
+        if let snapshot = SettingsWire.snapshot(d) { lenses[s]?.settingsSnapshot = snapshot }
+        if let silent = SettingsWire.silentModeUpdate(d) { lenses[s]?.settingsSnapshot["silentMode"] = silent }
         if let inner = f.bytes(4) ?? f.bytes(5), let inf = try? Proto.fields(inner) {
             if let v = inf.string(s == "L" ? 5 : 6) { lenses[s]?.version = v }
             if let v = inf.number(12), (0...100).contains(v) { lenses[s]?.battery = v }
@@ -361,7 +370,13 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
         case "lensx": body = SettingsWire.set(3, Proto.integer(1, value), magic: m)
         case "lensy": body = SettingsWire.set(2, Proto.integer(1, value), magic: m)
         case "panic": body = SettingsWire.set(100, Data("FFSPANICRST!".utf8), magic: m)
-        case "wake": try await send(Data("FWAK".utf8) + Data([UInt8(clamping: value)]), side: side); return
+        case "wake":
+            for step in SettingsWire.displayWake(UInt8(clamping: value), magic: m) {
+                try await send(step.body, sid: step.sid, side: side)
+                try await Task.sleep(for: .milliseconds(200))
+            }
+            try await settings("info", side: side)
+            return
         case "mic":
             requestedMic = value != 0
             do { try await send(Data("FMIC".utf8) + Data([value == 0 ? 0 : 1]), side: side) }

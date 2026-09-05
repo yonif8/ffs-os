@@ -129,6 +129,24 @@ struct Reassembler {
 }
 
 enum SettingsWire {
+    static func displayWake(_ id: UInt8, magic: Int) -> [(sid: UInt8, body: Data)] {
+        // Stock silent mode blocks application/display startup; it is not an audio mute.
+        [(9, set(6, Proto.integer(1, 0), magic: magic)),
+         (0x90, Data("FWAK".utf8) + Data([id]))]
+    }
+    static func snapshot(_ message: Data) -> [String: Int]? {
+        guard let fields = try? Proto.fields(message), let body = fields.bytes(4),
+              let info = try? Proto.fields(body), info.string(6) != nil else { return nil }
+        let mapping = ["brightness":2, "lensY":3, "lensX":4, "headUp":7,
+                       "headUpAngle":8, "wearDetection":10, "silentMode":14, "autoBrightness":18]
+        // Absent scalar fields in a complete protobuf snapshot carry their zero default.
+        return mapping.mapValues { info.number($0) ?? 0 }
+    }
+    static func silentModeUpdate(_ message: Data) -> Int? {
+        guard let fields = try? Proto.fields(message), fields.number(1) == 3,
+              let body = fields.bytes(5), let info = try? Proto.fields(body) else { return nil }
+        return info.number(2)
+    }
     static func set(_ subfield: Int, _ data: Data, magic: Int) -> Data {
         var info = Proto(); info.bytes(subfield, data)
         var p = Proto(); p.int(1, 1); p.int(2, magic); p.bytes(3, info.data); return p.data

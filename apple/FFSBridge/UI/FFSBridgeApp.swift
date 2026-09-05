@@ -82,6 +82,10 @@ struct BridgeView: View {
                         Button("Wake display") { model.perform { try await model.link.settings("wake", value: 1) } }
                     }.disabled(!model.link.pairReady || model.flasher.active)
                     DisclosureGroup("Display controls") {
+                        if model.link.lenses["R"]?.settingsSnapshot["silentMode"] == 1 {
+                            Text("Display sleep mode is on. Wake display clears it and starts the dashboard.")
+                                .font(.caption).foregroundStyle(.orange)
+                        }
                         HStack { Text("Brightness"); Slider(value: $brightness, in: 0...100, step: 1); Text("\(Int(brightness))").monospacedDigit() }
                         Button("Apply brightness") { model.perform { try await model.link.settings("brightness", value: Int(brightness)) } }
                         HStack {

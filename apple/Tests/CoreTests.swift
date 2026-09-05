@@ -48,6 +48,16 @@ struct CoreTests {
         try refuses("overflow protobuf") { _ = try Proto.fields(Data([8] + Array(repeating: 0xff, count: 10))) }
         let brightness = SettingsWire.brightness(35, auto: false, magic: 1)
         try check(brightness.hex == "080110011a060a0408001023", "Android brightness wire vector")
+        let wake = SettingsWire.displayWake(1, magic: 1)
+        try check(wake.count == 2 && wake[0].sid == 9 && wake[0].body.hex == "080110011a0432020800" && wake[1].sid == 0x90 && wake[1].body == Data("FWAK".utf8) + Data([1]), "Wake must clear the stock app-launch blocker before FWAK")
+        var snapshot = Proto(); snapshot.bytes(6, Data("2.2.7.14".utf8)); snapshot.int(14, 1)
+        var envelope = Proto(); envelope.bytes(4, snapshot.data)
+        try check(SettingsWire.snapshot(envelope.data)?["silentMode"] == 1, "Decode display-blocking silent mode from the settings snapshot")
+        var defaults = Proto(); defaults.bytes(6, Data("2.2.7.14".utf8))
+        var defaultEnvelope = Proto(); defaultEnvelope.bytes(4, defaults.data)
+        try check(SettingsWire.snapshot(defaultEnvelope.data)?["silentMode"] == 0, "Absent protobuf silent switch is off in a complete snapshot")
+        try check(SettingsWire.snapshot(SettingsWire.query(false, magic: 1)) == nil, "A query or ACK cannot be mistaken for a fresh settings snapshot")
+        try check(SettingsWire.silentModeUpdate(Data([8,3,42,2,16,1])) == 1, "Physical silent-mode switch notification updates display status")
         var framer = VoiceFramer()
         func packet(_ counter: Int) -> Data { var d = Data(repeating: 0, count: 205); d[204] = UInt8(counter); return d }
         try check(framer.offer(packet(255)) == 0, "Voice first packet")

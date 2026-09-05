@@ -37,6 +37,11 @@ FFS_IPHONE_CONFIG="$HOME/.config/ffs/mac.json" tools/ffs-iphone status
 Use the desktop command panel for any RPC below. The framebuffer is explicitly the
 right lens; it does not prove stereo agreement or that the panel is physically lit.
 
+**Wake display** clears the stock display-sleep (silent-mode) switch before sending
+FWAK. It is an explicit request to leave that mode, not an audio-mute operation.
+`status` includes the settings snapshot and `infoReceivedAt`; cached device readings
+are invalidated when a connection drops or a new connection starts.
+
 ## iPhone app
 
 Open `FFSBridge.xcodeproj`, choose your Personal Team under Signing & Capabilities,

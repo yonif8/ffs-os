@@ -69,6 +69,10 @@ struct MacBridgeView: View {
                         Button("Wake") { run("setting", ["key":"wake","value":1]) }
                     }.disabled(model.flasher.active)
                     Text(model.link.bluetooth).font(.caption).foregroundStyle(.secondary)
+                    if model.link.lenses["R"]?.settingsSnapshot["silentMode"] == 1 {
+                        Label("Display sleep mode is on. Wake clears it and starts the dashboard.", systemImage: "moon.fill")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
                     GroupBox("Developer control") {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(model.developer.status).font(.caption)

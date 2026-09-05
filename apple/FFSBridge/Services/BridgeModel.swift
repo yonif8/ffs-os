@@ -76,6 +76,7 @@ final class BridgeModel: ObservableObject {
         if developer.enabled { developer.stop() } else { do { try developer.start() } catch { errorMessage = error.localizedDescription } }
     }
     private func record(_ name: String, _ details: [String: Any]) {
+        if name == "pairReady", !flasher.active { perform { try await self.link.settings("info") } }
         eventID += 1
         eventBuffer.append(["id": eventID, "time": Date().timeIntervalSince1970, "event": name, "data": details])
         if eventBuffer.count > 2000 { eventBuffer.removeFirst(eventBuffer.count - 2000) }
@@ -123,7 +124,8 @@ final class BridgeModel: ObservableObject {
          "lenses": ["L", "R"].map { side -> [String: Any] in
              let l = link.lenses[side]!
              return ["side": side, "name": l.name, "state": l.state, "ready": l.ready, "version": l.version,
-                     "battery": l.battery as Any? ?? NSNull(), "rssi": l.rssi as Any? ?? NSNull(), "writeLimit": l.writeLimit, "receiveCount":l.receiveCount, "diagnostics": l.diagnostics]
+                     "battery": l.battery as Any? ?? NSNull(), "rssi": l.rssi as Any? ?? NSNull(), "writeLimit": l.writeLimit, "receiveCount":l.receiveCount, "diagnostics": l.diagnostics,
+                     "infoReceivedAt": l.infoReceivedAt?.timeIntervalSince1970 as Any? ?? NSNull(), "settings": l.settingsSnapshot]
          }, "flash": ["active": flasher.active, "message": flasher.message, "progress": flasher.progress, "ok": flasher.success as Any? ?? NSNull()],
          "voice": voice.status(), "buzzer": ["state": buzzer.state, "message": buzzer.detail]]
     }
