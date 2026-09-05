@@ -283,6 +283,7 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
             if ld.count >= 120, ld.subdata(in: 88..<92) == Data("AP01".utf8) {
                 let dash = Int(ld[92] >> 4), names = ["none","built","notop","nocfg","noimg","nobuf"]
                 out += " dash=\(dash < names.count ? names[dash] : "unknown") apps=\(ld[95] & 15) run=\(ld[93])"
+                out += " shell=\(ld[94] & 0x20 != 0 ? 2 : 1) codeBytes=\(ld.u16(108))"
                 out += " live=\((ld[95] >> 6) & 1) hidden=\(ld[95] >> 7)"
             }
             lenses[s]?.diagnostics["loader"] = out; log("\(s): \(out)")
@@ -365,6 +366,7 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
         case "query", "info": body = SettingsWire.query(false, magic: m)
         case "brightness-query": body = SettingsWire.query(true, magic: m)
         case "brightness": body = SettingsWire.brightness(value, auto: auto, magic: m)
+        case "headup": body = SettingsWire.set(4, Proto.integer(1, value == 0 ? 0 : 1), magic: m)
         case "wear": body = SettingsWire.set(5, Proto.integer(1, value == 0 ? 0 : 1), magic: m)
         case "silent": body = SettingsWire.set(6, Proto.integer(1, value == 0 ? 0 : 1), magic: m)
         case "lensx": body = SettingsWire.set(3, Proto.integer(1, value), magic: m)

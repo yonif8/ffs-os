@@ -105,3 +105,27 @@ STT indexing/restart recovery, and real localhost RPC authentication/replay reje
 It uses the Mac command port, so quit FFS Dev Bridge before running that test.
 These checks establish implementation behavior, not hardware parity. The private
 workspace's STATUS.md is the home for actual on-glass verification results.
+
+## Native app library and home screen
+
+The shared `AppLibrary` stores native FFSA packages and small app-authored checkpoints
+on the companion. **Apps on glasses** lets you import a package and sync its catalog.
+A compatible product-shell firmware then shows the app names in its drawer and asks
+the companion for code when the wearer opens one. The companion waits for a firmware
+execution acknowledgement. Back navigation, native drawing and memory release run on
+the glasses. Recent apps are saved sessions, not background processes.
+
+RPC: `libraryAdd {base64: <FXP1/FFSA frame>}`, `librarySync`, `libraryStatus`.
+The workspace CLI supports `install <source.c> --library`; it chooses the packer from
+that source's SDK checkout, or an explicit `--sdk-root`. App packages must match the
+active firmware ABI. Existing ABI-5 voice apps do not run on the ABI-4 product image.
+
+Optional private starter packages can be placed in `FFSBridge/SeedApps.local/*.ffsa`
+before running the project generator. They are copied into the built app and imported
+only if that app ID is not already in the user's library. This directory is ignored;
+no proprietary firmware or private content belongs in the public bridge repository.
+
+`python3 tools/test_app_library.py` exercises corrupt-package refusal, execution ACK matching,
+local state persistence across restart, token-bearing app loads, and clearing state.
+Native hardware and phone-background behaviour are separate validation steps; the
+private workspace's STATUS.md records their current status.

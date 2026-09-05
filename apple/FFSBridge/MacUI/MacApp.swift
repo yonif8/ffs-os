@@ -73,6 +73,7 @@ struct MacBridgeView: View {
                         Label("Display sleep mode is on. Wake clears it and starts the dashboard.", systemImage: "moon.fill")
                             .font(.caption).foregroundStyle(.orange)
                     }
+                    GroupBox("Apps on glasses") { AppLibraryView(library: model.library).padding(6) }
                     GroupBox("Developer control") {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(model.developer.status).font(.caption)

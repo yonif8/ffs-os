@@ -34,7 +34,13 @@ products=obj('products', isa='PBXGroup', children=[product], name='Products', so
 main=obj('main', isa='PBXGroup', children=refs+[products], sourceTree='<group>')
 sources=obj('sources', isa='PBXSourcesBuildPhase', buildActionMask=2147483647, files=builds, runOnlyForDeploymentPostprocessing=0)
 frameworks=obj('frameworks', isa='PBXFrameworksBuildPhase', buildActionMask=2147483647, files=[], runOnlyForDeploymentPostprocessing=0)
-resources=obj('resources', isa='PBXResourcesBuildPhase', buildActionMask=2147483647, files=[], runOnlyForDeploymentPostprocessing=0)
+seed_builds = []
+for file in sorted((APP/'SeedApps.local').glob('*.ffsa')):
+    path = str(file.relative_to(ROOT))
+    ref = obj(path, isa='PBXFileReference', lastKnownFileType='file', path=path, sourceTree='<group>')
+    refs.append(ref)
+    seed_builds.append(obj('build:'+path, isa='PBXBuildFile', fileRef=ref))
+resources=obj('resources', isa='PBXResourcesBuildPhase', buildActionMask=2147483647, files=seed_builds, runOnlyForDeploymentPostprocessing=0)
 base={'SDKROOT':'iphoneos','IPHONEOS_DEPLOYMENT_TARGET':'17.0','SWIFT_VERSION':'5.0','CLANG_ENABLE_MODULES':'YES','CLANG_ENABLE_OBJC_ARC':'YES','GCC_C_LANGUAGE_STANDARD':'gnu11','GCC_OPTIMIZATION_LEVEL':'3','ENABLE_USER_SCRIPT_SANDBOXING':'YES'}
 target={'PRODUCT_BUNDLE_IDENTIFIER':'com.futurefounders.ffsbridge','PRODUCT_NAME':'$(TARGET_NAME)','CODE_SIGN_STYLE':'Automatic','TARGETED_DEVICE_FAMILY':'1','INFOPLIST_FILE':'FFSBridge/Info.plist','SWIFT_OBJC_BRIDGING_HEADER':'FFSBridge/Core/LC3Bridge.h','HEADER_SEARCH_PATHS':['$(inherited)','$(SRCROOT)/../modules/ffs-ble/android/src/main/cpp/third_party/liblc3/include','$(SRCROOT)/../modules/ffs-ble/android/src/main/cpp/third_party/liblc3/liblc3'],'OTHER_LDFLAGS':['$(inherited)','-lsqlite3'],'SUPPORTED_PLATFORMS':'iphoneos iphonesimulator','SUPPORTS_MACCATALYST':'NO','MARKETING_VERSION':'1.0','CURRENT_PROJECT_VERSION':'1','ENABLE_APP_INTENTS_METADATA_EXTRACTION':'NO'}
 if MAC:

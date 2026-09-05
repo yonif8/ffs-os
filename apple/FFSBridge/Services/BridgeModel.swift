@@ -20,6 +20,7 @@ struct ActivityEntry: Identifiable {
 final class BridgeModel: ObservableObject {
     let link = GlassesLink()
     let flasher: FirmwareFlasher
+    let library: AppLibrary
     let voice: VoiceService
     let buzzer: BuzzerAudio
     let developer: DeveloperServer
@@ -36,6 +37,7 @@ final class BridgeModel: ObservableObject {
     private var eventBuffer: [[String: Any]] = []
     private var subscriptions = Set<AnyCancellable>()
     private var commandBusy = false
+    private var librarySynced = false
     private var fbFlush: Task<Void, Never>?
     init() {
         #if os(macOS)
@@ -44,8 +46,9 @@ final class BridgeModel: ObservableObject {
         #else
         root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         #endif
+        library = AppLibrary(root: root)
         flasher = FirmwareFlasher(link: link); voice = VoiceService(root: root); buzzer = BuzzerAudio(link: link); developer = DeveloperServer(root: root)
-        for publisher in [link.objectWillChange, flasher.objectWillChange, voice.objectWillChange, buzzer.objectWillChange, developer.objectWillChange] {
+        for publisher in [library.objectWillChange, link.objectWillChange, flasher.objectWillChange, voice.objectWillChange, buzzer.objectWillChange, developer.objectWillChange] {
             publisher.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
         }
         let forward: (String, [String: Any]) -> Void = { [weak self] name, details in self?.record(name, details) }
@@ -53,12 +56,18 @@ final class BridgeModel: ObservableObject {
         link.audio = { [weak self] data, side in self?.voice.submit(data, side: side) }
         link.serviceMessage = { [weak self] sid, data, side in
             guard let self else { return }
-            if sid == 0x91 { self.buzzer.receive(data); self.decodeEvent(data, side: side) }
+            if sid == 0x91 { self.library.receive(data); self.buzzer.receive(data); self.decodeEvent(data, side: side) }
             if sid == 0x30, self.fb.feed(data) {
                 self.fbFlush?.cancel()
                 if self.fb.complete { self.finishScreenshot() }
                 else { self.fbFlush = Task { [weak self] in try? await Task.sleep(for: .milliseconds(900)); guard !Task.isCancelled else { return }; self?.finishScreenshot() } }
             }
+        }
+        library.send = { [weak self] d in guard let self else { throw BridgeError.unavailable("Bridge closed") }; try await self.link.send(d) }
+        library.available = { [weak self] in self?.link.pairReady == true && self?.flasher.active == false }
+        library.setting = { [weak self] key, value in
+            guard let self else { return }; try await self.link.settings(key, value: value)
+            try await Task.sleep(for: .milliseconds(200)); try await self.link.settings("info")
         }
         voice.send = { [weak self] d in guard let self else { throw BridgeError.unavailable("Bridge closed") }; try await self.link.send(d) }
         developer.command = { [weak self] name, args in guard let self else { throw BridgeError.unavailable("Bridge closed") }; return try await self.command(name, args) }
@@ -76,7 +85,14 @@ final class BridgeModel: ObservableObject {
         if developer.enabled { developer.stop() } else { do { try developer.start() } catch { errorMessage = error.localizedDescription } }
     }
     private func record(_ name: String, _ details: [String: Any]) {
-        if name == "pairReady", !flasher.active { perform { try await self.link.settings("info") } }
+        if name == "disconnected" { librarySynced = false }
+        if name == "pairReady", !flasher.active { perform { try await self.link.settings(self.library.entries.isEmpty ? "info" : "wake", value: 1) } }
+        if name == "deviceInfo", details["side"] as? String == "R", !flasher.active,
+           link.lenses["R"]?.diagnostics["loader"]?.contains("shell=2") == true,
+           let values = link.lenses["R"]?.settingsSnapshot, !values.isEmpty {
+            if !librarySynced { librarySynced = true; library.sync() }
+            library.syncSettings(values)
+        }
         eventID += 1
         eventBuffer.append(["id": eventID, "time": Date().timeIntervalSince1970, "event": name, "data": details])
         if eventBuffer.count > 2000 { eventBuffer.removeFirst(eventBuffer.count - 2000) }
@@ -127,20 +143,27 @@ final class BridgeModel: ObservableObject {
                      "battery": l.battery as Any? ?? NSNull(), "rssi": l.rssi as Any? ?? NSNull(), "writeLimit": l.writeLimit, "receiveCount":l.receiveCount, "diagnostics": l.diagnostics,
                      "infoReceivedAt": l.infoReceivedAt?.timeIntervalSince1970 as Any? ?? NSNull(), "settings": l.settingsSnapshot]
          }, "flash": ["active": flasher.active, "message": flasher.message, "progress": flasher.progress, "ok": flasher.success as Any? ?? NSNull()],
-         "voice": voice.status(), "buzzer": ["state": buzzer.state, "message": buzzer.detail]]
+         "library": library.status(), "voice": voice.status(), "buzzer": ["state": buzzer.state, "message": buzzer.detail]]
     }
     func command(_ name: String, _ args: [String: Any]) async throws -> [String: Any] {
         if name == "status" { return status() }
+        if name == "libraryStatus" { return library.status() }
         if name == "events" {
             let since = args["since"] as? Int ?? 0
             let values = eventBuffer.filter { ($0["id"] as? Int ?? 0) > since }
             return ["cursor": eventID, "events": values, "truncated": since > 0 && since < (eventBuffer.first?["id"] as? Int ?? 0) - 1]
         }
+        guard !library.busy || ["screenshot", "screenshotReset", "disconnect"].contains(name) else { throw BridgeError.unavailable("App library is using the glasses; retry when it is idle") }
         guard !commandBusy else { throw BridgeError.unavailable("Another developer command owns the bridge") }
         commandBusy = true; defer { commandBusy = false }
         let side = args["side"] as? String
         if let side { guard ["L", "R"].contains(side) else { throw BridgeError.invalid("Side must be L or R") } }
         switch name {
+        case "libraryAdd":
+            guard let encoded = args["base64"] as? String, let frame = Data(base64Encoded: encoded) else { throw BridgeError.invalid("Native app frame required") }
+            try library.add(frame)
+            return library.status()
+        case "librarySync": library.sync(); return library.status()
         case "connect": try link.connect(side)
         case "disconnect": try link.disconnect()
         case "scan": try link.startScan()

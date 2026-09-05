@@ -66,6 +66,7 @@ struct BridgeView: View {
                     }.disabled(model.flasher.active)
                     Text(model.link.bluetooth).font(.caption).foregroundStyle(.secondary)
                 }
+                Section("Apps on glasses") { AppLibraryView(library: model.library) }
                 Section("Glasses") {
                     HStack {
                         Label(model.link.micLive ? "Microphone streaming" : "Microphone quiet", systemImage: model.link.micLive ? "mic.fill" : "mic.slash")
