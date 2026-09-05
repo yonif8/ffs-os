@@ -1,0 +1,536 @@
+// !$*UTF8*$!
+{
+	"archiveVersion" = "1";
+	"classes" = {
+	};
+	"objectVersion" = "56";
+	"objects" = {
+		"D3CDB33AAE94119C5CBB0185" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "FFSBridge/Core/BuzzerWire.swift";
+			"sourceTree" = "<group>";
+		};
+		"6ABC48BF15DD68F89C15CFEB" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "D3CDB33AAE94119C5CBB0185";
+		};
+		"02BB8A82C94E645975976A00" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "FFSBridge/Core/DeveloperCrypto.swift";
+			"sourceTree" = "<group>";
+		};
+		"DC74EE1C041A52C62F2AA8E4" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "02BB8A82C94E645975976A00";
+		};
+		"A775A28099C0F9FE5A46D408" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "FFSBridge/Core/Firmware.swift";
+			"sourceTree" = "<group>";
+		};
+		"3324A2F4520BEC6494E79D0B" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "A775A28099C0F9FE5A46D408";
+		};
+		"A129D8AB61A9A0CDA204E1D0" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "FFSBridge/Core/Framebuffer.swift";
+			"sourceTree" = "<group>";
+		};
+		"1F6D274360C404D91C3DE9F4" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "A129D8AB61A9A0CDA204E1D0";
+		};
+		"4660BF71F9C23B4F32193873" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "FFSBridge/Core/PeerRecovery.swift";
+			"sourceTree" = "<group>";
+		};
+		"8658682316DBB6C2438E7DDF" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "4660BF71F9C23B4F32193873";
+		};
+		"D0DBBE2BF41C2C63DD740E9A" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "FFSBridge/Core/STT.swift";
+			"sourceTree" = "<group>";
+		};
+		"277E20B5AD62891B4930184D" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "D0DBBE2BF41C2C63DD740E9A";
+		};
+		"387CFA7E6AC7F71E139E940B" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "FFSBridge/Core/Wire.swift";
+			"sourceTree" = "<group>";
+		};
+		"7A17F46FD4712B1F6F77623D" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "387CFA7E6AC7F71E139E940B";
+		};
+		"9B7F39EBEEF0C63678B311F2" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "FFSBridge/MacUI/MacApp.swift";
+			"sourceTree" = "<group>";
+		};
+		"E838E1467B55B776B7A1D752" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "9B7F39EBEEF0C63678B311F2";
+		};
+		"54372D460FEDB302BDE2B630" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "FFSBridge/Services/BridgeModel.swift";
+			"sourceTree" = "<group>";
+		};
+		"D830650FFB70C532A408574D" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "54372D460FEDB302BDE2B630";
+		};
+		"1CC8520047DC3EAFE5DFF21E" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "FFSBridge/Services/BuzzerAudio.swift";
+			"sourceTree" = "<group>";
+		};
+		"38472CE4FBEE0F8171F89341" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "1CC8520047DC3EAFE5DFF21E";
+		};
+		"8F8A6970B6F4279E6D31D127" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "FFSBridge/Services/DeveloperServer.swift";
+			"sourceTree" = "<group>";
+		};
+		"4A9303AE6933964FADBF3A55" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "8F8A6970B6F4279E6D31D127";
+		};
+		"F35BC98DD1FB2C16D9EB4558" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "FFSBridge/Services/FirmwareFlasher.swift";
+			"sourceTree" = "<group>";
+		};
+		"241D27949A9551176E3235FC" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "F35BC98DD1FB2C16D9EB4558";
+		};
+		"97C978FA59055FE6E9EC03AB" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "FFSBridge/Services/GlassesLink.swift";
+			"sourceTree" = "<group>";
+		};
+		"99DE1E1F3E347162FCCE8DD7" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "97C978FA59055FE6E9EC03AB";
+		};
+		"A22A320CB1432732807D6BE2" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "FFSBridge/Services/VoiceService.swift";
+			"sourceTree" = "<group>";
+		};
+		"B11E2D6EB7FEDB4C618CD30F" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "A22A320CB1432732807D6BE2";
+		};
+		"B142581B552B924457BAFBF4" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.c.c";
+			"path" = "FFSBridge/Core/LC3Bridge.c";
+			"sourceTree" = "<group>";
+		};
+		"0428B6EEDE9A28D58A04859E" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "B142581B552B924457BAFBF4";
+		};
+		"01130476E5C494BFDDA1397E" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.c.c";
+			"path" = "../modules/ffs-ble/android/src/main/cpp/third_party/liblc3/liblc3/attdet.c";
+			"sourceTree" = "<group>";
+		};
+		"6925C404348A97FBCB6CCBF3" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "01130476E5C494BFDDA1397E";
+		};
+		"449CE494469184469DB7855B" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.c.c";
+			"path" = "../modules/ffs-ble/android/src/main/cpp/third_party/liblc3/liblc3/bits.c";
+			"sourceTree" = "<group>";
+		};
+		"DA6E771B84FC38E06B639423" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "449CE494469184469DB7855B";
+		};
+		"B56939A6FFB6EDB232F164CF" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.c.c";
+			"path" = "../modules/ffs-ble/android/src/main/cpp/third_party/liblc3/liblc3/bwdet.c";
+			"sourceTree" = "<group>";
+		};
+		"9C2ED72930864DC3E9597FC2" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "B56939A6FFB6EDB232F164CF";
+		};
+		"C0FA53F7536EC9AB923A023D" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.c.c";
+			"path" = "../modules/ffs-ble/android/src/main/cpp/third_party/liblc3/liblc3/energy.c";
+			"sourceTree" = "<group>";
+		};
+		"73502096D66FFFC925C8FD9E" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "C0FA53F7536EC9AB923A023D";
+		};
+		"D2C92A2EC5DB345045A554B0" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.c.c";
+			"path" = "../modules/ffs-ble/android/src/main/cpp/third_party/liblc3/liblc3/lc3.c";
+			"sourceTree" = "<group>";
+		};
+		"179A9BDCD0CFF7FEF0AFECDE" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "D2C92A2EC5DB345045A554B0";
+		};
+		"564183CE9FDEC8E7CE486DDB" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.c.c";
+			"path" = "../modules/ffs-ble/android/src/main/cpp/third_party/liblc3/liblc3/ltpf.c";
+			"sourceTree" = "<group>";
+		};
+		"ACE817D96BE70ABDC7D15E1F" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "564183CE9FDEC8E7CE486DDB";
+		};
+		"EA3488058CAC205CF7D4AD00" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.c.c";
+			"path" = "../modules/ffs-ble/android/src/main/cpp/third_party/liblc3/liblc3/mdct.c";
+			"sourceTree" = "<group>";
+		};
+		"35833963C5F7595015F00237" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "EA3488058CAC205CF7D4AD00";
+		};
+		"06256D1FE8F14AF3C3E5BB24" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.c.c";
+			"path" = "../modules/ffs-ble/android/src/main/cpp/third_party/liblc3/liblc3/plc.c";
+			"sourceTree" = "<group>";
+		};
+		"4B64060C594EC0FC9441C7EB" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "06256D1FE8F14AF3C3E5BB24";
+		};
+		"39CBDE4F98C6045A58320A7D" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.c.c";
+			"path" = "../modules/ffs-ble/android/src/main/cpp/third_party/liblc3/liblc3/sns.c";
+			"sourceTree" = "<group>";
+		};
+		"CA22D170B52CF0C6FB61AD84" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "39CBDE4F98C6045A58320A7D";
+		};
+		"2375FEF9B7161721E4F32AEE" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.c.c";
+			"path" = "../modules/ffs-ble/android/src/main/cpp/third_party/liblc3/liblc3/spec.c";
+			"sourceTree" = "<group>";
+		};
+		"31B0755FFAF775979D603FE3" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "2375FEF9B7161721E4F32AEE";
+		};
+		"41787E5EBEFF7CC3AF2785F9" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.c.c";
+			"path" = "../modules/ffs-ble/android/src/main/cpp/third_party/liblc3/liblc3/tables.c";
+			"sourceTree" = "<group>";
+		};
+		"E6B9DDA1452607E3EF5317E7" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "41787E5EBEFF7CC3AF2785F9";
+		};
+		"9C223AB745E4BADF82BEDF15" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.c.c";
+			"path" = "../modules/ffs-ble/android/src/main/cpp/third_party/liblc3/liblc3/tns.c";
+			"sourceTree" = "<group>";
+		};
+		"31DE8186DD55AAAC5C640DBD" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "9C223AB745E4BADF82BEDF15";
+		};
+		"A8792157CB4F27FB949C035F" = {
+			"isa" = "PBXFileReference";
+			"explicitFileType" = "wrapper.application";
+			"path" = "FFSBridgeMac.app";
+			"sourceTree" = "BUILT_PRODUCTS_DIR";
+		};
+		"0A3E27B8CA818264D75C8D81" = {
+			"isa" = "PBXGroup";
+			"children" = (
+				"A8792157CB4F27FB949C035F",
+			);
+			"name" = "Products";
+			"sourceTree" = "<group>";
+		};
+		"0D6E4079E36703EBD37C0072" = {
+			"isa" = "PBXGroup";
+			"children" = (
+				"BDEFC259426BD086D1126108",
+				"D3CDB33AAE94119C5CBB0185",
+				"02BB8A82C94E645975976A00",
+				"A775A28099C0F9FE5A46D408",
+				"A129D8AB61A9A0CDA204E1D0",
+				"4660BF71F9C23B4F32193873",
+				"D0DBBE2BF41C2C63DD740E9A",
+				"387CFA7E6AC7F71E139E940B",
+				"9B7F39EBEEF0C63678B311F2",
+				"54372D460FEDB302BDE2B630",
+				"1CC8520047DC3EAFE5DFF21E",
+				"8F8A6970B6F4279E6D31D127",
+				"F35BC98DD1FB2C16D9EB4558",
+				"97C978FA59055FE6E9EC03AB",
+				"A22A320CB1432732807D6BE2",
+				"B142581B552B924457BAFBF4",
+				"01130476E5C494BFDDA1397E",
+				"449CE494469184469DB7855B",
+				"B56939A6FFB6EDB232F164CF",
+				"C0FA53F7536EC9AB923A023D",
+				"D2C92A2EC5DB345045A554B0",
+				"564183CE9FDEC8E7CE486DDB",
+				"EA3488058CAC205CF7D4AD00",
+				"06256D1FE8F14AF3C3E5BB24",
+				"39CBDE4F98C6045A58320A7D",
+				"2375FEF9B7161721E4F32AEE",
+				"41787E5EBEFF7CC3AF2785F9",
+				"9C223AB745E4BADF82BEDF15",
+				"0A3E27B8CA818264D75C8D81",
+			);
+			"sourceTree" = "<group>";
+		};
+		"878A52FC5FF6A57D50B7B870" = {
+			"isa" = "PBXSourcesBuildPhase";
+			"buildActionMask" = "2147483647";
+			"files" = (
+				"6ABC48BF15DD68F89C15CFEB",
+				"DC74EE1C041A52C62F2AA8E4",
+				"3324A2F4520BEC6494E79D0B",
+				"1F6D274360C404D91C3DE9F4",
+				"8658682316DBB6C2438E7DDF",
+				"277E20B5AD62891B4930184D",
+				"7A17F46FD4712B1F6F77623D",
+				"E838E1467B55B776B7A1D752",
+				"D830650FFB70C532A408574D",
+				"38472CE4FBEE0F8171F89341",
+				"4A9303AE6933964FADBF3A55",
+				"241D27949A9551176E3235FC",
+				"99DE1E1F3E347162FCCE8DD7",
+				"B11E2D6EB7FEDB4C618CD30F",
+				"0428B6EEDE9A28D58A04859E",
+				"6925C404348A97FBCB6CCBF3",
+				"DA6E771B84FC38E06B639423",
+				"9C2ED72930864DC3E9597FC2",
+				"73502096D66FFFC925C8FD9E",
+				"179A9BDCD0CFF7FEF0AFECDE",
+				"ACE817D96BE70ABDC7D15E1F",
+				"35833963C5F7595015F00237",
+				"4B64060C594EC0FC9441C7EB",
+				"CA22D170B52CF0C6FB61AD84",
+				"31B0755FFAF775979D603FE3",
+				"E6B9DDA1452607E3EF5317E7",
+				"31DE8186DD55AAAC5C640DBD",
+			);
+			"runOnlyForDeploymentPostprocessing" = "0";
+		};
+		"E2AA269EB967A8853A258BFA" = {
+			"isa" = "PBXFrameworksBuildPhase";
+			"buildActionMask" = "2147483647";
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = "0";
+		};
+		"41D311A605520FC7B8B9A980" = {
+			"isa" = "PBXResourcesBuildPhase";
+			"buildActionMask" = "2147483647";
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = "0";
+		};
+		"BDEFC259426BD086D1126108" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "text.xcconfig";
+			"path" = "Signing.xcconfig";
+			"sourceTree" = "<group>";
+		};
+		"73EBF6644258C120893E685D" = {
+			"isa" = "XCBuildConfiguration";
+			"name" = "Debug";
+			"buildSettings" = {
+				"SDKROOT" = "macosx";
+				"SWIFT_VERSION" = "5.0";
+				"CLANG_ENABLE_MODULES" = "YES";
+				"CLANG_ENABLE_OBJC_ARC" = "YES";
+				"GCC_C_LANGUAGE_STANDARD" = "gnu11";
+				"GCC_OPTIMIZATION_LEVEL" = "3";
+				"ENABLE_USER_SCRIPT_SANDBOXING" = "YES";
+				"MACOSX_DEPLOYMENT_TARGET" = "14.0";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
+				"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "DEBUG";
+			};
+			"baseConfigurationReference" = "BDEFC259426BD086D1126108";
+		};
+		"0B0C687DF8B6B8DC790B519C" = {
+			"isa" = "XCBuildConfiguration";
+			"name" = "Release";
+			"buildSettings" = {
+				"SDKROOT" = "macosx";
+				"SWIFT_VERSION" = "5.0";
+				"CLANG_ENABLE_MODULES" = "YES";
+				"CLANG_ENABLE_OBJC_ARC" = "YES";
+				"GCC_C_LANGUAGE_STANDARD" = "gnu11";
+				"GCC_OPTIMIZATION_LEVEL" = "3";
+				"ENABLE_USER_SCRIPT_SANDBOXING" = "YES";
+				"MACOSX_DEPLOYMENT_TARGET" = "14.0";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-O";
+			};
+			"baseConfigurationReference" = "BDEFC259426BD086D1126108";
+		};
+		"76F8DEC3DFE0BDB465198890" = {
+			"isa" = "XCConfigurationList";
+			"buildConfigurations" = (
+				"73EBF6644258C120893E685D",
+				"0B0C687DF8B6B8DC790B519C",
+			);
+			"defaultConfigurationIsVisible" = "0";
+			"defaultConfigurationName" = "Debug";
+		};
+		"6C7EFF6369083C8E1F2B1994" = {
+			"isa" = "XCBuildConfiguration";
+			"name" = "Debug";
+			"buildSettings" = {
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.futurefounders.ffsbridge.mac";
+				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"CODE_SIGN_STYLE" = "Manual";
+				"INFOPLIST_FILE" = "FFSBridge/InfoMac.plist";
+				"SWIFT_OBJC_BRIDGING_HEADER" = "FFSBridge/Core/LC3Bridge.h";
+				"HEADER_SEARCH_PATHS" = (
+					"$(inherited)",
+					"$(SRCROOT)/../modules/ffs-ble/android/src/main/cpp/third_party/liblc3/include",
+					"$(SRCROOT)/../modules/ffs-ble/android/src/main/cpp/third_party/liblc3/liblc3",
+				);
+				"OTHER_LDFLAGS" = (
+					"$(inherited)",
+					"-lsqlite3",
+				);
+				"SUPPORTED_PLATFORMS" = "macosx";
+				"SUPPORTS_MACCATALYST" = "NO";
+				"MARKETING_VERSION" = "1.0";
+				"CURRENT_PROJECT_VERSION" = "1";
+				"ENABLE_APP_INTENTS_METADATA_EXTRACTION" = "NO";
+				"CODE_SIGN_IDENTITY" = "-";
+				"DEVELOPMENT_TEAM" = "";
+				"ENABLE_HARDENED_RUNTIME" = "YES";
+				"ENABLE_APP_SANDBOX" = "NO";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
+				"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "DEBUG";
+			};
+			"baseConfigurationReference" = "BDEFC259426BD086D1126108";
+		};
+		"DD75E2CB1C510A828AC72D96" = {
+			"isa" = "XCBuildConfiguration";
+			"name" = "Release";
+			"buildSettings" = {
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.futurefounders.ffsbridge.mac";
+				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"CODE_SIGN_STYLE" = "Manual";
+				"INFOPLIST_FILE" = "FFSBridge/InfoMac.plist";
+				"SWIFT_OBJC_BRIDGING_HEADER" = "FFSBridge/Core/LC3Bridge.h";
+				"HEADER_SEARCH_PATHS" = (
+					"$(inherited)",
+					"$(SRCROOT)/../modules/ffs-ble/android/src/main/cpp/third_party/liblc3/include",
+					"$(SRCROOT)/../modules/ffs-ble/android/src/main/cpp/third_party/liblc3/liblc3",
+				);
+				"OTHER_LDFLAGS" = (
+					"$(inherited)",
+					"-lsqlite3",
+				);
+				"SUPPORTED_PLATFORMS" = "macosx";
+				"SUPPORTS_MACCATALYST" = "NO";
+				"MARKETING_VERSION" = "1.0";
+				"CURRENT_PROJECT_VERSION" = "1";
+				"ENABLE_APP_INTENTS_METADATA_EXTRACTION" = "NO";
+				"CODE_SIGN_IDENTITY" = "-";
+				"DEVELOPMENT_TEAM" = "";
+				"ENABLE_HARDENED_RUNTIME" = "YES";
+				"ENABLE_APP_SANDBOX" = "NO";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-O";
+			};
+			"baseConfigurationReference" = "BDEFC259426BD086D1126108";
+		};
+		"1B672BF3DA427763BF644BE3" = {
+			"isa" = "XCConfigurationList";
+			"buildConfigurations" = (
+				"6C7EFF6369083C8E1F2B1994",
+				"DD75E2CB1C510A828AC72D96",
+			);
+			"defaultConfigurationIsVisible" = "0";
+			"defaultConfigurationName" = "Debug";
+		};
+		"34A04005BCAF206EEC990BD9" = {
+			"isa" = "PBXNativeTarget";
+			"buildConfigurationList" = "1B672BF3DA427763BF644BE3";
+			"buildPhases" = (
+				"878A52FC5FF6A57D50B7B870",
+				"E2AA269EB967A8853A258BFA",
+				"41D311A605520FC7B8B9A980",
+			);
+			"buildRules" = (
+			);
+			"dependencies" = (
+			);
+			"name" = "FFSBridgeMac";
+			"productName" = "FFSBridgeMac";
+			"productReference" = "A8792157CB4F27FB949C035F";
+			"productType" = "com.apple.product-type.application";
+		};
+		"244210E48437B6556980A702" = {
+			"isa" = "PBXProject";
+			"attributes" = {
+				"BuildIndependentTargetsInParallel" = "YES";
+				"LastUpgradeCheck" = "2600";
+			};
+			"buildConfigurationList" = "76F8DEC3DFE0BDB465198890";
+			"compatibilityVersion" = "Xcode 14.0";
+			"developmentRegion" = "en";
+			"hasScannedForEncodings" = "0";
+			"knownRegions" = (
+				"en",
+				"Base",
+			);
+			"mainGroup" = "0D6E4079E36703EBD37C0072";
+			"productRefGroup" = "0A3E27B8CA818264D75C8D81";
+			"projectDirPath" = "";
+			"projectRoot" = "";
+			"targets" = (
+				"34A04005BCAF206EEC990BD9",
+			);
+		};
+	};
+	"rootObject" = "244210E48437B6556980A702";
+}

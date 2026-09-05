@@ -1,0 +1,9 @@
+#!/bin/bash
+set -euo pipefail
+APPLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+OUT="$APPLE_DIR/build/tools/ffs-iphone"
+mkdir -p "$(dirname "$OUT")"
+if [[ ! -x "$OUT" || "$APPLE_DIR/tools/bridge_cli.swift" -nt "$OUT" || "$APPLE_DIR/FFSBridge/Core/Wire.swift" -nt "$OUT" || "$APPLE_DIR/FFSBridge/Core/DeveloperCrypto.swift" -nt "$OUT" ]]; then
+  xcrun swiftc -O "$APPLE_DIR/FFSBridge/Core/Wire.swift" "$APPLE_DIR/FFSBridge/Core/DeveloperCrypto.swift" "$APPLE_DIR/tools/bridge_cli.swift" -o "$OUT"
+fi
+exec "$OUT" "$@"
