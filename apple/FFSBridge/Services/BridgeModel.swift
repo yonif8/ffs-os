@@ -87,7 +87,7 @@ final class BridgeModel: ObservableObject {
     private func record(_ name: String, _ details: [String: Any]) {
         if name == "disconnected" { librarySynced = false }
         if name == "pairReady", !flasher.active { perform { try await self.link.settings(self.library.entries.isEmpty ? "info" : "wake", value: 1) } }
-        if name == "deviceInfo", details["side"] as? String == "R", !flasher.active,
+        if name == "deviceInfo", details["side"] as? String == "R", !flasher.active, link.pairReady,
            link.lenses["R"]?.diagnostics["loader"]?.contains("shell=2") == true,
            let values = link.lenses["R"]?.settingsSnapshot, !values.isEmpty {
             if !librarySynced { librarySynced = true; library.sync() }
