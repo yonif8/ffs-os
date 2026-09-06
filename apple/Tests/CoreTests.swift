@@ -46,8 +46,10 @@ struct CoreTests {
         try check(fields.number(1) == -2 && fields.string(5) == "test", "Signed protobuf")
         try refuses("truncated protobuf") { _ = try Proto.fields(Data([0x2a, 0xff])) }
         try refuses("overflow protobuf") { _ = try Proto.fields(Data([8] + Array(repeating: 0xff, count: 10))) }
-        let brightness = SettingsWire.brightness(35, auto: false, magic: 1)
-        try check(brightness.hex == "080110011a060a0408001023", "Android brightness wire vector")
+        try check(SettingsWire.brightnessMode(false, magic: 1).hex == "080110011a040a020800", "Manual brightness has its own selector, including explicit zero")
+        try check(SettingsWire.brightnessMode(true, magic: 2).hex == "080110021a040a020801", "Automatic brightness has its own selector")
+        try check(SettingsWire.brightnessLevel(35, magic: 3).hex == "080110031a040a021023", "Level cannot overwrite a mode selector in the same message")
+        try check(SettingsWire.brightnessLevel(999, magic: 3) == SettingsWire.brightnessLevel(100, magic: 3), "Brightness level clamps to 100")
         let wake = SettingsWire.displayWake(1, magic: 1)
         try check(wake.count == 2 && wake[0].sid == 9 && wake[0].body.hex == "080110011a0432020800" && wake[1].sid == 0x90 && wake[1].body == Data("FWAK".utf8) + Data([1]), "Wake must clear the stock app-launch blocker before FWAK")
         var snapshot = Proto(); snapshot.bytes(6, Data("2.2.7.14".utf8)); snapshot.int(14, 1)

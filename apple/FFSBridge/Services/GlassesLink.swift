@@ -365,7 +365,11 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
         switch key.lowercased() {
         case "query", "info": body = SettingsWire.query(false, magic: m)
         case "brightness-query": body = SettingsWire.query(true, magic: m)
-        case "brightness": body = SettingsWire.brightness(value, auto: auto, magic: m)
+        case "brightness":
+            try await send(SettingsWire.brightnessMode(false, magic: m), sid: 9, side: side)
+            try await send(SettingsWire.brightnessLevel(value, magic: nextMagic()), sid: 9, side: side)
+            if auto { try await send(SettingsWire.brightnessMode(true, magic: nextMagic()), sid: 9, side: side) }
+            return
         case "headup": body = SettingsWire.set(4, Proto.integer(1, value == 0 ? 0 : 1), magic: m)
         case "wear": body = SettingsWire.set(5, Proto.integer(1, value == 0 ? 0 : 1), magic: m)
         case "silent": body = SettingsWire.set(6, Proto.integer(1, value == 0 ? 0 : 1), magic: m)

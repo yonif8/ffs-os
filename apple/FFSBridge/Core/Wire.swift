@@ -154,8 +154,13 @@ enum SettingsWire {
     static func query(_ brightnessOnly: Bool = false, magic: Int) -> Data {
         var p = Proto(); p.int(1, 2); p.int(2, magic); p.bytes(4, Proto.integer(1, brightnessOnly ? 0 : 1)); return p.data
     }
-    static func brightness(_ level: Int, auto: Bool, magic: Int) -> Data {
-        var p = Proto(); p.int(1, auto ? 1 : 0); p.int(2, min(100, max(0, level))); return set(1, p.data, magic: magic)
+    // Firmware dispatches one brightness selector per settings message. Combining
+    // mode and level selects the latter and leaves automatic mode unchanged.
+    static func brightnessMode(_ auto: Bool, magic: Int) -> Data {
+        set(1, Proto.integer(1, auto ? 1 : 0), magic: magic)
+    }
+    static func brightnessLevel(_ level: Int, magic: Int) -> Data {
+        set(1, Proto.integer(2, min(100, max(0, level))), magic: magic)
     }
     static func imu(_ enabled: Bool, pace: Int, magic: Int) -> Data {
         var c = Proto(); c.int(1, enabled ? 1 : 0); if enabled { c.int(2, pace) }
