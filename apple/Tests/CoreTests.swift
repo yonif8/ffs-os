@@ -11,6 +11,20 @@ struct CoreTests {
         do { try action() } catch { passed += 1; return }; throw BridgeError.invalid("FAIL: accepted \(label)")
     }
     static func main() throws {
+        var authReceiver = Reassembler()
+        let authFrames = try Wire.authentication(magic: 175, seq: 8)
+        let authBody = authReceiver.feed(authFrames[0])!.1
+        try check(authBody.hex == "080410af011a0408011004", "Stock authentication with varint request id")
+        let authSuccess = Proto.integer(1, 4) + Proto.integer(2, 175) + Data([0x1a, 0])
+        try check(Wire.authenticationResult(sid: 0x80, body: authSuccess, magic: 175) == 0, "Matching stock success")
+        try check(Wire.authenticationResult(sid: 9, body: authSuccess, magic: 175) == nil, "Wrong auth service ignored")
+        try check(Wire.authenticationResult(sid: 0x80, body: authSuccess, magic: 176) == nil, "Stale auth request ignored")
+        try check(Wire.authenticationResult(sid: 0x80, body: authBody, magic: 175) == 1, "Outgoing auth echo cannot succeed")
+        try check(Wire.authenticationResult(sid: 0x80, body: Data(authSuccess.dropLast()), magic: 175) == nil, "Truncated auth rejected")
+        try check(Wire.authenticationResult(sid: 0x80, body: Proto.integer(1, 4) + Proto.integer(2, 175), magic: 175) == nil, "Missing result cannot authenticate")
+        try refuses("Oversize authentication ID") { _ = try Wire.authentication(magic: 300, seq: 8) }
+        let heartbeat = try Wire.connectionHeartbeat(seq: 7)
+        try check(heartbeat == G2Flash.frames(sid: 0x80, pb: [0x08, 0x0e, 0x10, 0x26, 0x6a, 0x00], seq: 7).map { Data($0) }, "Connection heartbeat matches Android OTA framing")
         try check(SettingsWire.query(false, magic: 1).hex == "0802100122020801", "Android device-info request")
         try check(Wire.packets(SettingsWire.query(false, magic: 1), sid: 9, seq: 1, reserve: true)[0][7] == 0x20, "Settings require reply flag")
         var nak = try Wire.packets(Data([1]), sid: 9, seq: 1)[0]; nak[7] = 2

@@ -6,12 +6,13 @@ struct LensStatus: Identifiable {
     var id: String
     var name = "Not connected", state = "disconnected", version = "—"
     var ready = false, battery: Int?, charging: Bool?, rssi: Int?, writeLimit = 0
+    var authenticated = false
     var diagnostics: [String: String] = [:]
     var receiveCount = 0
     var infoReceivedAt: Date?
     var settingsSnapshot: [String: Int] = [:]
     mutating func invalidateReadback() {
-        diagnostics = [:]; settingsSnapshot = [:]; version = "—"; battery = nil; charging = nil; infoReceivedAt = nil
+        diagnostics = [:]; settingsSnapshot = [:]; version = "—"; battery = nil; charging = nil; infoReceivedAt = nil; authenticated = false
     }
 }
 
@@ -29,6 +30,7 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
     @Published private(set) var flashOwned = false
     @Published var micLive = false
     var pairReady: Bool { lenses.values.allSatisfy(\.ready) }
+    var pairAuthenticated: Bool { pairReady && lenses.values.allSatisfy(\.authenticated) }
     var event: ((String, [String: Any]) -> Void)?
     var audio: ((Data, String) -> Void)?
     var serviceMessage: ((UInt8, Data, String) -> Void)?
@@ -42,6 +44,8 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
     private var connectingGeneration = UUID()
     private var seq: UInt8 = 0
     private var magic = 0
+    private struct Authentication { let magic: Int; let generation = UUID() }
+    private var authentication: [String: Authentication] = [:]
     private var scanGeneration = UUID()
     private var pumping = false
     private struct Job {
@@ -53,6 +57,8 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
     private var lastMic: Date?
     private var requestedMic = false
     private var rssiTask: Task<Void, Never>?
+    private var connectionHeartbeatEnabled = false
+    private var connectionHeartbeatTasks: [String: Task<Void, Never>] = [:]
     private var recovery = PeerRecovery()
     private var recoveryTask: Task<Void, Never>?
 
@@ -102,6 +108,8 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
     func disconnect() throws {
         guard !flashOwned else { throw BridgeError.unavailable("Firmware flash owns the link") }
         recovery.reset(); recoveryTask?.cancel()
+        authentication.removeAll()
+        for s in ["L", "R"] { lenses[s]?.ready = false; lenses[s]?.invalidateReadback() }
         wanted.removeAll(); UserDefaults.standard.removeObject(forKey: "wantedSides")
         stopScan(); connecting = nil; connectingGeneration = UUID(); rssiTask?.cancel()
         for p in peripherals.values { manager.cancelPeripheralConnection(p) }
@@ -142,7 +150,7 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
         if central.state == .poweredOn {
             if !wanted.isEmpty { try? startScan(); connectNext() }
         } else {
-            recovery.reset(); recoveryTask?.cancel()
+            recovery.reset(); recoveryTask?.cancel(); authentication.removeAll()
             scanning = false; connecting = nil; connectingGeneration = UUID()
             for s in ["L", "R"] { lenses[s]?.ready = false; lenses[s]?.state = "disconnected"; lenses[s]?.invalidateReadback() }
             failJobs(BridgeError.unavailable(bluetooth))
@@ -171,7 +179,8 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
     }
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         guard let s = sideOf(peripheral) else { return }
-        lenses[s]?.invalidateReadback()
+        authentication.removeValue(forKey: s); assemblers[s] = Reassembler()
+        lenses[s]?.ready = false; lenses[s]?.invalidateReadback()
         lenses[s]?.state = "discovering"; peripheral.delegate = self
         peripheral.discoverServices(nil); log("\(s): connected; discovering channels")
     }
@@ -183,6 +192,8 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
     }
     private func dropped(_ p: CBPeripheral, error: Error?, retry: Bool) {
         guard let s = sideOf(p) else { return }
+        authentication.removeValue(forKey: s)
+        connectionHeartbeatTasks.removeValue(forKey: s)?.cancel()
         lenses[s]?.ready = false; lenses[s]?.state = "disconnected"; lenses[s]?.invalidateReadback(); chars[s] = [:]; assemblers[s] = Reassembler()
         if connecting == s { connecting = nil; connectingGeneration = UUID() }
         event?("disconnected", ["side": s, "code": (error as NSError?)?.code ?? 0])
@@ -219,15 +230,53 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
         guard let p = peripherals[s] else { return }
         let limit = p.maximumWriteValueLength(for: .withoutResponse)
         let ready = p.state == .connected && chars[s]?[Self.writeID]?.properties.contains(.writeWithoutResponse) == true && chars[s]?[Self.notifyID]?.isNotifying == true && limit >= 244
-        let changed = ready != lenses[s]?.ready
-        lenses[s]?.writeLimit = limit; lenses[s]?.ready = ready
-        if ready {
-            lenses[s]?.state = "ready"
-            if connecting == s { connecting = nil; connectingGeneration = UUID() }
-            if changed { log("\(s): ready (write limit \(limit))"); connectNext() }
-        } else if p.state == .connected && limit < 244 {
-            lenses[s]?.state = "write limit too small"; log("\(s): refusing 244-byte packets at write limit \(limit)")
+        lenses[s]?.writeLimit = limit
+        guard ready else {
+            lenses[s]?.ready = false
+            if p.state == .connected && limit < 244 { lenses[s]?.state = "write limit too small" }
+            return
         }
+        guard lenses[s]?.authenticated == true else {
+            if wanted.contains(s), authentication[s] == nil { beginAuthentication(s) }
+            return
+        }
+        let changed = lenses[s]?.ready != true
+        lenses[s]?.ready = true
+        lenses[s]?.state = "ready"
+        if connecting == s { connecting = nil; connectingGeneration = UUID() }
+        if changed { log("\(s): ready (write limit \(limit))"); startConnectionHeartbeat(s); connectNext() }
+    }
+    private func beginAuthentication(_ s: String) {
+        let request = Authentication(magic: Int(nextSeq())); authentication[s] = request
+        lenses[s]?.state = "authenticating"
+        log("\(s): authenticating stock connection")
+        Task { [weak self] in
+            guard let self, self.authentication[s]?.generation == request.generation, self.peripherals[s]?.state == .connected else { return }
+            do {
+                try await self.write(Wire.authentication(magic: request.magic, seq: self.nextSeq()), sides: [s], characteristic: Self.writeID)
+                try await Task.sleep(for: .seconds(4))
+                self.failAuthentication(s, generation: request.generation, reason: "authentication timed out")
+            } catch {
+                self.failAuthentication(s, generation: request.generation, reason: error.localizedDescription)
+            }
+        }
+    }
+    private func failAuthentication(_ s: String, generation: UUID, reason: String) {
+        guard authentication[s]?.generation == generation else { return }
+        authentication.removeValue(forKey: s); wanted.remove(s)
+        lenses[s]?.ready = false; lenses[s]?.authenticated = false
+        lenses[s]?.state = "authentication failed"; log("\(s): \(reason); reconnect explicitly")
+        if let p = peripherals[s] { manager.cancelPeripheralConnection(p) }
+    }
+    private func receiveAuthentication(_ sid: UInt8, body: Data, side s: String) {
+        guard let request = authentication[s], peripherals[s]?.state == .connected,
+              let result = Wire.authenticationResult(sid: sid, body: body, magic: request.magic) else { return }
+        guard result == 0 else {
+            failAuthentication(s, generation: request.generation, reason: "authentication rejected (\(result))"); return
+        }
+        authentication.removeValue(forKey: s); lenses[s]?.authenticated = true
+        event?("authenticated", ["side": s, "magic": request.magic]); log("\(s): authentication acknowledged")
+        evaluate(s)
     }
     func peripheral(_ peripheral: CBPeripheral, didReadRSSI RSSI: NSNumber, error: Error?) {
         guard let s = sideOf(peripheral), error == nil else { return }; lenses[s]?.rssi = RSSI.intValue
@@ -260,6 +309,9 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
         var a = assemblers[s] ?? Reassembler()
         let message = a.feed(data); assemblers[s] = a
         guard let (sid, body) = message else { return }
+        if characteristic.uuid == Self.notifyID, data.count > 1, data[1] == 0x12 {
+            receiveAuthentication(sid, body: body, side: s)
+        }
         serviceMessage?(sid, body, s)
         if sid == 9 { decodeInfo(body, side: s) }
         event?("service", ["side": s, "serviceId": Int(sid), "payload": body.base64EncodedString()])
@@ -289,6 +341,34 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
             lenses[s]?.diagnostics["loader"] = out; log("\(s): \(out)")
         }
         event?("deviceInfo", ["side": s, "version": lenses[s]?.version ?? "—", "battery": lenses[s]?.battery as Any? ?? NSNull()])
+    }
+    func setConnectionHeartbeat(enabled: Bool) throws {
+        guard !flashOwned else { throw BridgeError.unavailable("Firmware flash owns the link") }
+        connectionHeartbeatEnabled = enabled
+        for task in connectionHeartbeatTasks.values { task.cancel() }
+        connectionHeartbeatTasks.removeAll()
+        if enabled { for s in ["L", "R"] where lenses[s]?.ready == true { startConnectionHeartbeat(s) } }
+        log("Connection heartbeat \(enabled ? "enabled" : "disabled")")
+    }
+    private func startConnectionHeartbeat(_ s: String) {
+        guard connectionHeartbeatEnabled else { return }
+        connectionHeartbeatTasks[s]?.cancel()
+        connectionHeartbeatTasks[s] = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, self.connectionHeartbeatEnabled, self.lenses[s]?.ready == true else { return }
+                if !self.flashOwned {
+                    do {
+                        try await self.write(Wire.connectionHeartbeat(seq: self.nextSeq()), sides: [s], characteristic: Self.writeID)
+                        self.event?("connectionHeartbeat", ["side": s])
+                    } catch { self.log("\(s): connection heartbeat stopped: \(error.localizedDescription)"); return }
+                }
+                do { try await Task.sleep(for: .seconds(12)) } catch { return }
+            }
+        }
+    }
+    func connectionHeartbeat() async throws {
+        guard !flashOwned, pairReady else { throw BridgeError.unavailable("Heartbeat test needs both connected lenses and no flash") }
+        try await write(Wire.connectionHeartbeat(seq: nextSeq()), sides: ["L", "R"], characteristic: Self.writeID)
     }
     func send(_ body: Data, sid: UInt8 = 0x90, side: String? = nil) async throws {
         guard sid != 0x80 else { throw BridgeError.invalid("Service 0x80 is forbidden") }
@@ -334,6 +414,10 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
         if let side = observation.side {
             recoveryTask = Task { [weak self] in
                 guard let self, !Task.isCancelled, !self.flashOwned, self.wanted == Set(["L", "R"]), !self.pairReady else { return }
+                guard self.lenses[side]?.ready == true, self.lenses[side]?.diagnostics["loader"] != nil else {
+                    self.log("\(side): automatic recovery skipped; current connection has no custom-loader readback")
+                    return
+                }
                 self.log("Asymmetric link loss: one-shot panic reset of surviving \(side) lens")
                 do { try await self.settings("panic", value: 1, side: side) }
                 catch { self.log("Peer recovery write failed") }
@@ -349,12 +433,13 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
         lenses[s]?.ready == true && chars[s]?[Self.otaWriteID]?.properties.contains(.writeWithoutResponse) == true && chars[s]?[Self.otaNotifyID]?.isNotifying == true
     }
     func acquireFlash() throws {
-        guard !flashOwned, !pumping, jobs.isEmpty, ["L","R"].allSatisfy(otaReady) else { throw BridgeError.unavailable("Flash needs an idle link and both subscribed OTA channels") }
+        guard pairAuthenticated, !flashOwned, !pumping, jobs.isEmpty, ["L","R"].allSatisfy(otaReady) else { throw BridgeError.unavailable("Flash needs an idle link and both subscribed OTA channels") }
         flashOwned = true; recovery.reset(); recoveryTask?.cancel(); stopScan()
     }
     func releaseFlash() { flashOwned = false }
     func reconnectAfterFlash() {
-        for s in ["L", "R"] { lenses[s]?.ready = false; chars[s] = [:] }
+        authentication.removeAll()
+        for s in ["L", "R"] { lenses[s]?.ready = false; lenses[s]?.invalidateReadback(); chars[s] = [:] }
         connecting = nil; connectingGeneration = UUID()
         for p in peripherals.values { manager.cancelPeripheralConnection(p) }
         Task { [weak self] in try? await Task.sleep(for: .seconds(10)); try? self?.connect() }

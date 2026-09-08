@@ -19,7 +19,9 @@ xcodebuild -project FFSBridgeMac.xcodeproj -target FFSBridgeMac \
 
 The app uses the Mac's own Bluetooth radio. Allow Bluetooth when prompted, keep the
 glasses powered and nearby, and click Connect glasses. Disconnect the phone bridge
-before switching drivers. Both lenses connect serially to avoid overlapping initiators.
+before switching drivers. Both lenses connect serially to avoid overlapping initiators. Each completes the stock
+authentication request and matching success reply before becoming ready. Authentication
+failure stops that attempt; reconnect explicitly after handling any OS pairing prompt.
 The Mac app can remain in the background; the Mac must be awake and in Bluetooth range.
 A closed app, sleeping Mac, or glasses in a powered-off state cannot receive commands.
 
@@ -86,8 +88,20 @@ Firmware must match an independently obtained CI SHA-256 and all component CRCs,
 TOC/subheader boundaries and main-image MRAM bounds. Unknown goldens require explicit
 opt-in. A successful dry-run for the exact image and both ready OTA channels is
 mandatory. Real OTA owns the radio until transfer ends and reports reconnection
-separately. **Service 0x80 is forbidden**, including the old Android heartbeat; the
-Apple bridge uses a read-only settings query on 0x09 instead. Physical flashing still
+separately. **Arbitrary service 0x80 writes are forbidden.** The typed
+`connectionHeartbeat` command sends only the exact Android connection heartbeat
+(command 14); it requires both lenses and no active flash. The opt-in
+`connectionHeartbeatEnabled` command sends it on each lens becoming ready and
+every 12 seconds; it defaults off and pauses during OTA. Testing on stock 2.2.10.10
+received heartbeat replies but did not prevent the 30-second disconnect.
+Real OTA requires authentication on both current connections. This follows the
+[upstream 2.2.9 compatibility fix](https://github.com/jimrandomh/g2flash/commit/7c6d3c15b0bac9ad7247163c12c53efeb101e503). During OTA,
+control-channel heartbeat traffic is suppressed. An ambiguous timeout or lost
+link stops the transfer without replaying a possibly committed block; only an
+explicit block rejection permits retry in place. Automatic reconnect-and-resume
+is not implemented. `python3 tools/test_flash_transfer.py` verifies these paths
+against a simulated peer using the production transfer code.
+Physical flashing still
 requires the project's rig procedure and hardware validation of this path.
 
 Recordings and STT credentials stay outside source control. On Mac they live under

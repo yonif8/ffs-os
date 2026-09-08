@@ -138,11 +138,11 @@ final class BridgeModel: ObservableObject {
         #endif
     }
     func status() -> [String: Any] {
-        ["app": "FFS Bridge", "version": "1.0", "platform": Self.platformName, "pairReady": link.pairReady,
+        ["app": "FFS Bridge", "version": "1.0", "platform": Self.platformName, "pairReady": link.pairReady, "pairAuthenticated": link.pairAuthenticated,
          "bluetooth": link.bluetooth, "micLive": link.micLive, "eventCursor": eventID,
          "lenses": ["L", "R"].map { side -> [String: Any] in
              let l = link.lenses[side]!
-             return ["side": side, "name": l.name, "state": l.state, "ready": l.ready, "version": l.version,
+             return ["side": side, "name": l.name, "state": l.state, "ready": l.ready, "authenticated": l.authenticated, "version": l.version,
                      "battery": l.battery as Any? ?? NSNull(), "rssi": l.rssi as Any? ?? NSNull(), "writeLimit": l.writeLimit, "receiveCount":l.receiveCount, "diagnostics": l.diagnostics,
                      "infoReceivedAt": l.infoReceivedAt?.timeIntervalSince1970 as Any? ?? NSNull(), "settings": l.settingsSnapshot]
          }, "flash": ["active": flasher.active, "message": flasher.message, "progress": flasher.progress, "ok": flasher.success as Any? ?? NSNull()],
@@ -173,6 +173,10 @@ final class BridgeModel: ObservableObject {
         case "scan": try link.startScan()
         case "stopScan": link.stopScan()
         case "deviceInfo": try await link.settings("info", side: side)
+        case "connectionHeartbeat": try await link.connectionHeartbeat()
+        case "connectionHeartbeatEnabled":
+            guard let enabled = args["enabled"] as? Bool else { throw BridgeError.invalid("enabled is required") }
+            try link.setConnectionHeartbeat(enabled: enabled)
         case "setting": try await link.settings(args["key"] as? String ?? "query", value: args["value"] as? Int ?? 0, side: side, auto: args["auto"] as? Bool ?? false)
         case "push":
             guard let b64 = args["base64"] as? String, let data = Data(base64Encoded: b64), !data.isEmpty, let sid = UInt8(exactly: args["serviceId"] as? Int ?? 0x90) else { throw BridgeError.invalid("Invalid payload") }

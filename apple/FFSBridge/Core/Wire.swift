@@ -19,6 +19,26 @@ extension Data {
 }
 
 enum Wire {
+    // Exact connection heartbeat used by the Android OTA flasher. This is the
+    // typed heartbeat entry; arbitrary service 0x80 writes stay blocked.
+    static func connectionHeartbeat(seq: UInt8) throws -> [Data] {
+        try packets(Data([0x08, 0x0e, 0x10, 0x26, 0x6a, 0x00]), sid: 0x80, seq: seq)
+    }
+    static func authentication(magic: Int, seq: UInt8) throws -> [Data] {
+        guard (0...255).contains(magic) else { throw BridgeError.invalid("Authentication request ID must fit in 8 bits") }
+        var p = Proto(); p.int(1, 4); p.int(2, magic)
+        p.bytes(3, Proto.integer(1, 1) + Proto.integer(2, 4))
+        return try packets(p.data, sid: 0x80, seq: seq)
+    }
+    // Empty nested result encodes protobuf's default SUCCESS (0).
+    // An echoed request contains field 1 = 1 and must never authenticate us.
+    static func authenticationResult(sid: UInt8, body: Data, magic: Int) -> Int? {
+        guard sid == 0x80, let p = try? Proto.fields(body),
+              p.number(1) == 4, p.number(2) == magic,
+              let result = p.bytes(3), let fields = try? Proto.fields(result) else { return nil }
+        if fields[1] != nil { return fields.number(1) }
+        return 0
+    }
     static func crc16(_ data: Data) -> UInt16 {
         var c: UInt16 = 0xffff
         for b in data {
