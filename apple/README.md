@@ -142,7 +142,15 @@ code, in that order; no app content is preloaded by catalog synchronization. The
 execution acknowledgement. Back navigation, native drawing and memory release run on
 the glasses. Recent apps are saved sessions, not background processes.
 
-RPC: `libraryAdd {base64: <FXP1/FFSA frame>}`, `librarySync`, `libraryStatus`.
+Each entry has **Add to glasses** / **Remove from glasses** controls. These change
+only the on-glass catalog over Bluetooth; the companion retains the package and
+checkpoint. Choices persist on the companion and are applied at the next sync if
+made while disconnected. No firmware flash is needed for catalog additions,
+removals or updated package names/icon identifiers.
+
+RPC: `libraryAdd {base64: <FXP1/FFSA frame>}`, `librarySetListed {id: <app ID>, listed: true|false}`,
+`librarySync`, `libraryStatus`. The status field `listed` is the desired catalog
+membership; the operation's message reports synchronization success or failure.
 The workspace CLI supports `install <source.c> --library`; it chooses the packer from
 that source's SDK checkout, or an explicit `--sdk-root`. App packages must match the
 active firmware ABI. Existing ABI-5 voice apps do not run on the ABI-4 product image.

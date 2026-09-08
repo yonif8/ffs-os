@@ -41,8 +41,30 @@ import Foundation
         let encoded=app.frame(op:8,token:7);precondition(encoded.u16(46)==7 && encoded.count==frame.count)
         lib.receive(event(0x21,Data(saved.prefix(6))));precondition(!lib.entries[0].saved)
         let cleared=AppLibrary(root:root);precondition(!cleared.entries[0].saved)
+        // Remove only catalog metadata; keep package and saved session for re-adding.
+        lib.receive(event(0x21,saved));operations.removeAll();frames.removeAll()
+        try lib.setListed(id: 1, listed: false)
+        try await Task.sleep(for:.milliseconds(100))
+        precondition(operations == [3] && frames[0].count == 48)
+        precondition(!lib.entries[0].listed && lib.entries[0].saved && lib.message == "0 apps available on glasses")
+        request[2]=8;lib.receive(event(0x20,request));try await Task.sleep(for:.milliseconds(20))
+        precondition(operations == [3], "A stale selection must not resurrect a removed app")
+        let hiddenRestart = AppLibrary(root:root)
+        precondition(hiddenRestart.entries.count == 1 && !hiddenRestart.entries[0].listed && hiddenRestart.entries[0].saved)
+        hiddenRestart.available={true};hiddenRestart.send={f in operations.append(Int(f[16]));frames.append(Data(f.dropFirst(12)))}
+        operations.removeAll();frames.removeAll();hiddenRestart.sync()
+        try await Task.sleep(for:.milliseconds(100));precondition(operations == [3])
+        operations.removeAll();frames.removeAll();try hiddenRestart.setListed(id:1,listed:true)
+        try await Task.sleep(for:.milliseconds(100));precondition(operations == [5] && frames[0].count == 48)
+        precondition(hiddenRestart.entries[0].saved && hiddenRestart.entries[0].listed)
+        precondition(AppLibrary(root:root).entries[0].listed)
+        hiddenRestart.available={false};try hiddenRestart.setListed(id:1,listed:false)
+        try await Task.sleep(for:.milliseconds(20));precondition(!AppLibrary(root:root).entries[0].listed)
+        precondition(hiddenRestart.message.contains("Connect both"))
+        do { try hiddenRestart.setListed(id:99,listed:true);fatalError("Unknown app accepted") } catch {}
+
         lib.send={_ in throw BridgeError.unavailable("Glasses refused command") }
         lib.sync();try await Task.sleep(for:.milliseconds(100));precondition(lib.message.contains("refused"))
-        print("App library: corruption refusal, catalog ACK, durable save/reload, token load, and clear passed")
+        print("App library: corruption refusal, catalog ACK, durable save/reload, token load, clear, metadata-only removal/re-addition and offline catalog preferences passed")
     }
 }

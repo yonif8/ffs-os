@@ -1,11 +1,17 @@
 import Foundation
 
+struct PairedCommandRefusal: LocalizedError {
+    let right: UInt32, left: UInt32
+    var errorDescription: String? { "Glasses refused command (right \(right), left \(left))" }
+}
+
 /// One queue for every FFSA/FFSC producer. A BLE write is delivery, not execution.
 /// Firmware event 0x25 is emitted only after both lenses complete the same frame.
 @MainActor
 final class PairedCommands {
     private struct Pending {
         let sequence: UInt32, crc: UInt32
+        let removingCatalogEntry: Bool
         let continuation: CheckedContinuation<Void, Error>
     }
     private let session: UInt32
@@ -41,7 +47,7 @@ final class PairedCommands {
             envelope.le32(session); envelope.le32(seq); envelope.le32(crc); envelope.append(body)
             busy = true; defer { busy = false }
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                pending = Pending(sequence: seq, crc: crc, continuation: continuation)
+                pending = Pending(sequence: seq, crc: crc, removingCatalogEntry: body.count == 48 && body.prefix(4) == Data("FFSA".utf8) && body[4] == 3, continuation: continuation)
                 timer = Task { [weak self] in
                     guard let self else { return }
                     do { try await Task.sleep(for: timeout) } catch { return }
@@ -71,9 +77,13 @@ final class PairedCommands {
               d.u32(8) == session, d.u32(12) == p.sequence, d.u32(16) == p.crc else { return }
         pending = nil; timer?.cancel()
         let right = d.u32(24), left = d.u32(28)
-        if right == 0 && left == 0 { p.continuation.resume() }
+        // FFSA uninstall is idempotent: success or NOAPP on either endpoint
+        // establishes the same absent entry. Every other mixed result still poisons
+        // the queue, because its resulting arena/UI ownership may diverge.
+        let removed = p.removingCatalogEntry && [UInt32(0), 9].contains(right) && [UInt32(0), 9].contains(left)
+        if right == 0 && left == 0 || removed { p.continuation.resume() }
         else {
-            let error = BridgeError.unavailable("Glasses refused command (right \(right), left \(left))")
+            let error = PairedCommandRefusal(right: right, left: left)
             if right != left { failure = error }
             p.continuation.resume(throwing: error)
         }

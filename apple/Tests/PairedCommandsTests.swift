@@ -3,10 +3,10 @@ import Foundation
 @main struct PairedCommandsTests {
     @MainActor static func main() async throws {
         let frame = try Wire.appData(id: 1, seq: 2, blob: Data([4]))
-        func ack(_ f: Data, session: UInt32? = nil, seq: UInt32? = nil, crc: UInt32? = nil, left: UInt32 = 0) -> Data {
+        func ack(_ f: Data, session: UInt32? = nil, seq: UInt32? = nil, crc: UInt32? = nil, right: UInt32 = 0, left: UInt32 = 0) -> Data {
             var d = Data([1, 0, 0x25, 1, 0, 0, 24, 0])
             d.le32(session ?? f.u32(16)); d.le32(seq ?? f.u32(20)); d.le32(crc ?? f.u32(24))
-            d.le32(7); d.le32(0); d.le32(left); return d
+            d.le32(7); d.le32(right); d.le32(left); return d
         }
         let q = PairedCommands(session: 42)
         var sent: [Data] = [], completed = 0
@@ -36,6 +36,23 @@ import Foundation
         var reused = false; bad.transport = { _ in reused = true }
         do { try await bad.send(frame); fatalError("Diverged queue reused") } catch {}
         precondition(!reused)
+
+        var removeBody = Data(repeating: 0, count: 48)
+        removeBody.replaceSubrange(0..<4, with: Data("FFSA".utf8)); removeBody[4]=3;removeBody[5]=4;removeBody[6]=48;removeBody[8]=1
+        let removeFrame = Wire.fxp1(removeBody)
+        for (right, left): (UInt32, UInt32) in [(0,9),(9,0),(9,9)] {
+            let removal = PairedCommands(session: 46)
+            removal.transport = { removal.receive(ack($0, right: right, left: left)) }
+            try await removal.send(removeFrame)
+            removal.transport = { removal.receive(ack($0)) }
+            try await removal.send(frame) // a converged removal must leave the queue usable
+        }
+        let failedRemoval = PairedCommands(session: 47)
+        failedRemoval.transport = { failedRemoval.receive(ack($0, right: 14, left: 0)) }
+        do { try await failedRemoval.send(removeFrame); fatalError("Storage failure accepted") } catch {}
+        var afterFailure = false; failedRemoval.transport = { _ in afterFailure = true }
+        do { try await failedRemoval.send(frame); fatalError("Uncertain removal reused") } catch {}
+        precondition(!afterFailure)
 
         let timeout = PairedCommands(session: 44); timeout.timeout = .milliseconds(30)
         var count = 0; timeout.transport = { _ in count += 1 }

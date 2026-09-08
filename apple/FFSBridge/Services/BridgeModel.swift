@@ -166,6 +166,10 @@ final class BridgeModel: ObservableObject {
             guard let encoded = args["base64"] as? String, let frame = Data(base64Encoded: encoded) else { throw BridgeError.invalid("Native app frame required") }
             try library.add(frame)
             return library.status()
+        case "librarySetListed":
+            guard let id = args["id"] as? Int, let listed = args["listed"] as? Bool else { throw BridgeError.invalid("Supply app id and listed") }
+            try library.setListed(id: id, listed: listed)
+            return library.status()
         case "libraryAutoSync": automaticLibrarySync = args["enabled"] as? Bool ?? true; return ["enabled": automaticLibrarySync]
         case "librarySync": library.sync(); return library.status()
         case "connect": try link.connect(side)
