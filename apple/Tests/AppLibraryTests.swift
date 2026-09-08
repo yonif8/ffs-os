@@ -13,11 +13,11 @@ import Foundation
         var bad=frame;bad[bad.count-1] ^= 1
         do { _=try AppPackage(frame:bad); fatalError("Corrupt package accepted") }catch{}
         let lib=AppLibrary(root:root);try lib.add(frame)
-        var operations:[Int]=[]
+        var operations:[Int]=[];var frames:[Data]=[]
         func event(_ type:UInt8,_ payload:Data)->Data {var e=Data([1,0,type,1,0,0]);e.le16(payload.count);e.append(payload);return e}
         lib.available={true}
         lib.send={ f in
-            let image=Data(f.dropFirst(12));let op=Int(image[4]);operations.append(op)
+            let image=Data(f.dropFirst(12));let op=Int(image[4]);operations.append(op);frames.append(image)
             precondition(Wire.crc32(image)==f.u32(8))
 
         }
@@ -29,8 +29,14 @@ import Foundation
         var wrongLens=event(0x21,Data(saved.prefix(6)));wrongLens[3]=0
         lib.receive(wrongLens);precondition(lib.entries[0].saved)
         let reopened=AppLibrary(root:root);precondition(reopened.entries.count==1 && reopened.entries[0].saved)
+        operations.removeAll();frames.removeAll()
+        lib.sync();try await Task.sleep(for:.milliseconds(100))
+        precondition(operations == [5] && frames[0].count == 48, "Catalog must not preload code or saved content")
+        operations.removeAll();frames.removeAll()
         var request=Data();request.le16(1);request.le16(7);lib.receive(event(0x20,request))
-        try await Task.sleep(for:.milliseconds(100));precondition(operations.last==8)
+        try await Task.sleep(for:.milliseconds(100));precondition(operations == [5,6,8])
+        precondition(frames[0].count == 48 && Data(frames[1].dropFirst(48)) == Data([5,0,0,0]))
+        precondition(Data(frames[2].dropFirst(48)) == code && frames[2].u16(34) == 7)
         lib.receive(event(0x20,request));try await Task.sleep(for:.milliseconds(20));precondition(operations.filter{$0==8}.count==1)
         let encoded=app.frame(op:8,token:7);precondition(encoded.u16(46)==7 && encoded.count==frame.count)
         lib.receive(event(0x21,Data(saved.prefix(6))));precondition(!lib.entries[0].saved)

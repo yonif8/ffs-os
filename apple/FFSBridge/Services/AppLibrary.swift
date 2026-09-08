@@ -56,8 +56,6 @@ final class AppLibrary: ObservableObject {
             guard let self else { return }
             for p in self.packages.values.sorted(by: { $0.id < $1.id }) {
                 try await self.transmit(p.frame(op: 5))
-                let state = self.saved(p)
-                if !state.isEmpty { try await self.transmit(p.frame(op: 6, state: state)) }
             }
             self.message = "\(self.packages.count) apps available on glasses"
         }
@@ -80,6 +78,10 @@ final class AppLibrary: ObservableObject {
             if recentLoadRequests.count > 32 { recentLoadRequests.removeFirst() }
             enqueue { [weak self] in
                 guard let self else { return }; self.message = "Opening \(app.name)"
+                // Refresh possibly older persistent metadata, then restore content only
+                // for the app the wearer actually selected. Empty state clears stale RAM.
+                try await self.transmit(app.frame(op: 5))
+                try await self.transmit(app.frame(op: 6, state: self.saved(app)))
                 try await self.transmit(app.frame(op: 8, token: token)); self.message = "\(app.name) is open"
             }
         case 0x21:

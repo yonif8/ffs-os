@@ -135,8 +135,10 @@ workspace's STATUS.md is the home for actual on-glass verification results.
 
 The shared `AppLibrary` stores native FFSA packages and small app-authored checkpoints
 on the companion. **Apps on glasses** lets you import a package and sync its catalog.
-A compatible product-shell firmware then shows the app names in its drawer and asks
-the companion for code when the wearer opens one. The companion waits for a firmware
+Catalog sync sends names, icon identifiers and version metadata only. Product-shell
+firmware with persistent-catalog support retains those entries across reboot. When
+the wearer opens one, the companion sends its current metadata, saved state and
+code, in that order; no app content is preloaded by catalog synchronization. The companion waits for a firmware
 execution acknowledgement. Back navigation, native drawing and memory release run on
 the glasses. Recent apps are saved sessions, not background processes.
 
