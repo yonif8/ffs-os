@@ -22,6 +22,9 @@ glasses powered and nearby, and click Connect glasses. Disconnect the phone brid
 before switching drivers. Both lenses connect serially to avoid overlapping initiators. Each completes the stock
 authentication request and matching success reply before becoming ready. Authentication
 failure stops that attempt; reconnect explicitly after handling any OS pairing prompt.
+After OTA, all connection entry points share a ten-second reboot delay. Explicit
+disconnect or a Bluetooth power change cancels the pending reconnect task. This
+callback-race fix builds for both platforms; its next physical OTA test is pending.
 The Mac app can remain in the background; the Mac must be awake and in Bluetooth range.
 A closed app, sleeping Mac, or glasses in a powered-off state cannot receive commands.
 

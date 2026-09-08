@@ -42,6 +42,9 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
     private var wanted = Set<String>()
     private var connecting: String?
     private var connectingGeneration = UUID()
+    private var rebootReconnectTask: Task<Void, Never>?
+    private var rebootReconnectGeneration = UUID()
+    private var rebootReconnectAfter: TimeInterval = 0
     private var seq: UInt8 = 0
     private var magic = 0
     private struct Authentication { let magic: Int; let generation = UUID() }
@@ -107,6 +110,7 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
     }
     func disconnect() throws {
         guard !flashOwned else { throw BridgeError.unavailable("Firmware flash owns the link") }
+        cancelRebootReconnect()
         recovery.reset(); recoveryTask?.cancel()
         authentication.removeAll()
         for s in ["L", "R"] { lenses[s]?.ready = false; lenses[s]?.invalidateReadback() }
@@ -121,7 +125,8 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
     }
     private func sideOf(_ p: CBPeripheral) -> String? { peripherals.first { $0.value.identifier == p.identifier }?.key }
     private func connectNext() {
-        guard !flashOwned, manager.state == .poweredOn, connecting == nil else { return }
+        guard !flashOwned, manager.state == .poweredOn, connecting == nil,
+              ProcessInfo.processInfo.systemUptime >= rebootReconnectAfter else { return }
         for s in ["R", "L"] where wanted.contains(s) && lenses[s]?.ready != true {
             guard let p = peripherals[s], p.state != .disconnecting else { continue }
             connecting = s; connectingGeneration = UUID(); let generation = connectingGeneration
@@ -150,6 +155,7 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
         if central.state == .poweredOn {
             if !wanted.isEmpty { try? startScan(); connectNext() }
         } else {
+            cancelRebootReconnect()
             recovery.reset(); recoveryTask?.cancel(); authentication.removeAll()
             scanning = false; connecting = nil; connectingGeneration = UUID()
             for s in ["L", "R"] { lenses[s]?.ready = false; lenses[s]?.state = "disconnected"; lenses[s]?.invalidateReadback() }
@@ -437,12 +443,28 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
         flashOwned = true; recovery.reset(); recoveryTask?.cancel(); stopScan()
     }
     func releaseFlash() { flashOwned = false }
+    private func cancelRebootReconnect() {
+        rebootReconnectTask?.cancel(); rebootReconnectTask = nil
+        rebootReconnectGeneration = UUID(); rebootReconnectAfter = 0
+    }
     func reconnectAfterFlash() {
+        cancelRebootReconnect()
+        // Arm before cancellation: didDisconnect and discovery callbacks also
+        // call connectNext, and must respect the same physical reboot window.
+        rebootReconnectAfter = ProcessInfo.processInfo.systemUptime + 10
+        let generation = rebootReconnectGeneration
+        recovery.reset(); recoveryTask?.cancel(); stopScan()
         authentication.removeAll()
         for s in ["L", "R"] { lenses[s]?.ready = false; lenses[s]?.invalidateReadback(); chars[s] = [:] }
         connecting = nil; connectingGeneration = UUID()
         for p in peripherals.values { manager.cancelPeripheralConnection(p) }
-        Task { [weak self] in try? await Task.sleep(for: .seconds(10)); try? self?.connect() }
+        rebootReconnectTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(10)) } catch { return }
+            guard let self, self.rebootReconnectGeneration == generation,
+                  !Task.isCancelled, !self.wanted.isEmpty else { return }
+            self.rebootReconnectAfter = 0; self.rebootReconnectTask = nil
+            try? self.startScan(); self.connectNext()
+        }
     }
     func settings(_ key: String, value: Int = 0, side: String? = nil, auto: Bool = false) async throws {
         let m = nextMagic()
