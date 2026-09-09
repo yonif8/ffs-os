@@ -38,7 +38,7 @@ final class BridgeModel: ObservableObject {
     private var eventBuffer: [[String: Any]] = []
     private var subscriptions = Set<AnyCancellable>()
     private var commandBusy = false
-    private var librarySynced = false
+    private let librarySync = CatalogSyncGate()
     private var automaticLibrarySync = true
     private var fbFlush: Task<Void, Never>?
     init() {
@@ -88,12 +88,12 @@ final class BridgeModel: ObservableObject {
         if developer.enabled { developer.stop() } else { do { try developer.start() } catch { errorMessage = error.localizedDescription } }
     }
     private func record(_ name: String, _ details: [String: Any]) {
-        if name == "disconnected" { librarySynced = false; paired.disconnected(); library.disconnected() }
+        if name == "disconnected" { librarySync.disconnected(); paired.disconnected(); library.disconnected() }
         if name == "pairReady", !flasher.active { perform { try await self.link.settings(self.library.entries.isEmpty ? "info" : "wake", value: 1) } }
         if automaticLibrarySync, name == "deviceInfo", details["side"] as? String == "R", !flasher.active, link.pairReady,
            link.lenses["R"]?.diagnostics["loader"]?.contains("shell=2") == true,
            let values = link.lenses["R"]?.settingsSnapshot, !values.isEmpty {
-            if !librarySynced { librarySynced = true; library.sync() }
+            librarySync.request { self.library.sync() }
             library.syncSettings(values)
         }
         eventID += 1

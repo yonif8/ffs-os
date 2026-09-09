@@ -136,7 +136,9 @@ workspace's STATUS.md is the home for actual on-glass verification results.
 
 The shared `AppLibrary` stores native FFSA packages and small app-authored checkpoints
 on the companion. **Apps on glasses** lets you import a package and sync its catalog.
-Catalog sync sends names, icon identifiers and version metadata only. Product-shell
+Catalog sync first clears the on-glass catalog metadata, then sends the complete
+desired snapshot of names, icon identifiers and version metadata. This makes both
+lenses converge even if one contains an entry unknown to the current companion. Product-shell
 firmware with persistent-catalog support retains those entries across reboot. When
 the wearer opens one, the companion sends its current metadata, saved state and
 code, in that order; no app content is preloaded by catalog synchronization. The companion waits for a firmware
@@ -152,7 +154,8 @@ Each entry has **Add to glasses** / **Remove from glasses** controls. These chan
 only the on-glass catalog over Bluetooth; the companion retains the package and
 checkpoint. Choices persist on the companion and are applied at the next sync if
 made while disconnected. No firmware flash is needed for catalog additions,
-removals or updated package names/icon identifiers.
+removals or updated package names/icon identifiers. The companion can retain more
+than 12 packages, while at most 12 may be listed on the glasses at once.
 
 RPC: `libraryAdd {base64: <FXP1/FFSA frame>}`, `librarySetListed {id: <app ID>, listed: true|false}`,
 `librarySync`, `libraryStatus`. The status field `listed` is the desired catalog

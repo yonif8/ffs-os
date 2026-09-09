@@ -2,6 +2,30 @@ import Foundation
 import Combine
 
 @MainActor
+final class CatalogSyncGate {
+    private(set) var synchronized = false
+    private(set) var running = false
+    private var generation: UInt64 = 0
+
+    func request(_ start: () -> Task<Bool, Never>) {
+        guard !synchronized, !running else { return }
+        running = true
+        let expectedGeneration = generation, operation = start()
+        Task { [weak self] in
+            let succeeded = await operation.value
+            guard let self, self.generation == expectedGeneration else { return }
+            self.running = false
+            self.synchronized = succeeded
+        }
+    }
+    func disconnected() {
+        generation &+= 1
+        synchronized = false
+        running = false
+    }
+}
+
+@MainActor
 final class AppLibrary: ObservableObject {
     struct Entry: Identifiable { let id: Int; let name: String; let icon: Int; let saved: Bool; let listed: Bool }
     @Published private(set) var entries: [Entry] = []
@@ -11,7 +35,7 @@ final class AppLibrary: ObservableObject {
     private var packages: [Int: AppPackage] = [:]
     private var hiddenIDs = Set<Int>()
     private var recentLoadRequests: [UInt32] = []
-    private var queue: Task<Void, Never>?
+    private var queue: Task<Bool, Never>?
     private var settingsAcknowledged: Data?
     private var connectionGeneration: UInt64 = 0
     var send: ((Data) async throws -> Void)?
@@ -39,7 +63,9 @@ final class AppLibrary: ObservableObject {
     private func refresh() { entries = packages.values.sorted { $0.id < $1.id }.map { Entry(id: $0.id, name: $0.name, icon: $0.image.u16(32), saved: !saved($0).isEmpty, listed: !hiddenIDs.contains($0.id)) } }
     func add(_ frame: Data) throws {
         let p = try AppPackage(frame: frame)
-        guard packages[p.id] != nil || packages.count < 12 else { throw BridgeError.invalid("Library supports up to 12 apps") }
+        let alreadyListed = packages[p.id] != nil && !hiddenIDs.contains(p.id)
+        let listedCount = packages.keys.filter { !hiddenIDs.contains($0) }.count
+        guard alreadyListed || listedCount < 12 else { throw BridgeError.invalid("Remove an app from the glasses before adding another") }
         try frame.write(to: directory.appendingPathComponent("\(p.id).ffsa"), options: .atomic)
         packages[p.id] = p
         if hiddenIDs.contains(p.id) { var next = hiddenIDs; next.remove(p.id); try persistHidden(next) }
@@ -50,37 +76,49 @@ final class AppLibrary: ObservableObject {
         hiddenIDs = next
     }
     /// Changes only the glasses catalog. The companion keeps the package and checkpoint.
-    func setListed(id: Int, listed: Bool) throws {
+    @discardableResult func setListed(id: Int, listed: Bool) throws -> Task<Bool, Never> {
         guard packages[id] != nil else { throw BridgeError.invalid("Unknown app") }
+        if listed && hiddenIDs.contains(id) {
+            guard packages.keys.filter({ !hiddenIDs.contains($0) }).count < 12 else {
+                throw BridgeError.invalid("Glasses catalog supports up to 12 apps")
+            }
+        }
         var next = hiddenIDs
         if listed { next.remove(id) } else { next.insert(id) }
         if next != hiddenIDs { try persistHidden(next) }
         refresh(); message = "Catalog change saved; syncing with glasses"
-        sync()
+        return sync()
     }
-    private func enqueue(_ work: @escaping () async throws -> Void) {
+    @discardableResult private func enqueue(_ work: @escaping () async throws -> Void) -> Task<Bool, Never> {
         let previous = queue
-        queue = Task { [weak self] in
-            await previous?.value
-            guard let self else { return }
+        let next = Task { [weak self] in
+            _ = await previous?.value
+            guard let self else { return false }
             self.busy = true; defer { self.busy = false }
-            do { guard self.available?() == true else { throw BridgeError.unavailable("Connect both glasses to use the library") }; try await work() }
-            catch { self.message = error.localizedDescription }
+            do {
+                guard self.available?() == true else { throw BridgeError.unavailable("Connect both glasses to use the library") }
+                try await work()
+                return true
+            } catch {
+                self.message = error.localizedDescription
+                return false
+            }
         }
+        queue = next
+        return next
     }
     private func transmit(_ frame: Data) async throws {
         guard let send else { throw BridgeError.unavailable("App library transport unavailable") }
         try await send(frame)
     }
 
-    func sync() {
+    @discardableResult func sync() -> Task<Bool, Never> {
         enqueue { [weak self] in
-            guard let self else { return }
-            // Remove first to make room, including removals staged while disconnected.
+            guard let self else { throw BridgeError.unavailable("App library closed") }
             let apps = self.packages.values.sorted(by: { $0.id < $1.id })
-            for p in apps where self.hiddenIDs.contains(p.id) {
-                try await self.transmit(p.frame(op: 3))
-            }
+            // Reset first so both lenses rebuild the same complete snapshot even if
+            // either one contains entries this companion has never seen.
+            try await self.transmit(AppPackage.catalogResetFrame())
             for p in apps where !self.hiddenIDs.contains(p.id) {
                 try await self.transmit(p.frame(op: 5))
             }

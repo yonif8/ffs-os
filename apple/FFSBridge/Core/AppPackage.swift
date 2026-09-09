@@ -25,6 +25,15 @@ struct AppPackage {
         if op == 6 { body.append(state) }
         return Wire.fxp1(body)
     }
+    /// Begins an exact catalog snapshot. Firmware clears persistent catalog metadata,
+    /// then subsequent op-5 frames repopulate the desired entries.
+    static func catalogResetFrame() -> Data {
+        var body = Data(repeating: 0, count: 48)
+        body.replaceSubrange(0..<4, with: Data("FFSA".utf8))
+        body[4] = 9; body[5] = 4; body[6] = 48
+        body[8] = 0xff; body[9] = 0xff
+        return Wire.fxp1(body)
+    }
     static func settingsFrame(brightness: Int?, wear: Int?, headup: Int?) -> Data {
         var b = Data(repeating: 0, count: 48); b.replaceSubrange(0..<4, with: Data("FFSA".utf8)); b[4]=7; b[5]=4; b[6]=48
         b.append(UInt8(clamping: brightness ?? 255)); b.append(UInt8(clamping: wear ?? 255)); b.append(UInt8(clamping: headup ?? 255))

@@ -21,6 +21,14 @@ body CRC32, presented frame, right error, left error. Both errors must be zero.
 A Bluetooth write completing, a right-only 0x24 ACK, or a stale 0x25 is insufficient.
 The frame identifies a paired firmware transaction; it is not an optical measurement.
 
+App-library synchronization is an exact snapshot. Its first inner body is a
+48-byte FFSA control frame with opcode 9, ABI 4, header length 48 and reserved app
+ID `0xffff`; all remaining bytes are zero. Firmware treats this as an idempotent
+catalog-metadata reset. Only after both lenses acknowledge it does the companion
+send the desired entries as sorted opcode-5 metadata frames. The reset never
+deletes companion packages or checkpoints, and an empty desired catalog consists
+of the reset alone.
+
 The host serializes every producer and associates send failures/timeouts with the
 exact pending sequence. An uncertain delivery, disconnect during delivery or
 asymmetric execution error blocks subsequent writes. There is no automatic replay
