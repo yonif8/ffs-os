@@ -24,7 +24,8 @@ authentication request and matching success reply before becoming ready. Authent
 failure stops that attempt; reconnect explicitly after handling any OS pairing prompt.
 After OTA, all connection entry points share a ten-second reboot delay. Explicit
 disconnect or a Bluetooth power change cancels the pending reconnect task. This
-callback-race fix builds for both platforms; its next physical OTA test is pending.
+reconnect cooldown has been exercised during dual-lens OTA; it does not establish
+indefinite connection reliability.
 The Mac app can remain in the background; the Mac must be awake and in Bluetooth range.
 A closed app, sleeping Mac, or glasses in a powered-off state cannot receive commands.
 
@@ -141,6 +142,11 @@ the wearer opens one, the companion sends its current metadata, saved state and
 code, in that order; no app content is preloaded by catalog synchronization. The companion waits for a firmware
 execution acknowledgement. Back navigation, native drawing and memory release run on
 the glasses. Recent apps are saved sessions, not background processes.
+
+Settings readbacks are sent only when their encoded values differ from the last
+paired acknowledgement. Failed sends and disconnections invalidate that cache;
+unchanged polling therefore avoids another UI journal transaction while changed
+settings and fresh connections still synchronize.
 
 Each entry has **Add to glasses** / **Remove from glasses** controls. These change
 only the on-glass catalog over Bluetooth; the companion retains the package and
