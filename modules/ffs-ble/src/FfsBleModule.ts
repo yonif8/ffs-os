@@ -505,6 +505,15 @@ interface FfsBleNativeModule {
   /** A human-readable summary of the config in force, with header values REDACTED. */
   voiceGetSttConfig(): string;
 
+  /** Select the lens whose LC3 microphone packets feed the native voice archive. */
+  voiceSetCaptureSide(side: G2ConnectSide): G2ConnectSide;
+
+  /**
+   * Explicit debug export of one private recording session. An empty id selects
+   * the latest session; returned paths point into the app's external files area.
+   */
+  voiceExport(sessionId: string): string[];
+
   /**
    * Tiny persistent key/value store (FUT-236) — used so the calibration run knows
    * whether it has already been completed. Returns null if never set.

@@ -945,7 +945,7 @@ object G2Setting {
     private fun oneField(field: Int, value: Int): ByteArray =
         G2ProtobufWriter().apply { writeInt32Field(field, value) }.data
 
-    /** Suppress the audio cue on container pushes and notifications. */
+    /** Stock silent mode blocks app/display startup; this is not an audio-mute control. */
     fun setSilentMode(magicRandom: Int, enabled: Boolean): ByteArray =
         infoEnvelope(magicRandom, 6, oneField(1, if (enabled) 1 else 0))
 

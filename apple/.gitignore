@@ -1,0 +1,6 @@
+build/
+**/xcuserdata/
+Signing.local.xcconfig
+developer-pair.json
+*.bin
+*.ipa

@@ -98,3 +98,6 @@ tools/lc3fixture/build/
 # never be committed; this catches a stray copy dropped in the tree during development.
 stt-config.json
 **/stt-config.json
+
+# Private local native app seed packages
+apple/FFSBridge/SeedApps.local/

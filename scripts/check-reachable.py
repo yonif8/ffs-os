@@ -69,6 +69,16 @@ ALLOWLIST: dict[str, str] = {
     # NATIVE DASHBOARD panel that consumes templates.ts today). Until then a push goes
     # out over adb from the dev box, which is why nothing in the app imports it yet.
     "src/sdk/program.ts": "SDK v2 FFSP encoder, 2026-08-11 — on-glass side proven first; app panel not built yet",
+    # The old notification Expo module was deliberately quarantined under
+    # modules/legacy when the native package was reduced to a pure BLE bridge.
+    # It remains as migration/reference code and must not be imported by the app.
+    "modules/legacy/ffs-notify/index.ts": "quarantined legacy notification module; retained for migration reference, not app runtime",
+    "modules/legacy/ffs-notify/src/FfsNotifyModule.ts": "quarantined legacy notification module; retained for migration reference, not app runtime",
+    # These protocol helpers are retained while their replacement companion
+    # data path is under active integration. They have no user-facing screen and
+    # importing them merely to satisfy this graph check would execute dead code.
+    "src/data/sources/weather.ts": "retained companion data provider awaiting native data-path integration",
+    "src/os/pushAck.ts": "retained push acknowledgement helper awaiting native data-path integration",
 }
 
 # Matches: import ... from "X" / export ... from "X" / require("X") / import("X")

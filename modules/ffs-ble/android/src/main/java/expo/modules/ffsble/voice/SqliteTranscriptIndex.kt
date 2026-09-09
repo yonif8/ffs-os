@@ -284,8 +284,10 @@ class SqliteTranscriptIndex(
      *
      * The whole point is that the caller may pass a raw search box value containing quotes,
      * apostrophes, `*`, `-`, `(` or a stray `:`; any of those can make FTS4 throw. We replace
-     * the meta-characters with spaces and join the surviving tokens with `AND`, which gives
-     * the "all of these words" behaviour a search box implies. Bound as a parameter regardless,
+     * the meta-characters with spaces and join the surviving tokens with spaces. FTS4 treats
+     * adjacent terms as an implicit AND across Android SQLite variants; spelling `AND` out is
+     * not portable because some builds tokenize it as a literal search term. Bound as a
+     * parameter regardless,
      * so even if this function were wrong there is no injection surface.
      *
      * ⚠️ TRADE-OFF: this drops FTS4's phrase (`"..."`) and prefix (`foo*`) syntax. That is
@@ -301,7 +303,7 @@ class SqliteTranscriptIndex(
             .filter { it.isNotEmpty() && !it.equals("AND", true) && !it.equals("OR", true) &&
                       !it.equals("NOT", true) && !it.equals("NEAR", true) }
         if (tokens.isEmpty()) return ""
-        return tokens.joinToString(" AND ")
+        return tokens.joinToString(" ")
     }
 
     // -- stats / removal -----------------------------------------------------------------------

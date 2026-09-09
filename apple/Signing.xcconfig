@@ -1,0 +1,2 @@
+// Set DEVELOPMENT_TEAM in Signing.local.xcconfig or choose your team in Xcode.
+#include? "Signing.local.xcconfig"
