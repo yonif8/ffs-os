@@ -63,8 +63,24 @@ import Foundation
         precondition(hiddenRestart.message.contains("Connect both"))
         do { try hiddenRestart.setListed(id:99,listed:true);fatalError("Unknown app accepted") } catch {}
 
+        operations.removeAll();frames.removeAll()
+        let settings = ["brightness":15,"wearDetection":0,"headUp":1]
+        lib.syncSettings(settings);lib.syncSettings(settings);lib.syncSettings(settings)
+        try await Task.sleep(for:.milliseconds(100));precondition(operations == [7])
+        lib.syncSettings(["brightness":16,"wearDetection":0,"headUp":1])
+        try await Task.sleep(for:.milliseconds(100));precondition(operations == [7,7] && frames.last?[48] == 16)
+        lib.disconnected();lib.syncSettings(["brightness":16,"wearDetection":0,"headUp":1])
+        try await Task.sleep(for:.milliseconds(100));precondition(operations == [7,7,7])
+        var settingsAttempts = 0
+        lib.send={_ in settingsAttempts += 1; if settingsAttempts == 1 { throw BridgeError.unavailable("Retry settings") } }
+        lib.syncSettings(settings);lib.syncSettings(settings)
+        try await Task.sleep(for:.milliseconds(100));precondition(settingsAttempts == 2)
+        lib.disconnected();settingsAttempts=0
+        lib.send={_ in settingsAttempts += 1; if settingsAttempts == 1 { lib.disconnected() } }
+        lib.syncSettings(settings);lib.syncSettings(settings)
+        try await Task.sleep(for:.milliseconds(100));precondition(settingsAttempts == 2, "An old connection's completion must not suppress new readback")
         lib.send={_ in throw BridgeError.unavailable("Glasses refused command") }
         lib.sync();try await Task.sleep(for:.milliseconds(100));precondition(lib.message.contains("refused"))
-        print("App library: corruption refusal, catalog ACK, durable save/reload, token load, clear, metadata-only removal/re-addition and offline catalog preferences passed")
+        print("App library: catalog/save/load/removal, offline preferences, acknowledged settings deduplication, failure retry and reconnect refresh passed")
     }
 }

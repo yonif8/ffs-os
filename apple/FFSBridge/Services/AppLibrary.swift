@@ -12,6 +12,8 @@ final class AppLibrary: ObservableObject {
     private var hiddenIDs = Set<Int>()
     private var recentLoadRequests: [UInt32] = []
     private var queue: Task<Void, Never>?
+    private var settingsAcknowledged: Data?
+    private var connectionGeneration: UInt64 = 0
     var send: ((Data) async throws -> Void)?
     var setting: ((String, Int) async throws -> Void)?
     var available: (() -> Bool)?
@@ -86,11 +88,22 @@ final class AppLibrary: ObservableObject {
         }
     }
     func syncSettings(_ values: [String: Int]) {
+        let frame = AppPackage.settingsFrame(brightness: values["brightness"], wear: values["wearDetection"], headup: values["headUp"])
         enqueue { [weak self] in
-            try await self?.transmit(AppPackage.settingsFrame(brightness: values["brightness"], wear: values["wearDetection"], headup: values["headUp"]))
+            guard let self, self.settingsAcknowledged != frame else { return }
+            let generation = self.connectionGeneration
+            do {
+                try await self.transmit(frame)
+                if generation == self.connectionGeneration { self.settingsAcknowledged = frame }
+            } catch {
+                self.settingsAcknowledged = nil
+                throw error
+            }
         }
     }
-    func disconnected() { recentLoadRequests.removeAll() }
+    func disconnected() {
+        recentLoadRequests.removeAll(); settingsAcknowledged = nil; connectionGeneration &+= 1
+    }
     func receive(_ d: Data) {
         guard d.count >= 8, d[0] == 1, d[1] == 0, d[3] & 1 != 0, d.count == 8+d.u16(6) else { return }
         let p = Data(d.dropFirst(8))
