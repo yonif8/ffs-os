@@ -40,6 +40,10 @@ The wrapper also provides `capture --output /private/path/hud.png`: it builds th
 FFS_IPHONE_CONFIG="$HOME/.config/ffs/mac.json" tools/ffs-iphone status
 ```
 
+The client request timeout defaults to 12 seconds so a multi-packet paired command
+can receive its execution acknowledgement; set `FFS_IPHONE_TIMEOUT` to override it
+within the supported 1–30 second range.
+
 Use the desktop command panel for any RPC below. The framebuffer is explicitly the
 right lens; it does not prove stereo agreement or that the panel is physically lit.
 

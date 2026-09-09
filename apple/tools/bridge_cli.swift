@@ -7,7 +7,7 @@ struct BridgeCLI {
         do {
             let args = Array(CommandLine.arguments.dropFirst())
             if args.first == "--help" || args.isEmpty {
-                print("Usage: ffs-iphone <command> [JSON args | @file]\nSet FFS_IPHONE_CONFIG to a private JSON file containing host, port, and base64 key.\nCommands: status, events, connect, disconnect, deviceInfo, setting, push, appData, screenshotReset, screenshot, uploadFirmware, flash, flashProbe, voiceStart, voiceStop, voiceStatus, voiceConfig, voiceConfigStatus, voiceSearch, voiceSessions, voiceExport, voiceClear, buzzerSpeak, buzzerPlay, buzzerStop.")
+                print("Usage: ffs-iphone <command> [JSON args | @file]\nSet FFS_IPHONE_CONFIG to a private JSON file containing host, port, and base64 key. FFS_IPHONE_TIMEOUT overrides the 12-second request timeout.\nCommands: status, events, connect, disconnect, deviceInfo, setting, push, appData, screenshotReset, screenshot, uploadFirmware, flash, flashProbe, voiceStart, voiceStop, voiceStatus, voiceConfig, voiceConfigStatus, voiceSearch, voiceSessions, voiceExport, voiceClear, buzzerSpeak, buzzerPlay, buzzerStop.")
                 return
             }
             let env = ProcessInfo.processInfo.environment
@@ -27,7 +27,10 @@ struct BridgeCLI {
             guard let url = components.url else { throw BridgeError.invalid("Invalid iPhone host") }
             var request = URLRequest(url: url); request.httpMethod = "POST"; request.httpBody = body
             request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-            request.timeoutInterval = min(30, max(1, Double(env["FFS_IPHONE_TIMEOUT"] ?? "3") ?? 3))
+            // Paired FFSA/FFSC execution can legitimately use most of its 8-second
+            // bridge deadline after a multi-packet BLE upload. Keep the client
+            // alive long enough to receive that authoritative execution result.
+            request.timeoutInterval = min(30, max(1, Double(env["FFS_IPHONE_TIMEOUT"] ?? "12") ?? 12))
             let sessionConfig = URLSessionConfiguration.ephemeral; sessionConfig.connectionProxyDictionary = [:]
             let (data, response) = try await URLSession(configuration: sessionConfig).data(for: request)
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw BridgeError.unavailable("iPhone HTTP response failed") }
