@@ -94,15 +94,31 @@ import Foundation
         // while a completed attempt latches and suppresses duplicates until disconnect.
         let retryRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: retryRoot) }
-        let retryLibrary = AppLibrary(root:retryRoot), gate = CatalogSyncGate();var syncAttempts=0
-        retryLibrary.available={true};retryLibrary.send={_ in syncAttempts += 1;if syncAttempts == 1 { throw BridgeError.unavailable("Transient catalog failure") }}
-        gate.request { retryLibrary.sync() };try await Task.sleep(for:.milliseconds(30))
-        precondition(!gate.synchronized && !gate.running && syncAttempts == 1)
-        gate.request { retryLibrary.sync() };try await Task.sleep(for:.milliseconds(30))
-        precondition(gate.synchronized && !gate.running && syncAttempts == 2)
-        gate.request { retryLibrary.sync() };try await Task.sleep(for:.milliseconds(10));precondition(syncAttempts == 2)
-        gate.disconnected();gate.request { retryLibrary.sync() };try await Task.sleep(for:.milliseconds(30))
-        precondition(gate.synchronized && syncAttempts == 3)
+        let retryLibrary = AppLibrary(root:retryRoot);try retryLibrary.add(frame);var syncAttempts=0, failUpsert=true
+        retryLibrary.available={true};retryLibrary.send={f in
+            syncAttempts += 1
+            if failUpsert && f[16] == 5 { throw BridgeError.unavailable("Transient catalog failure") }
+        }
+        func requestAutomaticSync() {
+            if retryLibrary.catalogSync.needsAutomaticSync { retryLibrary.sync() }
+        }
+        requestAutomaticSync();try await Task.sleep(for:.milliseconds(30))
+        precondition(!retryLibrary.catalogSync.synchronized && !retryLibrary.catalogSync.running && syncAttempts == 2)
+        failUpsert=false;requestAutomaticSync();try await Task.sleep(for:.milliseconds(30))
+        precondition(retryLibrary.catalogSync.synchronized && !retryLibrary.catalogSync.running && syncAttempts == 4)
+        requestAutomaticSync();try await Task.sleep(for:.milliseconds(10));precondition(syncAttempts == 4)
+        // A later explicit sync may reset successfully and then fail while rebuilding.
+        // Its failure must invalidate the prior success so automatic repair runs.
+        failUpsert=true;let partial = await retryLibrary.sync().value
+        precondition(!partial && !retryLibrary.catalogSync.synchronized && syncAttempts == 6)
+        failUpsert=false;requestAutomaticSync();try await Task.sleep(for:.milliseconds(30))
+        precondition(retryLibrary.catalogSync.synchronized && syncAttempts == 8)
+        // A package mutation also invalidates the shared state before any sync starts.
+        var secondFrame=body;secondFrame[8]=2;try retryLibrary.add(Wire.fxp1(secondFrame))
+        precondition(!retryLibrary.catalogSync.synchronized && !retryLibrary.catalogSync.running)
+        requestAutomaticSync();try await Task.sleep(for:.milliseconds(30))
+        precondition(retryLibrary.catalogSync.synchronized && syncAttempts == 11)
+        retryLibrary.disconnected();precondition(!retryLibrary.catalogSync.synchronized)
 
         operations.removeAll();frames.removeAll()
         let settings = ["brightness":15,"wearDetection":0,"headUp":1]
