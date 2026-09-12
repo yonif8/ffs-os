@@ -40,6 +40,26 @@ final class BridgeModel: ObservableObject {
     private var commandBusy = false
     private var automaticLibrarySync = true
     private var fbFlush: Task<Void, Never>?
+    // Always-on, unfiltered bridge log: one JSON line per record() event to a daily file under
+    // <root>/logs/. Storage is not a concern; nothing is filtered or auto-deleted. The 2000-entry
+    // ring and the `events` RPC are unchanged — this is a durable superset written promptly so a
+    // crash or kill loses nothing. Local only; ffs_os is PUBLIC — never commit a .jsonl.
+    private let logStarted = Date()
+    private lazy var logDir: URL = {
+        let d = root.appendingPathComponent("logs")
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d
+    }()
+    private var logHandle: FileHandle?
+    private var logDay = ""
+    private static let logISO: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .current; f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSZ"; return f
+    }()
+    private static let logDayFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .current; f.dateFormat = "yyyy-MM-dd"; return f
+    }()
     init() {
         #if os(macOS)
         root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("FFSBridgeMac")
@@ -73,6 +93,7 @@ final class BridgeModel: ObservableObject {
         }
         voice.send = { [weak self] d in guard let self else { throw BridgeError.unavailable("Bridge closed") }; if PairedCommands.accepts(d) { try await self.paired.send(d) } else { try await self.link.send(d) } }
         developer.command = { [weak self] name, args in guard let self else { throw BridgeError.unavailable("Bridge closed") }; return try await self.command(name, args) }
+        logStartup()
     }
     func perform(_ action: @escaping () async throws -> Void) {
         Task { do { try await action() } catch { errorMessage = error.localizedDescription } }
@@ -96,6 +117,7 @@ final class BridgeModel: ObservableObject {
             library.syncSettings(values)
         }
         eventID += 1
+        logEvent(name, id: eventID, details)
         eventBuffer.append(["id": eventID, "time": Date().timeIntervalSince1970, "event": name, "data": details])
         if eventBuffer.count > 2000 { eventBuffer.removeFirst(eventBuffer.count - 2000) }
         // Raw service packets remain available to authenticated developer tools; never flood the status screen.
@@ -103,6 +125,48 @@ final class BridgeModel: ObservableObject {
         let text = details["message"] as? String ?? (details["side"] as? String).map { "\($0) · \(name)" } ?? name
         activity.append(ActivityEntry(id: eventID, time: Date(), kind: name, message: text, details: details))
         if activity.count > 200 { activity.removeFirst() }
+    }
+    // The single unfiltered sink. Writes one JSON line: ISO ms time, process uptime, event id,
+    // name, side (when known), and the event's data verbatim. Per-event write (durable to the OS
+    // on a crash/kill). Daily rotation; never deletes. Logging never throws into the caller.
+    private func logEvent(_ name: String, id: Int?, _ details: [String: Any]) {
+        let now = Date()
+        let day = Self.logDayFmt.string(from: now)
+        if day != logDay || logHandle == nil {
+            try? logHandle?.close(); logHandle = nil
+            let url = logDir.appendingPathComponent("bridge-\(day).jsonl")
+            if !FileManager.default.fileExists(atPath: url.path) {
+                FileManager.default.createFile(atPath: url.path, contents: nil)
+            }
+            logHandle = try? FileHandle(forWritingTo: url)
+            try? logHandle?.seekToEnd()
+            logDay = day
+        }
+        guard let handle = logHandle else { return }
+        var line: [String: Any] = ["t": Self.logISO.string(from: now),
+                                   "up": now.timeIntervalSince(logStarted), "name": name]
+        if let id { line["id"] = id }
+        if let side = details["side"] as? String ?? details["origin"] as? String { line["side"] = side }
+        line["data"] = JSONSerialization.isValidJSONObject(details) ? details : ["_repr": String(describing: details)]
+        guard var data = try? JSONSerialization.data(withJSONObject: line, options: [.sortedKeys]) else { return }
+        data.append(0x0a)
+        try? handle.write(contentsOf: data)
+    }
+    // Self-describing header, once per launch.
+    private func logStartup() {
+        let info = Bundle.main.infoDictionary ?? [:]
+        logEvent("bridgeStart", id: nil, [
+            "version": info["CFBundleShortVersionString"] as? String ?? "?",
+            "build": info["CFBundleVersion"] as? String ?? "?",
+            "gitSHA": info["FFSGitSHA"] as? String ?? "unknown",
+            "platform": Self.platformName])
+    }
+    // Strip a large base64 blob to its size so an RPC line stays readable (transport packets are
+    // logged separately as service/transport events).
+    private func loggableArgs(_ args: [String: Any]) -> [String: Any] {
+        var out = args
+        if let b = out["base64"] as? String { out["base64"] = "<\(b.count) base64 chars>" }
+        return out
     }
     private func decodeEvent(_ d: Data, side: String) {
         guard d.count >= 8, d[0] == 1, d.count == 8 + d.u16(6) else { return }
@@ -148,6 +212,7 @@ final class BridgeModel: ObservableObject {
          "pairedBusy": paired.busy, "library": library.status(), "voice": voice.status(), "buzzer": ["state": buzzer.state, "message": buzzer.detail]]
     }
     func command(_ name: String, _ args: [String: Any]) async throws -> [String: Any] {
+        logEvent("rpc", id: nil, ["command": name, "args": loggableArgs(args)])  // file only; ring unchanged
         if name == "status" { return status() }
         if name == "libraryStatus" { return library.status() }
         if name == "events" {
@@ -208,6 +273,12 @@ final class BridgeModel: ObservableObject {
         case "flash":
             guard let file = firmwareFile, let sha = args["sha256"] as? String else { throw BridgeError.invalid("Upload firmware and supply its CI SHA-256") }
             guard !voice.running, !["starting", "streaming", "synthesizing", "fetching", "converting", "retry"].contains(buzzer.state) else { throw BridgeError.unavailable("Stop voice/audio before flashing") }
+            // Log the firmware SHA + flash mode at start so a day's log file is self-describing.
+            // concurrent/mainOnly are opt-in flags owned by FirmwareFlasher (default serial); they are
+            // recorded here now, and passed into flasher.start() once that signature lands.
+            logEvent("flashStart", id: nil, ["sha256": sha, "dryRun": args["dryRun"] as? Bool ?? true,
+                     "file": file.lastPathComponent, "concurrent": args["concurrent"] as? Bool ?? false,
+                     "mainOnly": args["mainOnly"] as? Bool ?? false])
             try flasher.start(file: file, sha: sha, dry: args["dryRun"] as? Bool ?? true, allowUnknown: args["allowUnknownGolden"] as? Bool ?? false)
         case "flashProbe": return ["leftReady": link.otaReady("L"), "rightReady": link.otaReady("R")]
         case "voiceStart":

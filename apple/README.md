@@ -112,6 +112,12 @@ against a simulated peer using the production transfer code.
 Physical flashing still
 requires the project's rig procedure and hardware validation of this path.
 
+The bridge writes an always-on, unfiltered event log: one JSON line per event (transport,
+service payloads, glasses telemetry, device-info, per-lens connect/subscribe/authenticate,
+flash progress, RPC commands) to `~/Library/Application Support/FFSBridgeMac/logs/bridge-YYYY-MM-DD.jsonl`,
+rotated daily and never auto-deleted. Tail it with `tools/mac.py logs [-n N] [--since ISO] [-f]`.
+Logs are local and may contain captures — never commit a `.jsonl`.
+
 Recordings and STT credentials stay outside source control. On Mac they live under
 `~/Library/Application Support/FFSBridgeMac`; on iOS in app Documents. Original
 accepted LC3 packets and decoded PCM are retained. STT is off until configured;
