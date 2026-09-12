@@ -274,12 +274,13 @@ final class BridgeModel: ObservableObject {
             guard let file = firmwareFile, let sha = args["sha256"] as? String else { throw BridgeError.invalid("Upload firmware and supply its CI SHA-256") }
             guard !voice.running, !["starting", "streaming", "synthesizing", "fetching", "converting", "retry"].contains(buzzer.state) else { throw BridgeError.unavailable("Stop voice/audio before flashing") }
             // Log the firmware SHA + flash mode at start so a day's log file is self-describing.
-            // concurrent/mainOnly are opt-in flags owned by FirmwareFlasher (default serial); they are
-            // recorded here now, and passed into flasher.start() once that signature lands.
+            // concurrent/mainOnly are opt-in flags owned by FirmwareFlasher (default serial/full).
+            let concurrent = args["concurrent"] as? Bool ?? false, mainOnly = args["mainOnly"] as? Bool ?? false
             logEvent("flashStart", id: nil, ["sha256": sha, "dryRun": args["dryRun"] as? Bool ?? true,
-                     "file": file.lastPathComponent, "concurrent": args["concurrent"] as? Bool ?? false,
-                     "mainOnly": args["mainOnly"] as? Bool ?? false])
-            try flasher.start(file: file, sha: sha, dry: args["dryRun"] as? Bool ?? true, allowUnknown: args["allowUnknownGolden"] as? Bool ?? false)
+                     "file": file.lastPathComponent, "concurrent": concurrent, "mainOnly": mainOnly])
+            try flasher.start(file: file, sha: sha, dry: args["dryRun"] as? Bool ?? true,
+                              allowUnknown: args["allowUnknownGolden"] as? Bool ?? false,
+                              concurrent: concurrent, mainOnly: mainOnly)
         case "flashProbe": return ["leftReady": link.otaReady("L"), "rightReady": link.otaReady("R")]
         case "voiceStart":
             voice.liveOnGlasses = args["live"] as? Bool ?? true
