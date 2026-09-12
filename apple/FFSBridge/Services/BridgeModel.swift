@@ -85,7 +85,7 @@ final class BridgeModel: ObservableObject {
             }
         }
         paired.transport = { [weak self] d in guard let self else { throw BridgeError.unavailable("Bridge closed") }; try await self.link.send(d) }
-        library.send = { [weak self] d in guard let self else { throw BridgeError.unavailable("Bridge closed") }; try await self.paired.send(d) }
+        library.send = { [weak self] d, t in guard let self else { throw BridgeError.unavailable("Bridge closed") }; try await self.paired.send(d, timeout: t) }
         library.available = { [weak self] in self?.link.pairReady == true && self?.flasher.active == false }
         library.setting = { [weak self] key, value in
             guard let self else { return }; try await self.link.settings(key, value: value)
@@ -109,6 +109,9 @@ final class BridgeModel: ObservableObject {
     }
     private func record(_ name: String, _ details: [String: Any]) {
         if name == "disconnected" { paired.disconnected(); library.disconnected() }
+        // A fresh pairReady is a new connection boundary: clear any poison the previous session left,
+        // so a single earlier paired timeout does not wedge this session until a bridge restart.
+        if name == "pairReady" { paired.renew() }
         if name == "pairReady", !flasher.active { perform { try await self.link.settings(self.library.entries.isEmpty ? "info" : "wake", value: 1) } }
         if automaticLibrarySync, name == "deviceInfo", details["side"] as? String == "R", !flasher.active, link.pairReady,
            link.lenses["R"]?.diagnostics["loader"]?.contains("shell=2") == true,

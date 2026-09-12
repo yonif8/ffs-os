@@ -24,7 +24,7 @@ import Foundation
         var catalogs = [Set([1, 77]), Set([88])]
         func event(_ type:UInt8,_ payload:Data)->Data {var e=Data([1,0,type,1,0,0]);e.le16(payload.count);e.append(payload);return e}
         lib.available={true}
-        lib.send={ f in
+        lib.send={ f, _ in
             let image=Data(f.dropFirst(12));let op=Int(image[4]);operations.append(op);frames.append(image)
             precondition(Wire.crc32(image)==f.u32(8))
             if op == 9 { catalogs = [[], []] }
@@ -63,7 +63,7 @@ import Foundation
         precondition(operations == [9], "A stale selection must not resurrect a removed app")
         let hiddenRestart = AppLibrary(root:root)
         precondition(hiddenRestart.entries.count == 1 && !hiddenRestart.entries[0].listed && hiddenRestart.entries[0].saved)
-        hiddenRestart.available={true};hiddenRestart.send={f in operations.append(Int(f[16]));frames.append(Data(f.dropFirst(12)))}
+        hiddenRestart.available={true};hiddenRestart.send={f, _ in operations.append(Int(f[16]));frames.append(Data(f.dropFirst(12)))}
         operations.removeAll();frames.removeAll();let hiddenSync = await hiddenRestart.sync().value;precondition(hiddenSync)
         precondition(operations == [9])
         operations.removeAll();frames.removeAll();let relisted = await (try hiddenRestart.setListed(id:1,listed:true)).value;precondition(relisted)
@@ -79,7 +79,7 @@ import Foundation
         // listed slot while keeping its package and checkpoint on the companion.
         let capacityRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: capacityRoot) }
-        let capacity = AppLibrary(root:capacityRoot);capacity.available={true};capacity.send={_ in}
+        let capacity = AppLibrary(root:capacityRoot);capacity.available={true};capacity.send={_, _ in}
         for id in 1...12 { try capacity.add(makeFrame(id)) }
         do { try capacity.add(makeFrame(13));fatalError("Thirteenth listed app accepted") } catch {}
         let capacityRemoved = await (try capacity.setListed(id:1,listed:false)).value;precondition(capacityRemoved)
@@ -95,7 +95,7 @@ import Foundation
         let retryRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: retryRoot) }
         let retryLibrary = AppLibrary(root:retryRoot);try retryLibrary.add(frame);var syncAttempts=0, failUpsert=true
-        retryLibrary.available={true};retryLibrary.send={f in
+        retryLibrary.available={true};retryLibrary.send={f, _ in
             syncAttempts += 1
             if failUpsert && f[16] == 5 { throw BridgeError.unavailable("Transient catalog failure") }
         }
@@ -129,14 +129,14 @@ import Foundation
         lib.disconnected();lib.syncSettings(["brightness":16,"wearDetection":0,"headUp":1])
         try await Task.sleep(for:.milliseconds(100));precondition(operations == [7,7,7])
         var settingsAttempts = 0
-        lib.send={_ in settingsAttempts += 1; if settingsAttempts == 1 { throw BridgeError.unavailable("Retry settings") } }
+        lib.send={_, _ in settingsAttempts += 1; if settingsAttempts == 1 { throw BridgeError.unavailable("Retry settings") } }
         lib.syncSettings(settings);lib.syncSettings(settings)
         try await Task.sleep(for:.milliseconds(100));precondition(settingsAttempts == 2)
         lib.disconnected();settingsAttempts=0
-        lib.send={_ in settingsAttempts += 1; if settingsAttempts == 1 { lib.disconnected() } }
+        lib.send={_, _ in settingsAttempts += 1; if settingsAttempts == 1 { lib.disconnected() } }
         lib.syncSettings(settings);lib.syncSettings(settings)
         try await Task.sleep(for:.milliseconds(100));precondition(settingsAttempts == 2, "An old connection's completion must not suppress new readback")
-        lib.send={_ in throw BridgeError.unavailable("Glasses refused command") }
+        lib.send={_, _ in throw BridgeError.unavailable("Glasses refused command") }
         let refused = await lib.sync().value;precondition(!refused);precondition(lib.message.contains("refused"))
         print("App library: exact snapshot convergence, capacity rotation, automatic retry, save/load/removal and settings refresh passed")
     }

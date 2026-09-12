@@ -61,6 +61,38 @@ import Foundation
         do { try await second.value; fatalError("Uncertain arena overwritten") } catch {}
         precondition(count == 1)
 
+        // #1 A per-send timeout overrides the instance default. The reset-frame case: a LONG per-send
+        // budget survives past a short instance default, so a late ACK still completes rather than
+        // being abandoned at 8 s. Instance default 30 ms, per-send 1 h, ACK at ~120 ms -> completes.
+        let longBudget = PairedCommands(session: 50); longBudget.timeout = .milliseconds(30)
+        var lb: [Data] = []; longBudget.transport = { lb.append($0) }
+        let lbTask = Task { try await longBudget.send(frame, timeout: .seconds(3600)) }
+        try await Task.sleep(for: .milliseconds(120))
+        precondition(lb.count == 1 && longBudget.busy, "long per-send timeout did not override the short instance default")
+        longBudget.receive(ack(lb[0])); try await lbTask.value
+
+        // #2 The poison clears ONLY at a connection boundary. A timeout poisons the queue; mid-session
+        // the poison HOLDS (a later send fails without transmitting); renew() — a fresh pairReady —
+        // clears it so the next command transmits and completes.
+        let poison = PairedCommands(session: 51); poison.timeout = .milliseconds(30)
+        var pt: [Data] = []; poison.transport = { pt.append($0) }
+        do { try await poison.send(frame); fatalError("Missing ACK accepted") } catch {}
+        do { try await poison.send(frame); fatalError("Poison did not hold mid-session") } catch {}
+        precondition(pt.count == 1, "poisoned queue transmitted mid-session")
+        poison.renew()
+        let afterRenew = Task { try await poison.send(frame) }
+        try await Task.sleep(for: .milliseconds(20))
+        precondition(pt.count == 2, "renew did not let a new command transmit after a reconnect")
+        poison.receive(ack(pt[1])); try await afterRenew.value
+        // renew is boundary-only: with a command in flight (pending != nil) it must be a no-op.
+        let inflight = PairedCommands(session: 52); inflight.timeout = .seconds(3600)
+        var isent: [Data] = []; inflight.transport = { isent.append($0) }
+        let held = Task { try await inflight.send(frame) }
+        try await Task.sleep(for: .milliseconds(20))
+        inflight.renew()
+        precondition(inflight.busy, "renew acted while a command was in flight")
+        inflight.receive(ack(isent[0])); try await held.value
+
         // A timeout names the silent lens: a side heard from on 0x91 is not silent, so the absent
         // side is the lens that never acted. Here the right lens speaks (a non-completion frame) and
         // the left stays silent, so the message must name the left lens.
@@ -77,6 +109,6 @@ import Foundation
         let disconnected = PairedCommands(session: 45)
         disconnected.transport = { _ in disconnected.disconnected() }
         do { try await disconnected.send(frame); fatalError("Disconnect accepted") } catch {}
-        print("Paired commands: serialization, exact identity, wrong-eye/stale ACKs, split refusal, timeout (with silent-lens naming) and disconnect passed")
+        print("Paired commands: serialization, exact identity, wrong-eye/stale ACKs, split refusal, timeout (with silent-lens naming), per-send timeout, poison hold + renew-clears-on-reconnect, and disconnect passed")
     }
 }

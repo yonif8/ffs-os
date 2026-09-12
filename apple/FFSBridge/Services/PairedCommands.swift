@@ -33,7 +33,10 @@ final class PairedCommands {
         d.count >= 16 && d.prefix(4) == Data("FXP1".utf8) &&
         [Data("FFSA".utf8), Data("FFSC".utf8)].contains(d.subdata(in: 12..<16))
     }
-    func send(_ frame: Data) async throws {
+    /// `timeout` overrides the instance default for THIS frame only. The cold-boot catalog-reset
+    /// write can take far longer than an ordinary paired frame, so its caller passes a longer budget;
+    /// everything else stays on the 8 s default by passing nil.
+    func send(_ frame: Data, timeout deadline: Duration? = nil) async throws {
         guard Self.accepts(frame), frame.u32(4) == frame.count - 12,
               frame.u32(8) == Wire.crc32(Data(frame.dropFirst(12))) else {
             throw BridgeError.invalid("Invalid paired command")
@@ -47,6 +50,7 @@ final class PairedCommands {
             guard sequence < UInt32.max else { throw BridgeError.unavailable("Restart the bridge to renew its command session") }
             sequence += 1
             let seq = sequence, body = Data(frame.dropFirst(12)), crc = Wire.crc32(body)
+            let budget = deadline ?? timeout
             var envelope = Data("FFSQ".utf8)
             envelope.le32(session); envelope.le32(seq); envelope.le32(crc); envelope.append(body)
             busy = true; defer { busy = false }
@@ -55,7 +59,7 @@ final class PairedCommands {
                 pending = Pending(sequence: seq, crc: crc, removingCatalogEntry: body.count == 48 && body.prefix(4) == Data("FFSA".utf8) && body[4] == 3, continuation: continuation)
                 timer = Task { [weak self] in
                     guard let self else { return }
-                    do { try await Task.sleep(for: timeout) } catch { return }
+                    do { try await Task.sleep(for: budget) } catch { return }
                     fail(BridgeError.timeout(timeoutMessage()), sequence: seq)
                 }
                 Task { [weak self] in
@@ -75,6 +79,16 @@ final class PairedCommands {
     }
     func disconnected() {
         fail(BridgeError.unavailable("Connection lost during paired command. Restart the glasses and bridge before continuing."))
+    }
+    /// Clear a poisoned queue at a FRESH connection boundary (a new pairReady). A transient failure
+    /// in the previous session — a missing ACK, a cold-boot timeout — otherwise wedges every later
+    /// paired command until the bridge process restarts, because `failure` is sticky by design. The
+    /// arena-ownership doubt that justifies that stickiness belongs to the OLD connection, so on a new
+    /// one we start clean. Only at the boundary, and only with nothing in flight: mid-session the
+    /// poison must stand.
+    func renew() {
+        guard pending == nil else { return }
+        failure = nil
     }
     /// Names the silent lens when a paired command times out. A lens that completes the frame
     /// is heard from on 0x91; whichever side produced no traffic since the command started is the
