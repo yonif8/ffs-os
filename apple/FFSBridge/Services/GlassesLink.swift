@@ -346,6 +346,20 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
             }
             lenses[s]?.diagnostics["loader"] = out; log("\(s): \(out)")
         }
+        // Field 105: read-only crash-frame + uptime readback. Marker "DG2\x01": a present flag,
+        // uptime in ms, then the 8-word stacked exception frame (r0-r3, r12, lr, pc, xpsr) the
+        // firmware captured. A non-zero present flag means a fault was caught; pc/lr locate it.
+        // Right lens only (the left cannot answer a device-info read).
+        if let cr = f.bytes(105), cr.count >= 12, cr.subdata(in: 0..<3) == Data("DG2".utf8) {
+            let seen = cr.u32(4)
+            var out = "up=\(cr.u32(8) / 1000)s"
+            if seen != 0, cr.count >= 44 {
+                out += " CRASH pc=0x\(String(cr.u32(12 + 6 * 4), radix: 16))"
+                out += " lr=0x\(String(cr.u32(12 + 5 * 4), radix: 16))"
+                out += " psr=0x\(String(cr.u32(12 + 7 * 4), radix: 16))"
+            } else { out += " crash=none" }
+            lenses[s]?.diagnostics["crash"] = out; log("\(s): \(out)")
+        }
         event?("deviceInfo", ["side": s, "version": lenses[s]?.version ?? "—", "battery": lenses[s]?.battery as Any? ?? NSNull()])
     }
     func setConnectionHeartbeat(enabled: Bool) throws {

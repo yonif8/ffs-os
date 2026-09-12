@@ -17,6 +17,29 @@ xcodebuild -project FFSBridgeMac.xcodeproj -target FFSBridgeMac \
   SYMROOT="$PWD/build/MacProducts" OBJROOT="$PWD/build/MacIntermediates" build
 ```
 
+### Signing (keep the Bluetooth grant across rebuilds)
+
+The Mac app defaults to **ad-hoc** signing, which needs zero setup but changes the
+binary's code hash on every rebuild — so macOS treats each build as a new app and
+re-prompts for Bluetooth (its TCC grant is keyed on the ad-hoc code hash). To keep the
+grant, sign with a **stable identity**: pick one from `security find-identity -v -p
+codesigning` (an Apple Development cert, or a self-signed Code Signing cert made in
+Keychain Access → Certificate Assistant), and set it — macOS-SDK-scoped so the iPhone
+target is untouched — in the untracked `Signing.local.xcconfig`:
+
+```text
+CODE_SIGN_IDENTITY[sdk=macosx*] = <exact identity name from find-identity>
+CODE_SIGN_STYLE[sdk=macosx*] = Manual
+```
+
+Signing settings live in `Signing.xcconfig` (which `#include?`s the local file) — never
+as target-level settings in the generated project, because a target setting overrides the
+xcconfig and forces ad-hoc. **Rule: the shared/team bridge is built from a committed HEAD
+with a stable identity, never ad-hoc from a dirty tree.** The switch from ad-hoc to a
+stable cert is itself a new identity, so it prompts for Bluetooth **once** more; after that
+grant, rebuilds keep it. Verify by rebuilding: the next launch connects with no Bluetooth
+prompt.
+
 The app uses the Mac's own Bluetooth radio. Allow Bluetooth when prompted, keep the
 glasses powered and nearby, and click Connect glasses. Disconnect the phone bridge
 before switching drivers. Both lenses connect serially to avoid overlapping initiators. Each completes the stock
@@ -111,6 +134,12 @@ is not implemented. `python3 tools/test_flash_transfer.py` verifies these paths
 against a simulated peer using the production transfer code.
 Physical flashing still
 requires the project's rig procedure and hardware validation of this path.
+
+The bridge writes an always-on, unfiltered event log: one JSON line per event (transport,
+service payloads, glasses telemetry, device-info, per-lens connect/subscribe/authenticate,
+flash progress, RPC commands) to `~/Library/Application Support/FFSBridgeMac/logs/bridge-YYYY-MM-DD.jsonl`,
+rotated daily and never auto-deleted. Tail it with `tools/mac.py logs [-n N] [--since ISO] [-f]`.
+Logs are local and may contain captures — never commit a `.jsonl`.
 
 Recordings and STT credentials stay outside source control. On Mac they live under
 `~/Library/Application Support/FFSBridgeMac`; on iOS in app Documents. Original

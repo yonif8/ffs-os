@@ -61,9 +61,64 @@ import Foundation
         do { try await second.value; fatalError("Uncertain arena overwritten") } catch {}
         precondition(count == 1)
 
+        // #1 A per-send timeout overrides the instance default. The reset-frame case: a LONG per-send
+        // budget survives past a short instance default, so a late ACK still completes rather than
+        // being abandoned at 8 s. Instance default 30 ms, per-send 1 h, ACK at ~120 ms -> completes.
+        let longBudget = PairedCommands(session: 50); longBudget.timeout = .milliseconds(30)
+        var lb: [Data] = []; longBudget.transport = { lb.append($0) }
+        let lbTask = Task { try await longBudget.send(frame, timeout: .seconds(3600)) }
+        try await Task.sleep(for: .milliseconds(120))
+        precondition(lb.count == 1 && longBudget.busy, "long per-send timeout did not override the short instance default")
+        longBudget.receive(ack(lb[0])); try await lbTask.value
+
+        // #2 The poison clears ONLY at a connection boundary. A timeout poisons the queue; mid-session
+        // the poison HOLDS (a later send fails without transmitting); renew() — a fresh pairReady —
+        // clears it so the next command transmits and completes.
+        let poison = PairedCommands(session: 51); poison.timeout = .milliseconds(30)
+        var pt: [Data] = []; poison.transport = { pt.append($0) }
+        do { try await poison.send(frame); fatalError("Missing ACK accepted") } catch {}
+        do { try await poison.send(frame); fatalError("Poison did not hold mid-session") } catch {}
+        precondition(pt.count == 1, "poisoned queue transmitted mid-session")
+        poison.renew()
+        let afterRenew = Task { try await poison.send(frame) }
+        try await Task.sleep(for: .milliseconds(20))
+        precondition(pt.count == 2, "renew did not let a new command transmit after a reconnect")
+        poison.receive(ack(pt[1])); try await afterRenew.value
+        // renew is boundary-only: with a command in flight (pending != nil) it must be a no-op.
+        let inflight = PairedCommands(session: 52); inflight.timeout = .seconds(3600)
+        var isent: [Data] = []; inflight.transport = { isent.append($0) }
+        let held = Task { try await inflight.send(frame) }
+        try await Task.sleep(for: .milliseconds(20))
+        inflight.renew()
+        precondition(inflight.busy, "renew acted while a command was in flight")
+        inflight.receive(ack(isent[0])); try await held.value
+
+        // A timeout must NOT accuse a single lens. 0x91 traffic is right-lens-only, so the follower
+        // never appears as its own origin — naming the "silent" side would always (falsely) blame the
+        // left lens. Even when the right lens produces non-completion 0x91 traffic, a timeout stays
+        // neutral: it reports no 0x25 completion from the pair, naming neither lens.
+        let named = PairedCommands(session: 48); named.timeout = .milliseconds(40)
+        named.transport = { _ in named.receive(Data([0, 1, 2]), side: "R") }
+        do { try await named.send(frame); fatalError("Silent-lens timeout accepted") }
+        catch {
+            let m = (error as? BridgeError)?.errorDescription ?? ""
+            precondition(m.contains("No completion"), "timeout message was not the neutral no-completion wording")
+            precondition(!m.contains("left lens") && !m.contains("right lens"), "timeout falsely named a single lens")
+        }
+
         let disconnected = PairedCommands(session: 45)
         disconnected.transport = { _ in disconnected.disconnected() }
         do { try await disconnected.send(frame); fatalError("Disconnect accepted") } catch {}
-        print("Paired commands: serialization, exact identity, wrong-eye/stale ACKs, split refusal, timeout and disconnect passed")
+
+        // A refusal names the loader's reason (G2A_ERR_*), not a bare number, so the library message
+        // agrees with the on-glass shell. Both lenses INIT -> one honest reason; a split names each.
+        let bothInit = PairedCommandRefusal(right: 11, left: 11).errorDescription ?? ""
+        precondition(bothInit.contains("refused to start (init)") && bothInit.contains("code 11"), "refusal did not name the INIT reason")
+        precondition(PairedCommandRefusal.reason(2).contains("too new"), "ABI reason not named")
+        precondition(PairedCommandRefusal.reason(8).contains("not enough room"), "no-room reason not named")
+        let split = PairedCommandRefusal(right: 11, left: 0).errorDescription ?? ""
+        precondition(split.contains("right lens") && split.contains("left lens") && split.contains("(code 0)"), "split refusal did not name both lenses")
+
+        print("Paired commands: serialization, exact identity, wrong-eye/stale ACKs, split refusal, timeout (neutral no-completion wording, never names a single lens), per-send timeout, poison hold + renew-clears-on-reconnect, refusal reason naming, and disconnect passed")
     }
 }

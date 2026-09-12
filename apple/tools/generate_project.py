@@ -47,7 +47,13 @@ if MAC:
     base.pop('IPHONEOS_DEPLOYMENT_TARGET')
     base.update(SDKROOT='macosx', MACOSX_DEPLOYMENT_TARGET='14.0')
     target.pop('TARGETED_DEVICE_FAMILY')
-    target.update(PRODUCT_BUNDLE_IDENTIFIER='com.futurefounders.ffsbridge.mac', INFOPLIST_FILE='FFSBridge/InfoMac.plist', SUPPORTED_PLATFORMS='macosx', CODE_SIGN_IDENTITY='-', CODE_SIGN_STYLE='Manual', DEVELOPMENT_TEAM='', ENABLE_HARDENED_RUNTIME='YES', ENABLE_APP_SANDBOX='NO')
+    target.update(PRODUCT_BUNDLE_IDENTIFIER='com.futurefounders.ffsbridge.mac', INFOPLIST_FILE='FFSBridge/InfoMac.plist', SUPPORTED_PLATFORMS='macosx', ENABLE_HARDENED_RUNTIME='YES', ENABLE_APP_SANDBOX='NO')
+    # Leave signing to Signing.xcconfig (which #includes the untracked Signing.local.xcconfig): a
+    # target-level setting would override the xcconfig and force ad-hoc every build, which changes the
+    # code hash each rebuild so macOS re-prompts for Bluetooth (TCC keys on the cdhash for ad-hoc).
+    # Signing.xcconfig carries a macosx-scoped ad-hoc default; a stable identity in the local file wins.
+    for k in ('CODE_SIGN_STYLE', 'CODE_SIGN_IDENTITY', 'DEVELOPMENT_TEAM'):
+        target.pop(k, None)
 signing = obj('signing', isa='PBXFileReference', lastKnownFileType='text.xcconfig', path='Signing.xcconfig', sourceTree='<group>')
 objects[main]['children'].insert(0, signing)
 def configurations(name, settings):

@@ -474,7 +474,6 @@
 			"buildSettings" = {
 				"PRODUCT_BUNDLE_IDENTIFIER" = "com.futurefounders.ffsbridge.mac";
 				"PRODUCT_NAME" = "$(TARGET_NAME)";
-				"CODE_SIGN_STYLE" = "Manual";
 				"INFOPLIST_FILE" = "FFSBridge/InfoMac.plist";
 				"SWIFT_OBJC_BRIDGING_HEADER" = "FFSBridge/Core/LC3Bridge.h";
 				"HEADER_SEARCH_PATHS" = (
@@ -491,8 +490,6 @@
 				"MARKETING_VERSION" = "1.0";
 				"CURRENT_PROJECT_VERSION" = "1";
 				"ENABLE_APP_INTENTS_METADATA_EXTRACTION" = "NO";
-				"CODE_SIGN_IDENTITY" = "-";
-				"DEVELOPMENT_TEAM" = "";
 				"ENABLE_HARDENED_RUNTIME" = "YES";
 				"ENABLE_APP_SANDBOX" = "NO";
 				"SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
@@ -506,7 +503,6 @@
 			"buildSettings" = {
 				"PRODUCT_BUNDLE_IDENTIFIER" = "com.futurefounders.ffsbridge.mac";
 				"PRODUCT_NAME" = "$(TARGET_NAME)";
-				"CODE_SIGN_STYLE" = "Manual";
 				"INFOPLIST_FILE" = "FFSBridge/InfoMac.plist";
 				"SWIFT_OBJC_BRIDGING_HEADER" = "FFSBridge/Core/LC3Bridge.h";
 				"HEADER_SEARCH_PATHS" = (
@@ -523,8 +519,6 @@
 				"MARKETING_VERSION" = "1.0";
 				"CURRENT_PROJECT_VERSION" = "1";
 				"ENABLE_APP_INTENTS_METADATA_EXTRACTION" = "NO";
-				"CODE_SIGN_IDENTITY" = "-";
-				"DEVELOPMENT_TEAM" = "";
 				"ENABLE_HARDENED_RUNTIME" = "YES";
 				"ENABLE_APP_SANDBOX" = "NO";
 				"SWIFT_OPTIMIZATION_LEVEL" = "-O";

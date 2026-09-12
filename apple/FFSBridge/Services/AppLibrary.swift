@@ -36,6 +36,9 @@ final class AppLibrary: ObservableObject {
     @Published private(set) var entries: [Entry] = []
     @Published private(set) var message = "App library ready"
     @Published private(set) var busy = false
+    /// Surface a bridge-level diagnostic (e.g. the reconnect-wedge flag) in the library message that
+    /// `status()` returns, so `librarySync`/status callers see it without a separate channel.
+    func note(_ text: String) { message = text }
     private let directory: URL
     private var packages: [Int: AppPackage] = [:]
     private var hiddenIDs = Set<Int>()
@@ -44,7 +47,11 @@ final class AppLibrary: ObservableObject {
     private var settingsAcknowledged: Data?
     private var connectionGeneration: UInt64 = 0
     let catalogSync = CatalogSyncGate()
-    var send: ((Data) async throws -> Void)?
+    /// The first catalog-reset after a cold boot triggers a FlashDB metadata wipe that can take far
+    /// longer than the 8 s default paired-command timeout; give it a generous budget so the bridge
+    /// does not abandon a write the firmware is still completing.
+    private static let catalogResetTimeout: Duration = .seconds(30)
+    var send: ((Data, Duration?) async throws -> Void)?
     var setting: ((String, Int) async throws -> Void)?
     var available: (() -> Bool)?
     init(root: URL) {
@@ -116,9 +123,9 @@ final class AppLibrary: ObservableObject {
         queue = next
         return next
     }
-    private func transmit(_ frame: Data) async throws {
+    private func transmit(_ frame: Data, timeout: Duration? = nil) async throws {
         guard let send else { throw BridgeError.unavailable("App library transport unavailable") }
-        try await send(frame)
+        try await send(frame, timeout)
     }
 
     @discardableResult func sync() -> Task<Bool, Never> {
@@ -127,8 +134,9 @@ final class AppLibrary: ObservableObject {
             guard let self else { throw BridgeError.unavailable("App library closed") }
             let apps = self.packages.values.sorted(by: { $0.id < $1.id })
             // Reset first so both lenses rebuild the same complete snapshot even if
-            // either one contains entries this companion has never seen.
-            try await self.transmit(AppPackage.catalogResetFrame())
+            // either one contains entries this companion has never seen. The cold-boot
+            // reset write is slow, so this frame alone gets the longer timeout.
+            try await self.transmit(AppPackage.catalogResetFrame(), timeout: Self.catalogResetTimeout)
             for p in apps where !self.hiddenIDs.contains(p.id) {
                 try await self.transmit(p.frame(op: 5))
             }
