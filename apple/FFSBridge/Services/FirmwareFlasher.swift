@@ -53,7 +53,7 @@ final class FirmwareFlasher: ObservableObject {
     /// firmware: own staging file, own CRC check, own reboot). `mainOnly` sends just the main
     /// application component; the five stock components never change between our builds.
     /// Both default to the proven serial, full-container behaviour.
-    func start(file: URL, sha: String, dry: Bool, allowUnknown: Bool, concurrent: Bool = false, mainOnly: Bool = false, autoPanic: Bool = true) throws {
+    func start(file: URL, sha: String, dry: Bool, allowUnknown: Bool, concurrent: Bool = false, mainOnly: Bool = false, autoPanic: Bool = false) throws {
         guard !active else { throw BridgeError.unavailable("A flash is already active") }
         active = true; success = nil; progress = 0; sideProgress = [:]
         task = Task {
@@ -106,9 +106,11 @@ final class FirmwareFlasher: ObservableObject {
                     while !link.pairReady && Date() < deadline { try await Task.sleep(for: .milliseconds(250)) }
                     guard link.pairReady else { throw BridgeError.timeout("Transfer finished; both-lens reconnection not verified") }
                     try await link.settings("info")
+                    let shellUp = await summonShellAfterReconnect()
                     if autoPanic { try await panicResetPair() }
                     success = true
-                    report("FLASH COMPLETE — both lenses reconnected\(autoPanic ? ", panic-reset" : "") (\(mode))", 1)
+                    let note = autoPanic ? ", panic-reset" : (shellUp ? ", shell summoned" : ", shell NOT confirmed — a panic may be needed")
+                    report("FLASH COMPLETE — both lenses reconnected\(note) (\(mode))", 1)
                 }
             } catch {
                 success = false; validatedSHA = nil
@@ -118,17 +120,51 @@ final class FirmwareFlasher: ObservableObject {
             event?("flash", ["message": message, "progress": progress, "active": false, "ok": success ?? false])
         }
     }
-    /// Every OTA-reconnect boot leaves the follower (left MCU) unable to complete paired
-    /// command frames: op8/librarySync never gets its cross-lens 0x25, so apps won't import
-    /// or launch, until the lens reboots cleanly. Proven on 2026-09-12 — panic boots are
-    /// healthy, OTA-reconnect boots are wedged (facts.yaml: ota-reconnect-follower-wedge).
-    /// So after every OTA flash we panic-reset both lenses (L then R) and wait for the pair
-    /// to reconnect AND re-authenticate before declaring the flash done, unless opted out.
-    /// A panic write may throw if the lens has already begun its reset — that is the intended
-    /// effect, not a failure, so we log and continue; the manufactured reconnect follows.
+    /// A raw OTA-reconnect boot leaves each lens's base display page PARKED: `dash_state` stays
+    /// NONE, so `ffs_pair_tick` early-returns per lens — no peer link, no journal, no 0x91 trace,
+    /// and no paired command frames (op8 launch, `librarySync`). The one cold-over-BLE summon that
+    /// un-parks it is FWAK -> `RequestDisplayStartUp` on the BLE-thread gate. The bridge otherwise
+    /// sends FWAK on pairReady only when a flash is not active and the library is non-empty, so a
+    /// post-flash reconnect misses it. We therefore always send FWAK to BOTH lenses here
+    /// (settings("wake") with side nil broadcasts L+R) and wait for the master readback to show the
+    /// shell built and the follower peer session up before declaring the flash done. Proven
+    /// 2026-09-12: on a raw OTA boot the readback is `dash=none peer=down`; FWAK builds the shell.
+    /// Returns whether the shell + peer were confirmed within the window. Best-effort: a flash that
+    /// transferred and reconnected is still a success; an unconfirmed shell is reported, not thrown,
+    /// so an operator can enable the `autoPanic` fallback or panic manually.
+    @discardableResult
+    private func summonShellAfterReconnect() async -> Bool {
+        report("Summoning the display shell on both lenses (FWAK) after the OTA reconnect", 0.985)
+        // The bridge's own on-pairReady sync may momentarily own the loader ("library is using the
+        // glasses"); retry the wake a few times before giving up.
+        var waked = false
+        for attempt in 0..<4 {
+            do { try await link.settings("wake"); waked = true; break }
+            catch { if attempt == 3 { report("FWAK not accepted: \(error.localizedDescription)"); return false }
+                    try? await Task.sleep(for: .milliseconds(750)) }
+        }
+        guard waked else { return false }
+        // Wait for the master readback to show the shell built AND the follower peer session up.
+        let deadline = Date().addingTimeInterval(20)
+        while Date() < deadline {
+            try? await link.settings("info")
+            let ld = link.lenses["R"]?.diagnostics["loader"] ?? ""
+            let caps = link.lenses["R"]?.diagnostics["capabilities"] ?? ""
+            let peerUp = caps.contains("peer=") && !caps.contains("peer=down")
+            if ld.contains("dash=built") && peerUp { report("Shell built and follower peer up after FWAK", 0.99); return true }
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        report("Shell/peer NOT confirmed after FWAK (\(link.lenses["R"]?.diagnostics["loader"] ?? "no readback")) — a panic may be needed")
+        return false
+    }
+    /// Heavier fallback (opt-in via `autoPanic`): panic-reset both lenses and wait for the pair to
+    /// reconnect and re-authenticate. A clean (panic) boot builds the shell and completes command
+    /// frames, so this recovers a boot the FWAK summon could not. A panic write may throw if the
+    /// lens has already begun its reset — that is the intended effect, not a failure, so log and
+    /// continue; the manufactured reconnect follows.
     private func panicResetPair() async throws {
         for side in ["L", "R"] {
-            report("Panic-resetting \(side) lens to clear the OTA-boot follower wedge", 0.99)
+            report("Panic-resetting \(side) lens (autoPanic fallback)", 0.99)
             do { try await link.settings("panic", side: side) }
             catch { report("\(side): panic write returned \(error.localizedDescription) — reset likely already underway", 0.99) }
         }

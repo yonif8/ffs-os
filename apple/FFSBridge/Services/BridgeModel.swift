@@ -279,9 +279,10 @@ final class BridgeModel: ObservableObject {
             // Log the firmware SHA + flash mode at start so a day's log file is self-describing.
             // concurrent/mainOnly are opt-in flags owned by FirmwareFlasher (default serial/full).
             let concurrent = args["concurrent"] as? Bool ?? false, mainOnly = args["mainOnly"] as? Bool ?? false
-            // Auto-panic-reset both lenses after every OTA flash by default; pass autoPanic:false
-            // to opt out. Clears the OTA-reconnect follower wedge (see FirmwareFlasher.panicResetPair).
-            let autoPanic = args["autoPanic"] as? Bool ?? true
+            // After every OTA flash the flasher always FWAK-summons the parked display shell on both
+            // lenses (see FirmwareFlasher.summonShellAfterReconnect). autoPanic is the heavier opt-in
+            // fallback (default OFF): pass autoPanic:true to also panic-reset both lenses.
+            let autoPanic = args["autoPanic"] as? Bool ?? false
             logEvent("flashStart", id: nil, ["sha256": sha, "dryRun": args["dryRun"] as? Bool ?? true,
                      "file": file.lastPathComponent, "concurrent": concurrent, "mainOnly": mainOnly, "autoPanic": autoPanic])
             try flasher.start(file: file, sha: sha, dry: args["dryRun"] as? Bool ?? true,
