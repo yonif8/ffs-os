@@ -45,6 +45,9 @@ final class BridgeModel: ObservableObject {
     @Published var reconnectAutoPanic = false
     private var pairedOkSinceConnect = false
     private var reconnectWedgeFlagged = false
+    // Reproducer: when true, the mid-command debug drop is a process exit (abrupt, no clean BLE teardown)
+    // rather than a graceful disconnect. Set per-arming via the debugKillNextCommand RPC "mode":"exit".
+    private var debugKillExits = false
     private var fbFlush: Task<Void, Never>?
     // Always-on, unfiltered bridge log: one JSON line per record() event to a daily file under
     // <root>/logs/. Storage is not a concern; nothing is filtered or auto-deleted. The 2000-entry
@@ -94,8 +97,9 @@ final class BridgeModel: ObservableObject {
         paired.onCompleted = { [weak self] ok in self?.pairedCompleted(ok) }
         paired.onDebugDrop = { [weak self] in
             guard let self else { return }
-            self.logEvent("debugKill", id: nil, ["action": "drop BLE link mid-command (reproducer)"])
-            try? self.link.disconnect()
+            self.logEvent("debugKill", id: nil, ["mode": self.debugKillExits ? "exit" : "disconnect"])
+            if self.debugKillExits { Foundation.exit(0) }   // precisely-timed abrupt process death (no clean teardown)
+            else { try? self.link.disconnect() }
         }
         library.send = { [weak self] d, t in guard let self else { throw BridgeError.unavailable("Bridge closed") }; try await self.paired.send(d, timeout: t) }
         library.available = { [weak self] in self?.link.pairReady == true && self?.flasher.active == false }
@@ -281,9 +285,10 @@ final class BridgeModel: ObservableObject {
             // "P_EXEC" drops after a delay (default 80 ms, past follower READY). delayMs overrides.
             let point = args["point"] as? String ?? "P_START"
             let ms = args["delayMs"] as? Int ?? (point == "P_EXEC" ? 80 : 0)
+            debugKillExits = (args["mode"] as? String ?? "disconnect") == "exit"
             paired.debugKillAfterMs = ms
-            logEvent("debugKillArmed", id: nil, ["point": point, "delayMs": ms])
-            return ["armed": true, "point": point, "delayMs": ms]
+            logEvent("debugKillArmed", id: nil, ["point": point, "delayMs": ms, "mode": debugKillExits ? "exit" : "disconnect"])
+            return ["armed": true, "point": point, "delayMs": ms, "mode": debugKillExits ? "exit" : "disconnect"]
         case "librarySync": library.sync(); return library.status()
         case "connect": try link.connect(side)
         case "disconnect": try link.disconnect()
