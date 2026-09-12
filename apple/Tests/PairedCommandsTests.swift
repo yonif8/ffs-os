@@ -61,9 +61,22 @@ import Foundation
         do { try await second.value; fatalError("Uncertain arena overwritten") } catch {}
         precondition(count == 1)
 
+        // A timeout names the silent lens: a side heard from on 0x91 is not silent, so the absent
+        // side is the lens that never acted. Here the right lens speaks (a non-completion frame) and
+        // the left stays silent, so the message must name the left lens.
+        let named = PairedCommands(session: 48); named.timeout = .milliseconds(40)
+        named.transport = { _ in named.receive(Data([0, 1, 2]), side: "R") }
+        do { try await named.send(frame); fatalError("Silent-lens timeout accepted") }
+        catch { precondition((error as? BridgeError)?.errorDescription?.contains("left lens went silent") == true, "timeout did not name the silent left lens") }
+        // With neither lens heard from, the message stays generic — no lens is falsely named.
+        let neither = PairedCommands(session: 49); neither.timeout = .milliseconds(40)
+        neither.transport = { _ in }
+        do { try await neither.send(frame); fatalError("Silent-both timeout accepted") }
+        catch { precondition((error as? BridgeError)?.errorDescription?.contains("Neither lens") == true, "timeout misnamed a lens when both were silent") }
+
         let disconnected = PairedCommands(session: 45)
         disconnected.transport = { _ in disconnected.disconnected() }
         do { try await disconnected.send(frame); fatalError("Disconnect accepted") } catch {}
-        print("Paired commands: serialization, exact identity, wrong-eye/stale ACKs, split refusal, timeout and disconnect passed")
+        print("Paired commands: serialization, exact identity, wrong-eye/stale ACKs, split refusal, timeout (with silent-lens naming) and disconnect passed")
     }
 }

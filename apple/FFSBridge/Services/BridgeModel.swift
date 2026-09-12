@@ -77,7 +77,7 @@ final class BridgeModel: ObservableObject {
         link.audio = { [weak self] data, side in self?.voice.submit(data, side: side) }
         link.serviceMessage = { [weak self] sid, data, side in
             guard let self else { return }
-            if sid == 0x91 { self.paired.receive(data); self.library.receive(data); self.buzzer.receive(data); self.decodeEvent(data, side: side) }
+            if sid == 0x91 { self.paired.receive(data, side: side); self.library.receive(data); self.buzzer.receive(data); self.decodeEvent(data, side: side) }
             if sid == 0x30, self.fb.feed(data) {
                 self.fbFlush?.cancel()
                 if self.fb.complete { self.finishScreenshot() }

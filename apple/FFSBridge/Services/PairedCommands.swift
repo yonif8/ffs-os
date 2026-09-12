@@ -17,6 +17,10 @@ final class PairedCommands {
     private let session: UInt32
     private var sequence: UInt32 = 0
     private var pending: Pending?
+    /// Sides (e.g. "L"/"R") that produced any 0x91 traffic since the current command started.
+    /// A lens that completes the frame is necessarily heard from; one that stays silent is not,
+    /// so on a timeout the absent side is the lens that never acted.
+    private var sawSides: Set<String> = []
     private var queue: Task<Void, Error>?
     private var timer: Task<Void, Never>?
     private var failure: Error?
@@ -47,11 +51,12 @@ final class PairedCommands {
             envelope.le32(session); envelope.le32(seq); envelope.le32(crc); envelope.append(body)
             busy = true; defer { busy = false }
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                sawSides = []
                 pending = Pending(sequence: seq, crc: crc, removingCatalogEntry: body.count == 48 && body.prefix(4) == Data("FFSA".utf8) && body[4] == 3, continuation: continuation)
                 timer = Task { [weak self] in
                     guard let self else { return }
                     do { try await Task.sleep(for: timeout) } catch { return }
-                    fail(BridgeError.timeout("Both lenses did not complete the command. Restart the glasses and bridge before continuing."), sequence: seq)
+                    fail(BridgeError.timeout(timeoutMessage()), sequence: seq)
                 }
                 Task { [weak self] in
                     do { try await transport(Wire.fxp1(envelope)) }
@@ -71,7 +76,21 @@ final class PairedCommands {
     func disconnected() {
         fail(BridgeError.unavailable("Connection lost during paired command. Restart the glasses and bridge before continuing."))
     }
-    func receive(_ d: Data) {
+    /// Names the silent lens when a paired command times out. A lens that completes the frame
+    /// is heard from on 0x91; whichever side produced no traffic since the command started is the
+    /// one that never acted. Falls back to the generic wording when both or neither were heard.
+    private func timeoutMessage() -> String {
+        let silent = ["L": "left", "R": "right"].compactMap { sawSides.contains($0.key) ? nil : $0.value }
+        let tail = "Restart the glasses and bridge before continuing; if one lens stays silent, power-cycle the glasses (both in the case, then out)."
+        switch (silent.contains("left"), silent.contains("right")) {
+        case (true, false): return "The left lens went silent — it produced no events during the command while the right lens responded. \(tail)"
+        case (false, true): return "The right lens went silent — it produced no events during the command while the left lens responded. \(tail)"
+        case (true, true):  return "Neither lens produced any events during the command. \(tail)"
+        default:            return "Both lenses responded but neither reported completion of the command. \(tail)"
+        }
+    }
+    func receive(_ d: Data, side: String? = nil) {
+        if pending != nil, let side { sawSides.insert(side) }
         guard d.count == 32, d[0] == 1, d[1] == 0, d[2] == 0x25,
               d[3] & 1 == 1, d.u16(6) == 24, let p = pending,
               d.u32(8) == session, d.u32(12) == p.sequence, d.u32(16) == p.crc else { return }
