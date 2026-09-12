@@ -39,6 +39,12 @@ final class BridgeModel: ObservableObject {
     private var subscriptions = Set<AnyCancellable>()
     private var commandBusy = false
     private var automaticLibrarySync = true
+    // Reconnect-wedge detector: after a connect, the FIRST paired command that times out with no 0x25
+    // while the shell + peer read healthy (dash=built, peer up) is the master-journal reconnect wedge.
+    // Opt-in auto-panic (default OFF) recovers it by rebooting the pair. Re-armed on each pairReady.
+    @Published var reconnectAutoPanic = false
+    private var pairedOkSinceConnect = false
+    private var reconnectWedgeFlagged = false
     private var fbFlush: Task<Void, Never>?
     // Always-on, unfiltered bridge log: one JSON line per record() event to a daily file under
     // <root>/logs/. Storage is not a concern; nothing is filtered or auto-deleted. The 2000-entry
@@ -85,6 +91,7 @@ final class BridgeModel: ObservableObject {
             }
         }
         paired.transport = { [weak self] d in guard let self else { throw BridgeError.unavailable("Bridge closed") }; try await self.link.send(d) }
+        paired.onCompleted = { [weak self] ok in self?.pairedCompleted(ok) }
         library.send = { [weak self] d, t in guard let self else { throw BridgeError.unavailable("Bridge closed") }; try await self.paired.send(d, timeout: t) }
         library.available = { [weak self] in self?.link.pairReady == true && self?.flasher.active == false }
         library.setting = { [weak self] key, value in
@@ -94,6 +101,30 @@ final class BridgeModel: ObservableObject {
         voice.send = { [weak self] d in guard let self else { throw BridgeError.unavailable("Bridge closed") }; if PairedCommands.accepts(d) { try await self.paired.send(d) } else { try await self.link.send(d) } }
         developer.command = { [weak self] name, args in guard let self else { throw BridgeError.unavailable("Bridge closed") }; return try await self.command(name, args) }
         logStartup()
+    }
+    /// Reconnect-wedge detector. `ok == true` means a 0x25 arrived (the command path is alive), so the
+    /// reconnect was clean — disarm for this connection. `ok == false` means a paired command timed out
+    /// with no 0x25; if it is the FIRST such since the connect and the shell + peer read healthy
+    /// (dash=built, peer up — so NOT the OTA-parked-shell wedge), it is the master-journal reconnect
+    /// wedge: flag it in the library message and the JSONL, and (opt-in) auto-panic to recover.
+    private func pairedCompleted(_ ok: Bool) {
+        if ok { pairedOkSinceConnect = true; return }
+        guard !pairedOkSinceConnect, !reconnectWedgeFlagged else { return }
+        let loader = link.lenses["R"]?.diagnostics["loader"] ?? ""
+        let caps = link.lenses["R"]?.diagnostics["capabilities"] ?? ""
+        let peerUp = caps.contains("peer=") && !caps.contains("peer=down")
+        guard loader.contains("dash=built"), peerUp else { return }
+        reconnectWedgeFlagged = true
+        library.note("Reconnect wedge: the first command after connecting timed out with no 0x25 while the shell and peer read healthy (dash=built, peer up) — the master's paired journal is stuck from the previous session. A glasses reboot (panic) clears it." + (reconnectAutoPanic ? " Auto-panic recovering…" : " Enable reconnectAutoPanic or panic to recover."))
+        logEvent("reconnectWedge", id: nil, ["loader": loader, "capabilities": caps, "autoPanic": reconnectAutoPanic])
+        if reconnectAutoPanic { perform { try await self.recoverReconnectWedge() } }
+    }
+    /// Opt-in recovery for the reconnect wedge: panic-reset both lenses. The reboot clears the master's
+    /// stuck journal `p->state`; the link's normal reconnection brings the pair back and pairReady
+    /// re-arms the detector. Best-effort — a panic write may throw as the lens begins its reset.
+    private func recoverReconnectWedge() async throws {
+        logEvent("reconnectWedgeRecover", id: nil, ["action": "panic L+R"])
+        for side in ["L", "R"] { try? await link.settings("panic", side: side) }
     }
     func perform(_ action: @escaping () async throws -> Void) {
         Task { do { try await action() } catch { errorMessage = error.localizedDescription } }
@@ -111,7 +142,7 @@ final class BridgeModel: ObservableObject {
         if name == "disconnected" { paired.disconnected(); library.disconnected() }
         // A fresh pairReady is a new connection boundary: clear any poison the previous session left,
         // so a single earlier paired timeout does not wedge this session until a bridge restart.
-        if name == "pairReady" { paired.renew() }
+        if name == "pairReady" { paired.renew(); pairedOkSinceConnect = false; reconnectWedgeFlagged = false }
         if name == "pairReady", !flasher.active { perform { try await self.link.settings(self.library.entries.isEmpty ? "info" : "wake", value: 1) } }
         if automaticLibrarySync, name == "deviceInfo", details["side"] as? String == "R", !flasher.active, link.pairReady,
            link.lenses["R"]?.diagnostics["loader"]?.contains("shell=2") == true,
@@ -212,7 +243,7 @@ final class BridgeModel: ObservableObject {
                      "battery": l.battery as Any? ?? NSNull(), "rssi": l.rssi as Any? ?? NSNull(), "writeLimit": l.writeLimit, "receiveCount":l.receiveCount, "diagnostics": l.diagnostics,
                      "infoReceivedAt": l.infoReceivedAt?.timeIntervalSince1970 as Any? ?? NSNull(), "settings": l.settingsSnapshot]
          }, "flash": ["active": flasher.active, "message": flasher.message, "progress": flasher.progress, "ok": flasher.success as Any? ?? NSNull()],
-         "pairedBusy": paired.busy, "library": library.status(), "voice": voice.status(), "buzzer": ["state": buzzer.state, "message": buzzer.detail]]
+         "pairedBusy": paired.busy, "reconnectAutoPanic": reconnectAutoPanic, "library": library.status(), "voice": voice.status(), "buzzer": ["state": buzzer.state, "message": buzzer.detail]]
     }
     func command(_ name: String, _ args: [String: Any]) async throws -> [String: Any] {
         logEvent("rpc", id: nil, ["command": name, "args": loggableArgs(args)])  // file only; ring unchanged
@@ -238,6 +269,7 @@ final class BridgeModel: ObservableObject {
             try library.setListed(id: id, listed: listed)
             return library.status()
         case "libraryAutoSync": automaticLibrarySync = args["enabled"] as? Bool ?? true; return ["enabled": automaticLibrarySync]
+        case "reconnectAutoPanic": reconnectAutoPanic = args["enabled"] as? Bool ?? false; return ["enabled": reconnectAutoPanic]
         case "librarySync": library.sync(); return library.status()
         case "connect": try link.connect(side)
         case "disconnect": try link.disconnect()

@@ -36,6 +36,9 @@ final class AppLibrary: ObservableObject {
     @Published private(set) var entries: [Entry] = []
     @Published private(set) var message = "App library ready"
     @Published private(set) var busy = false
+    /// Surface a bridge-level diagnostic (e.g. the reconnect-wedge flag) in the library message that
+    /// `status()` returns, so `librarySync`/status callers see it without a separate channel.
+    func note(_ text: String) { message = text }
     private let directory: URL
     private var packages: [Int: AppPackage] = [:]
     private var hiddenIDs = Set<Int>()

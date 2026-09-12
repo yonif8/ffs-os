@@ -44,6 +44,10 @@ final class PairedCommands {
     private(set) var busy = false
     var transport: ((Data) async throws -> Void)?
     var timeout: Duration = .seconds(8)
+    /// Fired once per paired command outcome: `true` when a 0x25 arrived (success OR a per-side
+    /// refusal — either way the command path is alive), `false` when the command timed out with no
+    /// 0x25. The bridge uses `false` to detect the reconnect wedge (master journal stuck, no 0x25).
+    var onCompleted: ((Bool) -> Void)?
     init(session: UInt32 = UInt32.random(in: 1...UInt32.max)) { self.session = session }
 
     static func accepts(_ d: Data) -> Bool {
@@ -91,6 +95,7 @@ final class PairedCommands {
         guard let p = pending, sequence == nil || sequence == p.sequence else { return }
         // Ownership is uncertain after a missing ACK or partial BLE delivery.
         // Do not overwrite either lens's command arena with queued work.
+        if case BridgeError.timeout = error { onCompleted?(false) }
         failure = error; pending = nil; timer?.cancel(); p.continuation.resume(throwing: error)
     }
     func disconnected() {
@@ -119,7 +124,7 @@ final class PairedCommands {
         guard d.count == 32, d[0] == 1, d[1] == 0, d[2] == 0x25,
               d[3] & 1 == 1, d.u16(6) == 24, let p = pending,
               d.u32(8) == session, d.u32(12) == p.sequence, d.u32(16) == p.crc else { return }
-        pending = nil; timer?.cancel()
+        pending = nil; timer?.cancel(); onCompleted?(true)
         let right = d.u32(24), left = d.u32(28)
         // FFSA uninstall is idempotent: success or NOAPP on either endpoint
         // establishes the same absent entry. Every other mixed result still poisons
