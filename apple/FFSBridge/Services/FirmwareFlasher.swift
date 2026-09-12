@@ -53,7 +53,7 @@ final class FirmwareFlasher: ObservableObject {
     /// firmware: own staging file, own CRC check, own reboot). `mainOnly` sends just the main
     /// application component; the five stock components never change between our builds.
     /// Both default to the proven serial, full-container behaviour.
-    func start(file: URL, sha: String, dry: Bool, allowUnknown: Bool, concurrent: Bool = false, mainOnly: Bool = false) throws {
+    func start(file: URL, sha: String, dry: Bool, allowUnknown: Bool, concurrent: Bool = false, mainOnly: Bool = false, autoPanic: Bool = true) throws {
         guard !active else { throw BridgeError.unavailable("A flash is already active") }
         active = true; success = nil; progress = 0; sideProgress = [:]
         task = Task {
@@ -106,7 +106,9 @@ final class FirmwareFlasher: ObservableObject {
                     while !link.pairReady && Date() < deadline { try await Task.sleep(for: .milliseconds(250)) }
                     guard link.pairReady else { throw BridgeError.timeout("Transfer finished; both-lens reconnection not verified") }
                     try await link.settings("info")
-                    success = true; report("FLASH COMPLETE — both lenses reconnected (\(mode))", 1)
+                    if autoPanic { try await panicResetPair() }
+                    success = true
+                    report("FLASH COMPLETE — both lenses reconnected\(autoPanic ? ", panic-reset" : "") (\(mode))", 1)
                 }
             } catch {
                 success = false; validatedSHA = nil
@@ -115,6 +117,28 @@ final class FirmwareFlasher: ObservableObject {
             active = false
             event?("flash", ["message": message, "progress": progress, "active": false, "ok": success ?? false])
         }
+    }
+    /// Every OTA-reconnect boot leaves the follower (left MCU) unable to complete paired
+    /// command frames: op8/librarySync never gets its cross-lens 0x25, so apps won't import
+    /// or launch, until the lens reboots cleanly. Proven on 2026-09-12 — panic boots are
+    /// healthy, OTA-reconnect boots are wedged (facts.yaml: ota-reconnect-follower-wedge).
+    /// So after every OTA flash we panic-reset both lenses (L then R) and wait for the pair
+    /// to reconnect AND re-authenticate before declaring the flash done, unless opted out.
+    /// A panic write may throw if the lens has already begun its reset — that is the intended
+    /// effect, not a failure, so we log and continue; the manufactured reconnect follows.
+    private func panicResetPair() async throws {
+        for side in ["L", "R"] {
+            report("Panic-resetting \(side) lens to clear the OTA-boot follower wedge", 0.99)
+            do { try await link.settings("panic", side: side) }
+            catch { report("\(side): panic write returned \(error.localizedDescription) — reset likely already underway", 0.99) }
+        }
+        // Re-arm the same reboot/reconnect window the flash uses; it tears the pair down and
+        // reconnects after the SWPOR window regardless of exactly when each lens dropped.
+        link.reconnectAfterFlash()
+        let deadline = Date().addingTimeInterval(60)
+        while !link.pairAuthenticated && Date() < deadline { try await Task.sleep(for: .milliseconds(250)) }
+        guard link.pairAuthenticated else { throw BridgeError.timeout("Panic reset issued; both-lens reconnection + re-auth not verified") }
+        try await link.settings("info")
     }
     private func transmit(_ frames: [[UInt8]], side: String, control: Bool = false) async throws {
         try await link.write(frames.map { Data($0) }, sides: [side], characteristic: control ? GlassesLink.writeID : GlassesLink.otaWriteID, owner: true)
