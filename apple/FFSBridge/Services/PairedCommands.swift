@@ -38,10 +38,6 @@ final class PairedCommands {
     private let session: UInt32
     private var sequence: UInt32 = 0
     private var pending: Pending?
-    /// Sides (e.g. "L"/"R") that produced any 0x91 traffic since the current command started.
-    /// A lens that completes the frame is necessarily heard from; one that stays silent is not,
-    /// so on a timeout the absent side is the lens that never acted.
-    private var sawSides: Set<String> = []
     private var queue: Task<Void, Error>?
     private var timer: Task<Void, Never>?
     private var failure: Error?
@@ -76,7 +72,6 @@ final class PairedCommands {
             envelope.le32(session); envelope.le32(seq); envelope.le32(crc); envelope.append(body)
             busy = true; defer { busy = false }
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                sawSides = []
                 pending = Pending(sequence: seq, crc: crc, removingCatalogEntry: body.count == 48 && body.prefix(4) == Data("FFSA".utf8) && body[4] == 3, continuation: continuation)
                 timer = Task { [weak self] in
                     guard let self else { return }
@@ -111,21 +106,16 @@ final class PairedCommands {
         guard pending == nil else { return }
         failure = nil
     }
-    /// Names the silent lens when a paired command times out. A lens that completes the frame
-    /// is heard from on 0x91; whichever side produced no traffic since the command started is the
-    /// one that never acted. Falls back to the generic wording when both or neither were heard.
+    /// A paired command timed out: no 0x25 completion arrived from the master within the budget.
+    /// Do NOT name a single lens here. The 0x91 event bus is right-lens-only (the follower relays
+    /// its state through the master, so it never appears as its own 0x91 origin), so "which side
+    /// produced no traffic" can only ever accuse the left lens — a false positive by construction.
+    /// A lens is named only from evidence that can implicate it: a 0x25 that arrives with a per-side
+    /// error code (handled as a refusal, not a timeout). With no completion at all, stay neutral.
     private func timeoutMessage() -> String {
-        let silent = ["L": "left", "R": "right"].compactMap { sawSides.contains($0.key) ? nil : $0.value }
-        let tail = "Restart the glasses and bridge before continuing; if one lens stays silent, power-cycle the glasses (both in the case, then out)."
-        switch (silent.contains("left"), silent.contains("right")) {
-        case (true, false): return "The left lens went silent — it produced no events during the command while the right lens responded. \(tail)"
-        case (false, true): return "The right lens went silent — it produced no events during the command while the left lens responded. \(tail)"
-        case (true, true):  return "Neither lens produced any events during the command. \(tail)"
-        default:            return "Both lenses responded but neither reported completion of the command. \(tail)"
-        }
+        "No completion (event 0x25) arrived from the pair within the command budget — the master never reported both lenses finishing this frame. Reconnect and retry; if it persists, reboot the glasses over the link (panic write, then reflash the last known-good)."
     }
     func receive(_ d: Data, side: String? = nil) {
-        if pending != nil, let side { sawSides.insert(side) }
         guard d.count == 32, d[0] == 1, d[1] == 0, d[2] == 0x25,
               d[3] & 1 == 1, d.u16(6) == 24, let p = pending,
               d.u32(8) == session, d.u32(12) == p.sequence, d.u32(16) == p.crc else { return }

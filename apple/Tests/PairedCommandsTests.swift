@@ -93,18 +93,18 @@ import Foundation
         precondition(inflight.busy, "renew acted while a command was in flight")
         inflight.receive(ack(isent[0])); try await held.value
 
-        // A timeout names the silent lens: a side heard from on 0x91 is not silent, so the absent
-        // side is the lens that never acted. Here the right lens speaks (a non-completion frame) and
-        // the left stays silent, so the message must name the left lens.
+        // A timeout must NOT accuse a single lens. 0x91 traffic is right-lens-only, so the follower
+        // never appears as its own origin — naming the "silent" side would always (falsely) blame the
+        // left lens. Even when the right lens produces non-completion 0x91 traffic, a timeout stays
+        // neutral: it reports no 0x25 completion from the pair, naming neither lens.
         let named = PairedCommands(session: 48); named.timeout = .milliseconds(40)
         named.transport = { _ in named.receive(Data([0, 1, 2]), side: "R") }
         do { try await named.send(frame); fatalError("Silent-lens timeout accepted") }
-        catch { precondition((error as? BridgeError)?.errorDescription?.contains("left lens went silent") == true, "timeout did not name the silent left lens") }
-        // With neither lens heard from, the message stays generic — no lens is falsely named.
-        let neither = PairedCommands(session: 49); neither.timeout = .milliseconds(40)
-        neither.transport = { _ in }
-        do { try await neither.send(frame); fatalError("Silent-both timeout accepted") }
-        catch { precondition((error as? BridgeError)?.errorDescription?.contains("Neither lens") == true, "timeout misnamed a lens when both were silent") }
+        catch {
+            let m = (error as? BridgeError)?.errorDescription ?? ""
+            precondition(m.contains("No completion"), "timeout message was not the neutral no-completion wording")
+            precondition(!m.contains("left lens") && !m.contains("right lens"), "timeout falsely named a single lens")
+        }
 
         let disconnected = PairedCommands(session: 45)
         disconnected.transport = { _ in disconnected.disconnected() }
@@ -119,6 +119,6 @@ import Foundation
         let split = PairedCommandRefusal(right: 11, left: 0).errorDescription ?? ""
         precondition(split.contains("right lens") && split.contains("left lens") && split.contains("(code 0)"), "split refusal did not name both lenses")
 
-        print("Paired commands: serialization, exact identity, wrong-eye/stale ACKs, split refusal, timeout (with silent-lens naming), per-send timeout, poison hold + renew-clears-on-reconnect, refusal reason naming, and disconnect passed")
+        print("Paired commands: serialization, exact identity, wrong-eye/stale ACKs, split refusal, timeout (neutral no-completion wording, never names a single lens), per-send timeout, poison hold + renew-clears-on-reconnect, refusal reason naming, and disconnect passed")
     }
 }
