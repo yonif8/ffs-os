@@ -2,7 +2,28 @@ import Foundation
 
 struct PairedCommandRefusal: LocalizedError {
     let right: UInt32, left: UInt32
-    var errorDescription: String? { "Glasses refused command (right \(right), left \(left))" }
+    /// The per-lens result codes are the loader's G2A_ERR_* values (patches/ffs_appload.h). Name the
+    /// reason the way the on-glass shell now does, so the library message and the glasses agree.
+    static func reason(_ code: UInt32) -> String {
+        switch code {
+        case 0:            return "no error"
+        case 1, 3, 4:      return "the app file is invalid"          // SHORT / HDR / SIZE
+        case 2:            return "the app is too new for this firmware" // ABI
+        case 5:            return "the app file is corrupted"        // CRC
+        case 6, 7, 8, 13:  return "there is not enough room for the app" // SLOTS/OOM/ARENA/BUDGET
+        case 9:            return "the app was not found"            // NOAPP
+        case 10:           return "the app is missing its entry point" // ENTRY
+        case 11:           return "the app refused to start (init)"  // INIT
+        case 12:           return "another app is already running"   // BUSY
+        case 14:           return "the app data could not be saved"  // STORAGE
+        default:           return "an unrecognized error"
+        }
+    }
+    var errorDescription: String? {
+        right == left
+            ? "Glasses refused the command: \(Self.reason(right)) (code \(right))."
+            : "Glasses refused the command: right lens — \(Self.reason(right)) (code \(right)); left lens — \(Self.reason(left)) (code \(left))."
+    }
 }
 
 /// One queue for every FFSA/FFSC producer. A BLE write is delivery, not execution.

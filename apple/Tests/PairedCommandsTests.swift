@@ -109,6 +109,16 @@ import Foundation
         let disconnected = PairedCommands(session: 45)
         disconnected.transport = { _ in disconnected.disconnected() }
         do { try await disconnected.send(frame); fatalError("Disconnect accepted") } catch {}
-        print("Paired commands: serialization, exact identity, wrong-eye/stale ACKs, split refusal, timeout (with silent-lens naming), per-send timeout, poison hold + renew-clears-on-reconnect, and disconnect passed")
+
+        // A refusal names the loader's reason (G2A_ERR_*), not a bare number, so the library message
+        // agrees with the on-glass shell. Both lenses INIT -> one honest reason; a split names each.
+        let bothInit = PairedCommandRefusal(right: 11, left: 11).errorDescription ?? ""
+        precondition(bothInit.contains("refused to start (init)") && bothInit.contains("code 11"), "refusal did not name the INIT reason")
+        precondition(PairedCommandRefusal.reason(2).contains("too new"), "ABI reason not named")
+        precondition(PairedCommandRefusal.reason(8).contains("not enough room"), "no-room reason not named")
+        let split = PairedCommandRefusal(right: 11, left: 0).errorDescription ?? ""
+        precondition(split.contains("right lens") && split.contains("left lens") && split.contains("(code 0)"), "split refusal did not name both lenses")
+
+        print("Paired commands: serialization, exact identity, wrong-eye/stale ACKs, split refusal, timeout (with silent-lens naming), per-send timeout, poison hold + renew-clears-on-reconnect, refusal reason naming, and disconnect passed")
     }
 }
