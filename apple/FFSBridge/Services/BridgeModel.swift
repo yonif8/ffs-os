@@ -279,15 +279,18 @@ final class BridgeModel: ObservableObject {
             // Log the firmware SHA + flash mode at start so a day's log file is self-describing.
             // concurrent/mainOnly are opt-in flags owned by FirmwareFlasher (default serial/full).
             let concurrent = args["concurrent"] as? Bool ?? false, mainOnly = args["mainOnly"] as? Bool ?? false
-            // After every OTA flash the flasher always FWAK-summons the parked display shell on both
-            // lenses (see FirmwareFlasher.summonShellAfterReconnect). autoPanic is the heavier opt-in
-            // fallback (default OFF): pass autoPanic:true to also panic-reset both lenses.
+            // After every OTA flash the flasher FWAK-summons the parked display shell on both lenses
+            // (see FirmwareFlasher.summonShellAfterReconnect) when summon is true (default). Pass
+            // summon:false for one flash to isolate the firmware self-wake from the bridge FWAK.
+            // autoPanic is the heavier opt-in fallback (default OFF): pass autoPanic:true to also
+            // panic-reset both lenses.
             let autoPanic = args["autoPanic"] as? Bool ?? false
+            let summon = args["summon"] as? Bool ?? true
             logEvent("flashStart", id: nil, ["sha256": sha, "dryRun": args["dryRun"] as? Bool ?? true,
-                     "file": file.lastPathComponent, "concurrent": concurrent, "mainOnly": mainOnly, "autoPanic": autoPanic])
+                     "file": file.lastPathComponent, "concurrent": concurrent, "mainOnly": mainOnly, "autoPanic": autoPanic, "summon": summon])
             try flasher.start(file: file, sha: sha, dry: args["dryRun"] as? Bool ?? true,
                               allowUnknown: args["allowUnknownGolden"] as? Bool ?? false,
-                              concurrent: concurrent, mainOnly: mainOnly, autoPanic: autoPanic)
+                              concurrent: concurrent, mainOnly: mainOnly, autoPanic: autoPanic, summon: summon)
         case "flashProbe": return ["leftReady": link.otaReady("L"), "rightReady": link.otaReady("R")]
         case "voiceStart":
             voice.liveOnGlasses = args["live"] as? Bool ?? true

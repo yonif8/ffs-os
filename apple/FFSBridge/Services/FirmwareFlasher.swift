@@ -53,7 +53,7 @@ final class FirmwareFlasher: ObservableObject {
     /// firmware: own staging file, own CRC check, own reboot). `mainOnly` sends just the main
     /// application component; the five stock components never change between our builds.
     /// Both default to the proven serial, full-container behaviour.
-    func start(file: URL, sha: String, dry: Bool, allowUnknown: Bool, concurrent: Bool = false, mainOnly: Bool = false, autoPanic: Bool = false) throws {
+    func start(file: URL, sha: String, dry: Bool, allowUnknown: Bool, concurrent: Bool = false, mainOnly: Bool = false, autoPanic: Bool = false, summon: Bool = true) throws {
         guard !active else { throw BridgeError.unavailable("A flash is already active") }
         active = true; success = nil; progress = 0; sideProgress = [:]
         task = Task {
@@ -106,10 +106,14 @@ final class FirmwareFlasher: ObservableObject {
                     while !link.pairReady && Date() < deadline { try await Task.sleep(for: .milliseconds(250)) }
                     guard link.pairReady else { throw BridgeError.timeout("Transfer finished; both-lens reconnection not verified") }
                     try await link.settings("info")
-                    let shellUp = await summonShellAfterReconnect()
+                    // `summon` (default true) sends the post-flash FWAK. Turn it off for one flash to
+                    // isolate the firmware self-wake (BLE-gate RequestDisplayStartUp) from the bridge FWAK.
+                    let shellUp = summon ? await summonShellAfterReconnect() : false
                     if autoPanic { try await panicResetPair() }
                     success = true
-                    let note = autoPanic ? ", panic-reset" : (shellUp ? ", shell summoned" : ", shell NOT confirmed — a panic may be needed")
+                    let note = autoPanic ? ", panic-reset"
+                        : !summon ? ", FWAK summon skipped"
+                        : (shellUp ? ", shell summoned" : ", shell NOT confirmed — a panic may be needed")
                     report("FLASH COMPLETE — both lenses reconnected\(note) (\(mode))", 1)
                 }
             } catch {
