@@ -1,2 +1,12 @@
-// Set DEVELOPMENT_TEAM in Signing.local.xcconfig or choose your team in Xcode.
+// Signing for the Xcode projects. Set DEVELOPMENT_TEAM (and, for the Mac app, a stable
+// CODE_SIGN_IDENTITY) in the untracked Signing.local.xcconfig, or choose your team in Xcode.
+//
+// Mac app default: ad-hoc ("-"), scoped to the macOS SDK so it never touches the iPhone target.
+// Ad-hoc works with zero setup but changes the binary's code hash on every rebuild, so macOS
+// treats each build as a new app and re-prompts for Bluetooth. To keep the Bluetooth grant across
+// rebuilds, override CODE_SIGN_IDENTITY[sdk=macosx*] with a STABLE identity in Signing.local.xcconfig
+// (see README "Mac app"). The local file is included last, so its values win.
+CODE_SIGN_IDENTITY[sdk=macosx*] = -
+CODE_SIGN_STYLE[sdk=macosx*] = Manual
+
 #include? "Signing.local.xcconfig"
