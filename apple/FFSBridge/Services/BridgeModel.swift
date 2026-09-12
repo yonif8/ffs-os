@@ -92,6 +92,11 @@ final class BridgeModel: ObservableObject {
         }
         paired.transport = { [weak self] d in guard let self else { throw BridgeError.unavailable("Bridge closed") }; try await self.link.send(d) }
         paired.onCompleted = { [weak self] ok in self?.pairedCompleted(ok) }
+        paired.onDebugDrop = { [weak self] in
+            guard let self else { return }
+            self.logEvent("debugKill", id: nil, ["action": "drop BLE link mid-command (reproducer)"])
+            try? self.link.disconnect()
+        }
         library.send = { [weak self] d, t in guard let self else { throw BridgeError.unavailable("Bridge closed") }; try await self.paired.send(d, timeout: t) }
         library.available = { [weak self] in self?.link.pairReady == true && self?.flasher.active == false }
         library.setting = { [weak self] key, value in
@@ -270,6 +275,15 @@ final class BridgeModel: ObservableObject {
             return library.status()
         case "libraryAutoSync": automaticLibrarySync = args["enabled"] as? Bool ?? true; return ["enabled": automaticLibrarySync]
         case "reconnectAutoPanic": reconnectAutoPanic = args["enabled"] as? Bool ?? false; return ["enabled": reconnectAutoPanic]
+        case "debugKillNextCommand":
+            // Reproducer: arm a single-shot mid-command BLE drop on the NEXT paired command.
+            // point "P_START" (default) drops right after the FFSQ write (0 ms, follower not yet READY);
+            // "P_EXEC" drops after a delay (default 80 ms, past follower READY). delayMs overrides.
+            let point = args["point"] as? String ?? "P_START"
+            let ms = args["delayMs"] as? Int ?? (point == "P_EXEC" ? 80 : 0)
+            paired.debugKillAfterMs = ms
+            logEvent("debugKillArmed", id: nil, ["point": point, "delayMs": ms])
+            return ["armed": true, "point": point, "delayMs": ms]
         case "librarySync": library.sync(); return library.status()
         case "connect": try link.connect(side)
         case "disconnect": try link.disconnect()

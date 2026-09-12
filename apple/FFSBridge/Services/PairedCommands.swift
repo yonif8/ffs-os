@@ -48,6 +48,14 @@ final class PairedCommands {
     /// refusal — either way the command path is alive), `false` when the command timed out with no
     /// 0x25. The bridge uses `false` to detect the reconnect wedge (master journal stuck, no 0x25).
     var onCompleted: ((Bool) -> Void)?
+    /// DEBUG reproducer (default off, single-shot). When armed, the NEXT paired command's FFSQ write is
+    /// sent to the master and then the BLE link is DROPPED `debugKillAfterMs` ms later — before the 0x25 —
+    /// to reproduce the mid-command interruption that wedges the reconnect. 0 ms drops right after the
+    /// write (P_START: master pinned, follower has not READYed); a longer delay (~50-100 ms) lands after
+    /// the follower READYs (P_EXEC). `onDebugDrop` is wired to the link's force-disconnect. Cleared when
+    /// it fires. NOT for production use — armed only via the `debugKillNextCommand` RPC.
+    var debugKillAfterMs: Int?
+    var onDebugDrop: (() -> Void)?
     init(session: UInt32 = UInt32.random(in: 1...UInt32.max)) { self.session = session }
 
     static func accepts(_ d: Data) -> Bool {
@@ -83,8 +91,20 @@ final class PairedCommands {
                     fail(BridgeError.timeout(timeoutMessage()), sequence: seq)
                 }
                 Task { [weak self] in
-                    do { try await transport(Wire.fxp1(envelope)) }
-                    catch { self?.fail(error, sequence: seq) }
+                    guard let self else { return }
+                    do {
+                        try await transport(Wire.fxp1(envelope))
+                        // DEBUG reproducer: interrupt this in-flight frame by dropping the link before 0x25.
+                        if let ms = self.debugKillAfterMs {
+                            self.debugKillAfterMs = nil
+                            let drop = self.onDebugDrop
+                            Task { @MainActor in
+                                if ms > 0 { try? await Task.sleep(for: .milliseconds(ms)) }
+                                drop?()
+                            }
+                        }
+                    }
+                    catch { self.fail(error, sequence: seq) }
                 }
             }
         }
