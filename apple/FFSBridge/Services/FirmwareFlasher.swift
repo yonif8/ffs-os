@@ -125,29 +125,39 @@ final class FirmwareFlasher: ObservableObject {
     /// and no paired command frames (op8 launch, `librarySync`). The one cold-over-BLE summon that
     /// un-parks it is FWAK -> `RequestDisplayStartUp` on the BLE-thread gate. The bridge otherwise
     /// sends FWAK on pairReady only when a flash is not active and the library is non-empty, so a
-    /// post-flash reconnect misses it. We therefore always send FWAK to BOTH lenses here
-    /// (settings("wake") with side nil broadcasts L+R) and wait for the master readback to show the
-    /// shell built and the follower peer session up before declaring the flash done. Proven
+    /// post-flash reconnect misses it. We therefore always send FWAK here — PER SIDE, because
+    /// GlassesLink.send guards `allSatisfy(ready)` and refuses a both-sides wake outright if either
+    /// lens is momentarily not ready on the reconnect, which would leave NEITHER lens waked. Each
+    /// side is waked as soon as it is ready (both need it: the master to build the shell, the
+    /// follower to un-park and join the peer session), then we wait for the master readback to show
+    /// the shell built and the follower peer session up before declaring the flash done. Proven
     /// 2026-09-12: on a raw OTA boot the readback is `dash=none peer=down`; FWAK builds the shell.
-    /// Returns whether the shell + peer were confirmed within the window. Best-effort: a flash that
-    /// transferred and reconnected is still a success; an unconfirmed shell is reported, not thrown,
-    /// so an operator can enable the `autoPanic` fallback or panic manually.
+    /// Belt-and-suspenders with the firmware self-wake from the BLE gate. Returns whether the shell
+    /// + peer were confirmed within the window. Best-effort: a flash that transferred and reconnected
+    /// is still a success; an unconfirmed shell is reported, not thrown, so an operator can enable the
+    /// `autoPanic` fallback or panic manually.
     @discardableResult
     private func summonShellAfterReconnect() async -> Bool {
         report("Summoning the display shell on both lenses (FWAK) after the OTA reconnect", 0.985)
-        // The bridge's own on-pairReady sync may momentarily own the loader ("library is using the
-        // glasses"); retry the wake a few times before giving up.
-        var waked = false
-        for attempt in 0..<4 {
-            do { try await link.settings("wake"); waked = true; break }
-            catch { if attempt == 3 { report("FWAK not accepted: \(error.localizedDescription)"); return false }
-                    try? await Task.sleep(for: .milliseconds(750)) }
+        // Wake each side independently, retrying until it is both ready and accepts the write (the
+        // bridge's own on-pairReady sync may momentarily own the loader), up to a shared window.
+        let wakeDeadline = Date().addingTimeInterval(25)
+        var waked: Set<String> = []
+        while waked.count < 2 && Date() < wakeDeadline {
+            for side in ["L", "R"] where !waked.contains(side) {
+                guard link.lenses[side]?.ready == true else { continue }
+                do { try await link.settings("wake", side: side); waked.insert(side) }
+                catch { /* lens flapped or loader busy; retry on the next pass */ }
+            }
+            if waked.count < 2 { try? await Task.sleep(for: .milliseconds(500)) }
         }
-        guard waked else { return false }
+        if waked.count < 2 {
+            report("FWAK reached \(waked.sorted().joined(separator: "+").isEmpty ? "neither lens" : waked.sorted().joined(separator: "+")) only — other lens not ready in time")
+        }
         // Wait for the master readback to show the shell built AND the follower peer session up.
         let deadline = Date().addingTimeInterval(20)
         while Date() < deadline {
-            try? await link.settings("info")
+            try? await link.settings("info", side: "R")
             let ld = link.lenses["R"]?.diagnostics["loader"] ?? ""
             let caps = link.lenses["R"]?.diagnostics["capabilities"] ?? ""
             let peerUp = caps.contains("peer=") && !caps.contains("peer=down")
