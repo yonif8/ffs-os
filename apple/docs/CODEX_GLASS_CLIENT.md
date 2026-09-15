@@ -50,6 +50,11 @@ Agent message deltas stream into the current conversation. `request_user_input`
 questions with selectable choices are presented sequentially; command, file and
 permission approvals are deliberately not granted by the glasses client.
 
+Spoken turns start in Codex Plan mode using the selected task's own model and
+reasoning effort. This matches the glasses client's intentionally read-only scope
+and makes `request_user_input` available for the selectable-answer UI; it does not
+change the task's workspace, model, or server ownership.
+
 ## Push to talk
 
 The current firmware exposes its processed 16 kHz mono microphone stream on the

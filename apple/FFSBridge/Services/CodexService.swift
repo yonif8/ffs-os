@@ -5,6 +5,7 @@ import Combine
 final class CodexService: ObservableObject {
     struct ThreadRow {
         var id: String, title: String, cwd: String, projectID: String?
+        var model: String, effort: String?
         var status: UInt8, updatedAt: Int
     }
     struct ProjectRoot {
@@ -156,7 +157,8 @@ final class CodexService: ObservableObject {
                     ?? (item["preview"] as? String).flatMap { $0.isEmpty ? nil : $0 }
                     ?? "Untitled task"
                 values.append(ThreadRow(id: id, title: title, cwd: item["cwd"] as? String ?? "",
-                    projectID: item["projectId"] as? String, status: status,
+                    projectID: item["projectId"] as? String, model: item["model"] as? String ?? "",
+                    effort: item["reasoningEffort"] as? String, status: status,
                     updatedAt: item["recencyAt"] as? Int ?? item["updatedAt"] as? Int ?? 0))
                 _ = handle(for: id)
             }
@@ -277,9 +279,13 @@ final class CodexService: ObservableObject {
         let text = finalized.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { confirming = false; throw BridgeError.invalid("Nothing was transcribed") }
         guard connected, !activeThreadID.isEmpty else { confirming = false; throw BridgeError.unavailable("KJDev is offline; draft retained") }
+        guard let thread = threads.first(where: { $0.id == activeThreadID }), !thread.model.isEmpty else {
+            confirming = false; throw BridgeError.unavailable("The selected task has no runnable Codex model")
+        }
         let clientID = "ffs-glasses-\(activeThreadID)-\(commandID)"
-        let result = try await rpc.request("turn/start", ["threadId": activeThreadID,
-            "input": [["type": "text", "text": text]], "clientUserMessageId": clientID]) as? [String: Any] ?? [:]
+        let params = Self.turnStartParams(threadID: activeThreadID, text: text, clientID: clientID,
+            model: thread.model, effort: thread.effort)
+        let result = try await rpc.request("turn/start", params) as? [String: Any] ?? [:]
         if let turn = result["turn"] as? [String: Any] { activeTurnID = turn["id"] as? String ?? "" }
         updateLatest { $0 += ($0.isEmpty ? "" : "\n\n") + "YOU\n" + text }
         voice.clearCurrentTranscript(); pttSession = false; confirming = false
@@ -464,6 +470,15 @@ final class CodexService: ObservableObject {
             }
         }
         return blocks.joined(separator: "\n\n")
+    }
+
+    static func turnStartParams(threadID: String, text: String, clientID: String,
+                                model: String, effort: String?) -> [String: Any] {
+        var settings: [String: Any] = ["model": model, "developer_instructions": NSNull()]
+        if let effort, !effort.isEmpty { settings["reasoning_effort"] = effort }
+        return ["threadId": threadID, "input": [["type": "text", "text": text]],
+            "clientUserMessageId": clientID,
+            "collaborationMode": ["mode": "plan", "settings": settings]]
     }
 
     static func threadStatus(_ value: Any?) -> UInt8 {

@@ -40,6 +40,12 @@ import Foundation
         precondition(rendered == "YOU\nhello\n\nCODEX\nhi")
         precondition(CodexService.threadStatus(["type":"active", "activeFlags":[]]) == 1)
         precondition(CodexService.threadStatus(["type":"notLoaded"]) == 0)
+        let turn = CodexService.turnStartParams(threadID: "thread", text: "hello", clientID: "once",
+            model: "gpt-test", effort: "medium")
+        let mode = turn["collaborationMode"] as? [String: Any]
+        let settings = mode?["settings"] as? [String: Any]
+        precondition(mode?["mode"] as? String == "plan" && settings?["model"] as? String == "gpt-test")
+        precondition(settings?["reasoning_effort"] as? String == "medium" && settings?["developer_instructions"] is NSNull)
         // Simulate an unqueued master tail left by process termination.
         let handle = try FileHandle(forWritingTo: dir.appendingPathComponent("master.pcm"))
         try handle.seekToEnd(); try handle.write(contentsOf: Data(repeating: 0, count: 3200)); try handle.close()
