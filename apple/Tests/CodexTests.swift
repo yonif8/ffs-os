@@ -27,12 +27,22 @@ import Foundation
         precondition(CodexWire.decodeEvent(CodexWire.GlassesEvent(envelope)!) == event)
         var bad = envelope; bad[0] = 2; precondition(CodexWire.GlassesEvent(bad) == nil)
 
-        if CommandLine.arguments.contains("--live") {
+        if CommandLine.arguments.contains("--live") || CommandLine.arguments.contains("--soak") {
             let rpc = CodexRPC()
+            var disconnectError = ""
+            rpc.disconnected = { disconnectError = $0.localizedDescription }
             try await rpc.connect(host: "codex-server", socketPath: "/home/claude-bot/.codex/app-server-control/app-server-control.sock")
             let projects = try await rpc.request("project/list", ["limit": 10]) as? [String: Any] ?? [:]
             let threads = try await rpc.request("thread/list", ["limit": 10, "sortDirection": "desc", "archived": false]) as? [String: Any] ?? [:]
+            let values = threads["data"] as? [[String: Any]] ?? []
+            if let id = values.first?["id"] as? String {
+                let page = try await rpc.request("thread/turns/list", ["threadId": id, "limit": 1,
+                    "sortDirection": "desc", "itemsView": "full"]) as? [String: Any] ?? [:]
+                print("PASS live KJDev task history page: turns=\((page["data"] as? [Any])?.count ?? -1)")
+            }
             print("PASS live KJDev app-server: projects=\((projects["data"] as? [Any])?.count ?? -1) threads=\((threads["data"] as? [Any])?.count ?? -1)")
+            if CommandLine.arguments.contains("--soak") { try await Task.sleep(for: .seconds(25)) }
+            precondition(disconnectError.isEmpty, disconnectError)
             rpc.disconnect()
         }
         print("PASS Codex wire: bounded snapshots, UTF-8, newest-text preservation, event validation")

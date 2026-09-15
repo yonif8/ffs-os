@@ -12,4 +12,5 @@ services = APPLE / 'FFSBridge/Services'
 sources = [core/'Wire.swift', core/'CodexWire.swift', services/'CodexRPC.swift', APPLE/'Tests/CodexTests.swift']
 binary = OUT/'codex-tests'
 subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', *map(str, sources), '-o', str(binary)], check=True)
-subprocess.run([str(binary), *(['--live'] if '--live' in sys.argv else [])], check=True, timeout=30)
+mode = '--soak' if '--soak' in sys.argv else '--live' if '--live' in sys.argv else None
+subprocess.run([str(binary), *([mode] if mode else [])], check=True, timeout=40)

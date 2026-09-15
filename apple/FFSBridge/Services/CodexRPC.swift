@@ -188,7 +188,13 @@ final class CodexRPC {
         do {
             while !Task.isCancelled {
                 let data = try await pipe.receive()
-                guard let object = try JSONSerialization.jsonObject(with: data) as? JSON else { continue }
+                let decoded: Any
+                do { decoded = try JSONSerialization.jsonObject(with: data) }
+                catch {
+                    let prefix = data.prefix(4).map { String(format: "%02x", $0) }.joined()
+                    throw BridgeError.invalid("Invalid Codex JSON WebSocket message (\(data.count) bytes, prefix \(prefix))")
+                }
+                guard let object = decoded as? JSON else { continue }
                 if let id = object["id"] as? Int, object["method"] == nil {
                     guard let continuation = pending.removeValue(forKey: id) else { continue }
                     if let error = object["error"] as? JSON {
