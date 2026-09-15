@@ -239,6 +239,10 @@ final class VoiceService: ObservableObject {
     }
     func resumeCapture() {
         guard running else { return }
+        // A long push-to-talk pause may let the provider close its idle socket and
+        // leave the reconnect loop in exponential backoff.  Resume is explicit user
+        // intent, so reconnect immediately while preserving settled draft text.
+        if config.streaming && socket?.state != .running { startLive() }
         capturing = true
         statusMessage = "Capturing · waiting for glasses audio"
     }
