@@ -5,7 +5,10 @@ import Foundation
 /// independently decodable snapshot rather than a delta that can be lost.
 enum CodexWire {
     static let appID = 16
-    static let maximumSnapshotBytes = 1024
+    // Keep one rendered viewport plus control state below the firmware's absolute
+    // 1,024-byte mailbox ceiling. The margin avoids exercising a full-capacity
+    // value on the display callback while older turns remain reachable by paging.
+    static let maximumSnapshotBytes = 768
     static let magic = Data("CDX1".utf8)
 
     struct Row: Equatable {

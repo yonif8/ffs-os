@@ -10,7 +10,7 @@ import Foundation
                    .init(handle: 2, title: "A current task", project: false, status: 1)],
             draft: "hello from the glasses", question: "Proceed?", options: ["Yes", "No"])
         let encoded = try CodexWire.encode(snapshot)
-        precondition(encoded.count <= 1024)
+        precondition(encoded.count <= CodexWire.maximumSnapshotBytes)
         let decoded = CodexWire.decode(encoded)!
         precondition(decoded.connected && decoded.thinking && decoded.hasOlder && decoded.paused)
         precondition(decoded.hasPreviousRows && decoded.hasNextRows)
@@ -20,7 +20,7 @@ import Foundation
         precondition(decoded.draft == snapshot.draft && decoded.question == snapshot.question)
         snapshot.rows = (0..<100).map { .init(handle: UInt16($0 + 1), title: String(repeating: "界", count: 40), project: false, status: 2) }
         let crowded = try CodexWire.encode(snapshot)
-        precondition(crowded.count <= 1024)
+        precondition(crowded.count <= CodexWire.maximumSnapshotBytes)
 
         let event = CodexWire.Event(kind: .selectConversation, sessionID: 0x99887766, commandID: 0x12345678, value: 44)
         var envelope = Data([1, UInt8(CodexWire.appID), event.kind.rawValue, 1, 7, 0])
@@ -39,10 +39,30 @@ import Foundation
             let projects = try await rpc.request("project/list", ["limit": 10]) as? [String: Any] ?? [:]
             let threads = try await rpc.request("thread/list", ["limit": 10, "sortDirection": "desc", "archived": false]) as? [String: Any] ?? [:]
             let values = threads["data"] as? [[String: Any]] ?? []
-            if let id = values.first?["id"] as? String {
+            if let id = ProcessInfo.processInfo.environment["CODEX_TEST_THREAD"] ?? values.first?["id"] as? String {
                 let page = try await rpc.request("thread/turns/list", ["threadId": id, "limit": 10,
                     "sortDirection": "desc", "itemsView": "full"]) as? [String: Any] ?? [:]
                 print("PASS live KJDev task history page: turns=\((page["data"] as? [Any])?.count ?? -1)")
+                let newest = try await rpc.request("thread/turns/list", ["threadId": id, "limit": 1,
+                    "sortDirection": "desc", "itemsView": "full"]) as? [String: Any] ?? [:]
+                if let cursor = newest["nextCursor"] as? String {
+                    let older = try await rpc.request("thread/turns/list", ["threadId": id, "limit": 1,
+                        "cursor": cursor, "sortDirection": "desc", "itemsView": "full"]) as? [String: Any] ?? [:]
+                    let turns = older["data"] as? [[String: Any]] ?? []
+                    var blocks: [String] = []
+                    for turn in turns { for item in turn["items"] as? [[String: Any]] ?? [] {
+                        if item["type"] as? String == "agentMessage", let text = item["text"] as? String { blocks.append("CODEX\n" + text) }
+                        if item["type"] as? String == "userMessage" {
+                            let content = item["content"] as? [[String: Any]] ?? []
+                            let text = content.compactMap { $0["text"] as? String }.joined(separator: "\n")
+                            if !text.isEmpty { blocks.append("YOU\n" + text) }
+                        }
+                    } }
+                    let rendered = blocks.joined(separator: "\n\n")
+                    let roundTrip = CodexWire.decode(try CodexWire.encode(.init(conversation: rendered)))
+                    precondition(roundTrip != nil && !rendered.isEmpty)
+                    print("PASS live KJDev cursor page: cursorBytes=\(cursor.utf8.count) textBytes=\(rendered.utf8.count) wireBytes=\((try CodexWire.encode(.init(conversation: rendered))).count)")
+                }
             }
             print("PASS live KJDev app-server: projects=\((projects["data"] as? [Any])?.count ?? -1) threads=\((threads["data"] as? [Any])?.count ?? -1)")
             if CommandLine.arguments.contains("--soak") { try await Task.sleep(for: .seconds(25)) }
