@@ -3,6 +3,9 @@ import Foundation
 /// FFSA native application package. Executable bytes stay local to the companion
 /// until the wearer selects this app; all pixels are drawn by the glasses.
 struct AppPackage {
+    /// Highest additive glasses app ABI this bridge can validate and retain.
+    /// Older packages remain valid because the runtime table only grows at its tail.
+    static let maximumABI: UInt8 = 6
     let image: Data
     var id: Int { image.u16(8) }
     var crc: UInt32 { image.u32(16) }
@@ -11,7 +14,7 @@ struct AppPackage {
         guard frame.count >= 60, frame.prefix(4) == Data("FXP1".utf8), frame.u32(4) == UInt32(frame.count - 12) else { throw BridgeError.invalid("Invalid app frame") }
         let body = Data(frame.dropFirst(12))
         guard Wire.crc32(body) == frame.u32(8), body.prefix(4) == Data("FFSA".utf8), body.u16(6) == 48,
-              body[5] <= 5, [0,4].contains(body[4]), body.u16(8) > 0, body.u16(8) < 65535,
+              body[5] <= Self.maximumABI, [0,4].contains(body[4]), body.u16(8) > 0, body.u16(8) < 65535,
               body.u32(12) > 0, body.u32(12) <= 6144, body.count == 48 + Int(body.u32(12)),
               body.u32(28) <= 4096, Wire.crc32(Data(body.dropFirst(48))) == body.u32(16) else { throw BridgeError.invalid("Invalid or incompatible native app package") }
         for offset in [20,22,24,26] { let entry = body.u16(offset); guard entry == 65535 || entry < Int(body.u32(12)) else { throw BridgeError.invalid("Invalid app entry") } }
