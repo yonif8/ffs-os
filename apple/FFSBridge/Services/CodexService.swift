@@ -39,6 +39,8 @@ final class CodexService: ObservableObject {
     private var pttSession = false
     private var confirming = false
     private var drawerPage = 0
+    private var refreshing = false
+    private var resumedThreads = Set<String>()
 
     private struct PendingQuestion {
         var requestID: Any
@@ -77,6 +79,7 @@ final class CodexService: ObservableObject {
                 if !self.connected {
                     do {
                         self.statusMessage = "Connecting to KJDev"
+                        self.resumedThreads.removeAll()
                         try await self.rpc.connect(host: self.host, socketPath: self.socketPath)
                         self.connected = true; self.statusMessage = "Connected to KJDev"; backoff = 1
                         try await self.refresh()
@@ -120,6 +123,12 @@ final class CodexService: ObservableObject {
 
     func refresh() async throws {
         guard connected else { throw BridgeError.unavailable("Codex is not connected") }
+        // Pair-ready and the app's SHOW/SYNC event can arrive together.  App-server
+        // permits only one active writer per task, so collapse overlapping refreshes
+        // instead of issuing two concurrent thread/resume requests.
+        guard !refreshing else { return }
+        refreshing = true
+        defer { refreshing = false }
         var projectCursor: String?, serverProjects: [String: String] = [:]
         repeat {
             var params: [String: Any] = ["limit": 100]
@@ -186,7 +195,20 @@ final class CodexService: ObservableObject {
 
     private func open(_ id: String) async throws {
         guard connected else { throw BridgeError.unavailable("KJDev is offline") }
-        _ = try await rpc.request("thread/resume", ["threadId": id, "excludeTurns": true])
+        var readOnly = false
+        // A loaded task already has this connection as its writer. Resuming it a
+        // second time is rejected by app-server, so attach each task at most once
+        // per WebSocket connection; subsequent opens only page its current turns.
+        if !resumedThreads.contains(id) {
+            do {
+                _ = try await rpc.request("thread/resume", ["threadId": id, "excludeTurns": true])
+                resumedThreads.insert(id)
+            } catch where error.localizedDescription.contains("already has an active writer") {
+                // History is still readable while another trusted client owns the
+                // writer. A later refresh retries attachment after that client exits.
+                readOnly = true
+            }
+        }
         activeThreadID = id; activeTurnID = ""; conversation = ""; olderCursor = nil
         if let page = drawerPages().firstIndex(where: { $0.contains(where: { !$0.project && $0.handle == handle(for: id) }) }) { drawerPage = page }
         saveState()
@@ -196,7 +218,8 @@ final class CodexService: ObservableObject {
         conversation = Self.render(turns: turns.reversed())
         olderCursor = result["nextCursor"] as? String
         if let turn = turns.first, (turn["status"] as? String) == "inProgress" { activeTurnID = turn["id"] as? String ?? "" }
-        statusMessage = "Conversation loaded"; queueSnapshot()
+        statusMessage = readOnly ? "Conversation active elsewhere; viewing read-only" : "Conversation loaded"
+        queueSnapshot()
     }
 
     private func loadOlder() async throws {
@@ -391,7 +414,7 @@ final class CodexService: ObservableObject {
     }
 
     private func lost(_ error: Error) {
-        connected = false; statusMessage = "KJDev disconnected; reconnecting"
+        connected = false; resumedThreads.removeAll(); statusMessage = "KJDev disconnected; reconnecting"
         log("disconnected", ["error": error.localizedDescription]); queueSnapshot()
     }
 
