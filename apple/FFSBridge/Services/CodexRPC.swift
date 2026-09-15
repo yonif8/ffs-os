@@ -60,20 +60,24 @@ final class CodexSSHPipe {
 
     func send(_ data: Data, opcode: UInt8 = 1) throws {
         guard process?.isRunning == true else { throw BridgeError.unavailable("KJDev transport is disconnected") }
-        var frame = Data([0x80 | opcode])
-        let count = data.count
-        if count < 126 { frame.append(0x80 | UInt8(count)) }
-        else if count <= 0xffff {
-            frame.append(0x80 | 126); frame.append(UInt8(count >> 8)); frame.append(UInt8(count))
-        } else {
-            frame.append(0x80 | 127)
-            let n = UInt64(count); for shift in stride(from: 56, through: 0, by: -8) { frame.append(UInt8(n >> UInt64(shift))) }
-        }
+        var frame = Self.frameHeader(count: data.count, opcode: opcode)
         var mask = [UInt8](repeating: 0, count: 4)
         for i in 0..<4 { mask[i] = UInt8.random(in: 0...255) }
         frame.append(contentsOf: mask)
         for (i, byte) in data.enumerated() { frame.append(byte ^ mask[i & 3]) }
         try write(frame)
+    }
+
+    static func frameHeader(count: Int, opcode: UInt8 = 1) -> Data {
+        var frame = Data([0x80 | opcode])
+        if count < 126 { frame.append(0x80 | UInt8(count)) }
+        else if count <= 0xffff {
+            frame.append(0x80 | 126); frame.append(UInt8(count >> 8)); frame.append(UInt8(truncatingIfNeeded: count))
+        } else {
+            frame.append(0x80 | 127)
+            let n = UInt64(count); for shift in stride(from: 56, through: 0, by: -8) { frame.append(UInt8(truncatingIfNeeded: n >> UInt64(shift))) }
+        }
+        return frame
     }
 
     func receive() async throws -> Data {

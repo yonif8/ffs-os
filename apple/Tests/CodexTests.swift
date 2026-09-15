@@ -28,6 +28,9 @@ import Foundation
         precondition(CodexWire.decodeEvent(CodexWire.GlassesEvent(envelope)!) == event)
         var bad = envelope; bad[0] = 2; precondition(CodexWire.GlassesEvent(bad) == nil)
 
+        precondition(CodexSSHPipe.frameHeader(count: 300) == Data([0x81, 0xfe, 0x01, 0x2c]))
+        precondition(CodexSSHPipe.frameHeader(count: 70_000) == Data([0x81, 0xff, 0, 0, 0, 0, 0, 1, 0x11, 0x70]))
+
         if CommandLine.arguments.contains("--live") || CommandLine.arguments.contains("--soak") {
             let rpc = CodexRPC()
             var disconnectError = ""
