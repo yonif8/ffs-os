@@ -5,6 +5,7 @@ import SQLite3
 @MainActor
 final class VoiceService: ObservableObject {
     @Published private(set) var running = false
+    @Published private(set) var capturing = false
     @Published private(set) var sessionID = ""
     @Published private(set) var packetCount = 0
     @Published private(set) var pendingCount = 0
@@ -26,6 +27,11 @@ final class VoiceService: ObservableObject {
     private var faceSeq = 0
     var send: ((Data) async throws -> Void)?
     var event: ((String, [String: Any]) -> Void)?
+    /// Disposable live text callback. Audio and the durable recording remain local.
+    var liveTranscript: ((String, Bool) -> Void)?
+    var currentTranscript: String {
+        (settled + " " + tail).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
     init(root: URL) {
         self.root = root.appendingPathComponent("voice", isDirectory: true)
         do {
@@ -59,7 +65,7 @@ final class VoiceService: ObservableObject {
         FileManager.default.createFile(atPath: rawURL.path, contents: nil); FileManager.default.createFile(atPath: pcmURL.path, contents: nil)
         master = try FileHandle(forWritingTo: rawURL); pcmFile = try FileHandle(forWritingTo: pcmURL)
         packetCount = 0; framer = VoiceFramer(); pcm = Data(); clipStartMs = 0; startTime = Date(); lastArrival = nil
-        running = true; statusMessage = "Capturing · waiting for glasses audio"; settled = ""; tail = ""; lastFace = ""
+        running = true; capturing = true; statusMessage = "Capturing · waiting for glasses audio"; settled = ""; tail = ""; lastFace = ""
         try metadata(ended: false); startLive(); startFaceLoop()
         idleTask?.cancel(); idleTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -72,7 +78,7 @@ final class VoiceService: ObservableObject {
     }
     func stop() {
         guard running else { return }
-        running = false; idleTask?.cancel()
+        running = false; capturing = false; idleTask?.cancel()
         do { try finishClip(); try metadata(ended: true); try master?.synchronize(); try pcmFile?.synchronize(); try master?.close(); try pcmFile?.close() }
         catch { log("Archive finalization failed") }
         master = nil; pcmFile = nil; ffs_lc3_destroy(decoder); decoder = nil
@@ -84,7 +90,7 @@ final class VoiceService: ObservableObject {
         socket = nil; faceTask?.cancel(); Task { await flushFace() }; statusMessage = "Capture stopped"; log("Capture stopped")
     }
     func submit(_ data: Data, side: String) {
-        guard running, captureSide == "both" || captureSide == side else { return }
+        guard running, capturing, captureSide == "both" || captureSide == side else { return }
         guard let conceal = framer.offer(data) else { return }
         do {
             // Archive the original accepted packet BEFORE decoding. All bytes stay native/private.
@@ -221,12 +227,43 @@ final class VoiceService: ObservableObject {
         try Wav.encode(pcm).write(to: file, options: .atomic); return file
     }
     func status() -> [String: Any] {
-        ["running": running, "sessionId": sessionID, "packets": packetCount, "duplicates": framer.duplicates,
+        ["running": running, "capturing": capturing, "sessionId": sessionID, "packets": packetCount, "duplicates": framer.duplicates,
          "malformed": framer.malformed, "concealedFrames": framer.concealed, "resyncs": framer.resyncs,
          "lostPackets": framer.lost, "sttPending": pendingCount, "sttProvider": config.kind, "decoderAvailable": decoder != nil || !running]
     }
+    func pauseCapture() {
+        guard running else { return }
+        capturing = false
+        try? finishClip()
+        statusMessage = "Capture paused"
+    }
+    func resumeCapture() {
+        guard running else { return }
+        capturing = true
+        statusMessage = "Capturing · waiting for glasses audio"
+    }
+    func clearCurrentTranscript() { settled = ""; tail = ""; lastFace = ""; liveTranscript?("", true) }
+    /// Ask the streaming provider to flush its final tail before the caller sends
+    /// anything to Codex. Release alone never calls this and therefore never sends.
+    func finalizeCurrentTranscript() async throws -> String {
+        guard running else { return currentTranscript }
+        capturing = false
+        try finishClip()
+        if config.streaming, let socket, socket.state == .running {
+            let message = config.string("streamFinalizeMessage", "{\"type\":\"Finalize\"}")
+            if !message.isEmpty { try await socket.send(.string(message)) }
+            try? await Task.sleep(for: .milliseconds(700))
+        }
+        if !tail.isEmpty { settle(tail) }
+        let result = currentTranscript
+        stop()
+        return result
+    }
     func clearFace() async throws { settled = ""; tail = ""; lastFace = ""; faceSeq += 1; try await send?(Wire.appData(id: 14, seq: faceSeq, blob: Data(), clear: true)) }
-    private func settle(_ text: String) { settled = String((settled + " " + text).suffix(880)); tail = "" }
+    private func settle(_ text: String) {
+        settled = String((settled + " " + text).suffix(880)); tail = ""
+        liveTranscript?(currentTranscript, true)
+    }
     private func startFaceLoop() {
         faceTask?.cancel(); faceTask = Task { [weak self] in
             while !Task.isCancelled { try? await Task.sleep(for: .milliseconds(300)); await self?.flushFace() }
@@ -271,7 +308,7 @@ final class VoiceService: ObservableObject {
                         guard data.count <= 1024 * 1024, let object = try? JSONSerialization.jsonObject(with: data),
                               let text = STTConfig.path(object, config.string("streamTextPath", "channel.alternatives.0.transcript")) as? String else { continue }
                         let final = (STTConfig.path(object, config.string("streamFinalPath", "is_final")) as? Bool) == true
-                        if final { settle(text) } else { tail = text }
+                        if final { settle(text) } else { tail = text; liveTranscript?(currentTranscript, false) }
                         backoff = max(0.1, config.number("streamReconnectMs", 1000) / 1000)
                     }
                 } catch { if !Task.isCancelled && running { log("Live STT disconnected; durable archive unaffected") } }

@@ -25,6 +25,16 @@
 			"isa" = "PBXBuildFile";
 			"fileRef" = "D3CDB33AAE94119C5CBB0185";
 		};
+		"B3EAFCFB34F6EB21A49C4DA5" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "FFSBridge/Core/CodexWire.swift";
+			"sourceTree" = "<group>";
+		};
+		"579792BE54C23B2BF8EB641C" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "B3EAFCFB34F6EB21A49C4DA5";
+		};
 		"02BB8A82C94E645975976A00" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -114,6 +124,26 @@
 		"38472CE4FBEE0F8171F89341" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "1CC8520047DC3EAFE5DFF21E";
+		};
+		"4CFF6C60E60721C33131182B" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "FFSBridge/Services/CodexRPC.swift";
+			"sourceTree" = "<group>";
+		};
+		"935687B8339FFA452B939425" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "4CFF6C60E60721C33131182B";
+		};
+		"0BD8E1C1AF41C67A1BF3A48E" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "FFSBridge/Services/CodexService.swift";
+			"sourceTree" = "<group>";
+		};
+		"BB18DED44DB2ED8ED1E2CEB9" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "0BD8E1C1AF41C67A1BF3A48E";
 		};
 		"8F8A6970B6F4279E6D31D127" = {
 			"isa" = "PBXFileReference";
@@ -335,6 +365,7 @@
 				"BDEFC259426BD086D1126108",
 				"118783DB1ACF7C2BEE58C610",
 				"D3CDB33AAE94119C5CBB0185",
+				"B3EAFCFB34F6EB21A49C4DA5",
 				"02BB8A82C94E645975976A00",
 				"A775A28099C0F9FE5A46D408",
 				"A129D8AB61A9A0CDA204E1D0",
@@ -344,6 +375,8 @@
 				"E52DBF049D5AE476F8569287",
 				"54372D460FEDB302BDE2B630",
 				"1CC8520047DC3EAFE5DFF21E",
+				"4CFF6C60E60721C33131182B",
+				"0BD8E1C1AF41C67A1BF3A48E",
 				"8F8A6970B6F4279E6D31D127",
 				"F35BC98DD1FB2C16D9EB4558",
 				"97C978FA59055FE6E9EC03AB",
@@ -374,6 +407,7 @@
 			"files" = (
 				"674BF3D521FD06C9398343A4",
 				"6ABC48BF15DD68F89C15CFEB",
+				"579792BE54C23B2BF8EB641C",
 				"DC74EE1C041A52C62F2AA8E4",
 				"3324A2F4520BEC6494E79D0B",
 				"1F6D274360C404D91C3DE9F4",
@@ -383,6 +417,8 @@
 				"E613E64A28F7E2C4EE204F96",
 				"D830650FFB70C532A408574D",
 				"38472CE4FBEE0F8171F89341",
+				"935687B8339FFA452B939425",
+				"BB18DED44DB2ED8ED1E2CEB9",
 				"4A9303AE6933964FADBF3A55",
 				"241D27949A9551176E3235FC",
 				"99DE1E1F3E347162FCCE8DD7",

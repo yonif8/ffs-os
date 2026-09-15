@@ -8,6 +8,9 @@ import Foundation
         let voice = VoiceService(root: root)
         voice.liveOnGlasses = false
         let session = try voice.start()
+        precondition(voice.capturing)
+        voice.pauseCapture(); precondition(!voice.capturing)
+        voice.resumeCapture(); precondition(voice.capturing)
         var packet = Data(repeating: 0, count: 205)
         for counter in [254, 255, 0, 2] { packet[204] = UInt8(counter); voice.submit(packet, side: "R") }
         voice.submit(packet, side: "R") // duplicate
@@ -29,6 +32,14 @@ import Foundation
         let recovered = VoiceService(root: root)
         precondition(recovered.pendingCount == 0)
         let recoveredHits = try recovered.search("synthetic"); precondition(recoveredHits.count == 1)
+        let rendered = CodexService.render(turns: [["items": [
+            ["type":"userMessage", "content":[["type":"text", "text":"hello"]]],
+            ["type":"reasoning", "text":"private"],
+            ["type":"agentMessage", "text":"hi"]
+        ]]])
+        precondition(rendered == "YOU\nhello\n\nCODEX\nhi")
+        precondition(CodexService.threadStatus(["type":"active", "activeFlags":[]]) == 1)
+        precondition(CodexService.threadStatus(["type":"notLoaded"]) == 0)
         // Simulate an unqueued master tail left by process termination.
         let handle = try FileHandle(forWritingTo: dir.appendingPathComponent("master.pcm"))
         try handle.seekToEnd(); try handle.write(contentsOf: Data(repeating: 0, count: 3200)); try handle.close()
@@ -38,7 +49,7 @@ import Foundation
         try tail.setConfig("{\"providerKind\":\"mock\"}")
         try await Task.sleep(for: .milliseconds(200))
         let tailHits = try tail.search("synthetic"); precondition(tailHits.count == 2)
-        let server = DeveloperServer(root: root)
+        let server = DeveloperServer(root: root, port: 18766)
         server.command = { name, args in ["echo": name, "value": args["value"] ?? ""] }
         try server.start()
         try await Task.sleep(for: .milliseconds(200))
@@ -57,6 +68,6 @@ import Foundation
         var corrupt = body; corrupt[corrupt.count-1] ^= 1
         do { _ = try await request(corrupt); fatalError("Unauthenticated request accepted") } catch {}
         server.stop()
-        print("PASS: native LC3 + PLC archive, duplicate/side filtering, WAV, durable STT/index/recovery, encrypted RPC, replay and tamper rejection")
+        print("PASS: native LC3 + PLC archive, PTT pause/resume, durable STT/index/recovery, Codex rendering/status truth, encrypted RPC, replay and tamper rejection")
     }
 }

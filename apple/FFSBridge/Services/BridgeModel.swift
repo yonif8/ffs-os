@@ -23,6 +23,7 @@ final class BridgeModel: ObservableObject {
     let paired = PairedCommands()
     let library: AppLibrary
     let voice: VoiceService
+    let codex: CodexService
     let buzzer: BuzzerAudio
     let developer: DeveloperServer
     let root: URL
@@ -77,16 +78,16 @@ final class BridgeModel: ObservableObject {
         root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         #endif
         library = AppLibrary(root: root)
-        flasher = FirmwareFlasher(link: link); voice = VoiceService(root: root); buzzer = BuzzerAudio(link: link); developer = DeveloperServer(root: root)
-        for publisher in [library.objectWillChange, link.objectWillChange, flasher.objectWillChange, voice.objectWillChange, buzzer.objectWillChange, developer.objectWillChange] {
+        flasher = FirmwareFlasher(link: link); voice = VoiceService(root: root); codex = CodexService(root: root, voice: voice); buzzer = BuzzerAudio(link: link); developer = DeveloperServer(root: root)
+        for publisher in [library.objectWillChange, link.objectWillChange, flasher.objectWillChange, voice.objectWillChange, codex.objectWillChange, buzzer.objectWillChange, developer.objectWillChange] {
             publisher.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
         }
         let forward: (String, [String: Any]) -> Void = { [weak self] name, details in self?.record(name, details) }
-        link.event = forward; flasher.event = forward; voice.event = forward; buzzer.event = forward
+        link.event = forward; flasher.event = forward; voice.event = forward; codex.event = forward; buzzer.event = forward
         link.audio = { [weak self] data, side in self?.voice.submit(data, side: side) }
         link.serviceMessage = { [weak self] sid, data, side in
             guard let self else { return }
-            if sid == 0x91 { self.paired.receive(data, side: side); self.library.receive(data); self.buzzer.receive(data); self.decodeEvent(data, side: side) }
+            if sid == 0x91 { self.paired.receive(data, side: side); self.library.receive(data); self.buzzer.receive(data); self.codex.receive(data, side: side); self.decodeEvent(data, side: side) }
             if sid == 0x30, self.fb.feed(data) {
                 self.fbFlush?.cancel()
                 if self.fb.complete { self.finishScreenshot() }
@@ -108,6 +109,11 @@ final class BridgeModel: ObservableObject {
             try await Task.sleep(for: .milliseconds(200)); try await self.link.settings("info")
         }
         voice.send = { [weak self] d in guard let self else { throw BridgeError.unavailable("Bridge closed") }; if PairedCommands.accepts(d) { try await self.paired.send(d) } else { try await self.link.send(d) } }
+        codex.send = { [weak self] d in guard let self else { throw BridgeError.unavailable("Bridge closed") }; try await self.paired.send(d) }
+        codex.setMicrophone = { [weak self] enabled in
+            guard let self else { throw BridgeError.unavailable("Bridge closed") }
+            try await self.link.settings("mic", value: enabled ? 1 : 0)
+        }
         developer.command = { [weak self] name, args in guard let self else { throw BridgeError.unavailable("Bridge closed") }; return try await self.command(name, args) }
         logStartup()
     }
@@ -148,10 +154,10 @@ final class BridgeModel: ObservableObject {
         if developer.enabled { developer.stop() } else { do { try developer.start() } catch { errorMessage = error.localizedDescription } }
     }
     private func record(_ name: String, _ details: [String: Any]) {
-        if name == "disconnected" { paired.disconnected(); library.disconnected() }
+        if name == "disconnected" { paired.disconnected(); library.disconnected(); codex.disconnectedFromGlasses() }
         // A fresh pairReady is a new connection boundary: clear any poison the previous session left,
         // so a single earlier paired timeout does not wedge this session until a bridge restart.
-        if name == "pairReady" { paired.renew(); pairedOkSinceConnect = false; reconnectWedgeFlagged = false }
+        if name == "pairReady" { paired.renew(); pairedOkSinceConnect = false; reconnectWedgeFlagged = false; codex.pairReady() }
         if name == "pairReady", !flasher.active { perform { try await self.link.settings(self.library.entries.isEmpty ? "info" : "wake", value: 1) } }
         if automaticLibrarySync, name == "deviceInfo", details["side"] as? String == "R", !flasher.active, link.pairReady,
            link.lenses["R"]?.diagnostics["loader"]?.contains("shell=2") == true,
@@ -252,12 +258,13 @@ final class BridgeModel: ObservableObject {
                      "battery": l.battery as Any? ?? NSNull(), "rssi": l.rssi as Any? ?? NSNull(), "writeLimit": l.writeLimit, "receiveCount":l.receiveCount, "diagnostics": l.diagnostics,
                      "infoReceivedAt": l.infoReceivedAt?.timeIntervalSince1970 as Any? ?? NSNull(), "settings": l.settingsSnapshot]
          }, "flash": ["active": flasher.active, "message": flasher.message, "progress": flasher.progress, "ok": flasher.success as Any? ?? NSNull()],
-         "pairedBusy": paired.busy, "reconnectAutoPanic": reconnectAutoPanic, "library": library.status(), "voice": voice.status(), "buzzer": ["state": buzzer.state, "message": buzzer.detail]]
+         "pairedBusy": paired.busy, "reconnectAutoPanic": reconnectAutoPanic, "library": library.status(), "voice": voice.status(), "codex": codex.status(), "buzzer": ["state": buzzer.state, "message": buzzer.detail]]
     }
     func command(_ name: String, _ args: [String: Any]) async throws -> [String: Any] {
         logEvent("rpc", id: nil, ["command": name, "args": loggableArgs(args)])  // file only; ring unchanged
         if name == "status" { return status() }
         if name == "libraryStatus" { return library.status() }
+        if name == "codexStatus" { return codex.status() }
         if name == "events" {
             let since = args["since"] as? Int ?? 0
             let values = eventBuffer.filter { ($0["id"] as? Int ?? 0) > since }
@@ -364,6 +371,7 @@ final class BridgeModel: ObservableObject {
         case "buzzerSpeak": return ["requestId": try buzzer.speak(args["text"] as? String ?? "")]
         case "buzzerPlay": guard let url = URL(string: args["url"] as? String ?? "") else { throw BridgeError.invalid("Audio URL required") }; return ["requestId": try buzzer.play(url)]
         case "buzzerStop": buzzer.stop()
+        case "codexRefresh": try await codex.refresh(); return codex.status()
         default: throw BridgeError.invalid("Unknown bridge command: \(name)")
         }
         return ["accepted": true]

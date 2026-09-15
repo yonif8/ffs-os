@@ -101,6 +101,11 @@ pairing key over the trusted device connection without printing it.
 `voiceConfig`, `voiceConfigStatus`, `voiceSearch`, `voiceSessions`, `voiceExport`,
 `voiceClear`, `buzzerSpeak`, `buzzerPlay`, `buzzerStop`.
 
+The Codex glasses client adds `codexStatus` and `codexRefresh`. It connects to the
+existing KJDev app-server and does not run Codex on the Mac. Architecture,
+configuration, PTT behavior and rollback are documented in
+[`docs/CODEX_GLASS_CLIENT.md`](docs/CODEX_GLASS_CLIENT.md).
+
 Arguments are JSON objects; see `BridgeModel.command` for the exact contract.
 FFSA app commands and FFSC data now use the paired command queue: `push` requires
 both lenses and returns `executed: true` only after firmware acknowledges the same
@@ -154,6 +159,7 @@ receiver; installing this app does not install newer firmware on the glasses.
 ```sh
 python3 tools/test_core.py
 python3 tools/test_services.py
+python3 tools/test_codex.py --live
 ```
 
 Core tests compare transport/OTA/settings structures against independent fixtures,

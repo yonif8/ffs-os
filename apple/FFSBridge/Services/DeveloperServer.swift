@@ -10,17 +10,18 @@ final class DeveloperServer: ObservableObject {
     @Published private(set) var enabled = false
     @Published private(set) var status = "Developer connection off"
     let key: Data
-    #if os(macOS)
-    let port: UInt16 = 8766
-    #else
-    let port: UInt16 = 8765
-    #endif
+    let port: UInt16
     private var listener: NWListener?
     private let queue = DispatchQueue(label: "ffs.developer.network")
     private var connections: [UUID: NWConnection] = [:]
     private var seen: [String: Date] = [:]
     var command: ((String, [String: Any]) async throws -> [String: Any])?
-    init(root: URL) {
+    init(root: URL, port requestedPort: UInt16? = nil) {
+        #if os(macOS)
+        port = requestedPort ?? 8766
+        #else
+        port = requestedPort ?? 8765
+        #endif
         let file = root.appendingPathComponent("developer-pair.json")
         if let bytes = try? Data(contentsOf: file), let json = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
            let base64 = json["key"] as? String, let existing = Data(base64Encoded: base64), existing.count == 32 { key = existing }
