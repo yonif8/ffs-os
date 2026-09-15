@@ -36,7 +36,7 @@ import Foundation
             let threads = try await rpc.request("thread/list", ["limit": 10, "sortDirection": "desc", "archived": false]) as? [String: Any] ?? [:]
             let values = threads["data"] as? [[String: Any]] ?? []
             if let id = values.first?["id"] as? String {
-                let page = try await rpc.request("thread/turns/list", ["threadId": id, "limit": 1,
+                let page = try await rpc.request("thread/turns/list", ["threadId": id, "limit": 10,
                     "sortDirection": "desc", "itemsView": "full"]) as? [String: Any] ?? [:]
                 print("PASS live KJDev task history page: turns=\((page["data"] as? [Any])?.count ?? -1)")
             }

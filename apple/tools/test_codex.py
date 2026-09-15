@@ -13,4 +13,5 @@ sources = [core/'Wire.swift', core/'CodexWire.swift', services/'CodexRPC.swift',
 binary = OUT/'codex-tests'
 subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', *map(str, sources), '-o', str(binary)], check=True)
 mode = '--soak' if '--soak' in sys.argv else '--live' if '--live' in sys.argv else None
-subprocess.run([str(binary), *([mode] if mode else [])], check=True, timeout=40)
+subprocess.run([str(binary), *([mode] if mode else [])], check=True,
+               timeout=75 if mode == '--soak' else 45)

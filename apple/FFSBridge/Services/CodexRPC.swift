@@ -7,6 +7,7 @@ final class CodexSSHPipe {
     private let socketPath: String
     private var process: Process?
     private var input: FileHandle?
+    private var outputTask: Task<Void, Never>?
     private let reader = CodexPipeReader()
 
     init(host: String = "codex-server",
@@ -21,11 +22,24 @@ final class CodexSSHPipe {
         process.arguments = ["-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
                              host, "nc", "-U", socketPath]
         process.standardInput = stdin; process.standardOutput = stdout; process.standardError = stderr
-        stdout.fileHandleForReading.readabilityHandler = { [reader] handle in
-            let data = handle.availableData
-            Task { await reader.feed(data) }
+        let output = stdout.fileHandleForReading
+        let stream = AsyncStream<Data> { continuation in
+            output.readabilityHandler = { handle in
+                let data = handle.availableData
+                if data.isEmpty {
+                    handle.readabilityHandler = nil
+                    continuation.finish()
+                } else { continuation.yield(data) }
+            }
+            process.terminationHandler = { _ in continuation.finish() }
         }
-        process.terminationHandler = { [reader] _ in Task { await reader.close() } }
+        outputTask = Task.detached(priority: .userInitiated) { [reader] in
+            // Feeding the actor from an ordered AsyncStream avoids launching one
+            // independent Task per FileHandle callback.  Those Tasks could reorder
+            // adjacent chunks and corrupt large (multi-megabyte) JSON responses.
+            for await data in stream { await reader.feed(data) }
+            await reader.close()
+        }
         do { try process.run() } catch { throw BridgeError.unavailable("Could not start the KJDev SSH bridge") }
         self.process = process; input = stdin.fileHandleForWriting
 
@@ -93,7 +107,9 @@ final class CodexSSHPipe {
     func stop() {
         try? send(Data(), opcode: 8)
         input?.closeFile(); input = nil
+        if let output = process?.standardOutput as? Pipe { output.fileHandleForReading.readabilityHandler = nil }
         process?.terminate(); process = nil
+        outputTask?.cancel(); outputTask = nil
         Task { await reader.close() }
     }
 
@@ -192,7 +208,9 @@ final class CodexRPC {
                 do { decoded = try JSONSerialization.jsonObject(with: data) }
                 catch {
                     let prefix = data.prefix(4).map { String(format: "%02x", $0) }.joined()
-                    throw BridgeError.invalid("Invalid Codex JSON WebSocket message (\(data.count) bytes, prefix \(prefix))")
+                    let suffix = data.suffix(4).map { String(format: "%02x", $0) }.joined()
+                    let newlines = data.reduce(0) { $1 == 0x0a ? $0 + 1 : $0 }
+                    throw BridgeError.invalid("Invalid Codex JSON WebSocket message (\(data.count) bytes, prefix \(prefix), suffix \(suffix), newlines \(newlines)): \(error.localizedDescription)")
                 }
                 guard let object = decoded as? JSON else { continue }
                 if let id = object["id"] as? Int, object["method"] == nil {
