@@ -203,7 +203,9 @@ The workspace CLI supports `install <source.c> --library`; it chooses the packer
 that source's SDK checkout, or an explicit `--sdk-root`. App packages must match the
 active firmware ABI. Existing ABI-5 voice apps do not run on the ABI-4 product image.
 
-Optional private starter packages can be placed in `FFSBridge/SeedApps.local/*.ffsa`
+ABI-6 packages require matching ABI-6 firmware; older packages remain accepted because
+the runtime API is additive. Optional private starter packages can be placed in
+`FFSBridge/SeedApps.local/*.ffsa`
 before running the project generator. They are copied into the built app and imported
 only if that app ID is not already in the user's library. This directory is ignored;
 no proprietary firmware or private content belongs in the public bridge repository.

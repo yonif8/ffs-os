@@ -5,7 +5,7 @@ import Foundation
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         var body = Data(repeating: 0, count: 48)
-        body.replaceSubrange(0..<4, with: Data("FFSA".utf8)); body[5]=4;body[6]=48;body[8]=1;body[10]=12;body[12]=2;body[28]=32
+        body.replaceSubrange(0..<4, with: Data("FFSA".utf8)); body[5]=6;body[6]=48;body[8]=1;body[10]=12;body[12]=2;body[28]=32
         body.replaceSubrange(36..<40,with:Data("Test".utf8)); let code=Data([0x70,0x47]);let crc=Wire.crc32(code)
         var c=Data();c.le32(crc);body.replaceSubrange(16..<20,with:c);body.append(code)
         let frame=Wire.fxp1(body), app=try AppPackage(frame:frame)
@@ -21,6 +21,8 @@ import Foundation
             return Wire.fxp1(image)
         }
         precondition(app.id==1 && app.name=="Test")
+        var futureBody=body;futureBody[5]=AppPackage.maximumABI+1
+        do { _=try AppPackage(frame:Wire.fxp1(futureBody));fatalError("Future ABI accepted") }catch{}
         var bad=frame;bad[bad.count-1] ^= 1
         do { _=try AppPackage(frame:bad); fatalError("Corrupt package accepted") }catch{}
         let lib=AppLibrary(root:root);try lib.add(frame)
