@@ -43,6 +43,18 @@ import Foundation
                 let page = try await rpc.request("thread/turns/list", ["threadId": id, "limit": 10,
                     "sortDirection": "desc", "itemsView": "full"]) as? [String: Any] ?? [:]
                 print("PASS live KJDev task history page: turns=\((page["data"] as? [Any])?.count ?? -1)")
+                if let expected = ProcessInfo.processInfo.environment["CODEX_EXPECT_USER_TEXT"] {
+                    let turns = page["data"] as? [[String: Any]] ?? []
+                    let messages = turns.flatMap { $0["items"] as? [[String: Any]] ?? [] }
+                        .filter { $0["type"] as? String == "userMessage" }
+                        .map { item in
+                            (item["content"] as? [[String: Any]] ?? [])
+                                .compactMap { $0["text"] as? String }.joined(separator: "\n")
+                        }
+                    let matches = messages.filter { $0.contains(expected) }.count
+                    precondition(matches == 1, "Expected one confirmed user message containing '\(expected)', found \(matches)")
+                    print("PASS live KJDev confirmed user message exactly once")
+                }
                 let newest = try await rpc.request("thread/turns/list", ["threadId": id, "limit": 1,
                     "sortDirection": "desc", "itemsView": "full"]) as? [String: Any] ?? [:]
                 if let cursor = newest["nextCursor"] as? String {

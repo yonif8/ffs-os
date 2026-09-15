@@ -66,9 +66,9 @@ final class CodexService: ObservableObject {
         rpc.notification = { [weak self] method, params in self?.notification(method, params) }
         rpc.serverRequest = { [weak self] id, method, params in self?.serverRequest(id, method, params) }
         rpc.disconnected = { [weak self] error in self?.lost(error) }
-        voice.liveTranscript = { [weak self] transcript, isFinal in
+        voice.liveTranscript = { [weak self] _, _ in
             guard let self, self.pttSession else { return }
-            self.statusMessage = isFinal ? "Transcription ready" : "Transcribing"
+            self.statusMessage = self.voice.capturing ? "Transcribing" : "Transcription ready"
             self.queueSnapshot()
         }
     }
