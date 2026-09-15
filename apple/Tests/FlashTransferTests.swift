@@ -4,7 +4,10 @@ import CryptoKit
 // Runs the production FirmwareFlasher with an in-memory peer. No Bluetooth.
 @MainActor
 final class GlassesLink {
-    struct Lens { var ready = true }
+    struct Lens {
+        var ready = true
+        var diagnostics = ["loader": "dash=built", "capabilities": "peer=L/built"]
+    }
     static let writeID = 1, otaWriteID = 2
     var lenses = ["L": Lens(), "R": Lens()]
     var pairReady = true, pairAuthenticated = true
@@ -23,7 +26,7 @@ final class GlassesLink {
     func acquireFlash() throws {}
     func releaseFlash() {}
     func reconnectAfterFlash() {}
-    func settings(_ key: String) async throws {}
+    func settings(_ key: String, side: String? = nil) async throws {}
     func write(_ frames: [Data], sides: [String], characteristic: Int, owner: Bool) async throws {
         guard characteristic == Self.otaWriteID else { controlWrites += 1; return }
         guard let first = frames.first, first[6] == 0xc0 else { fatalError("Missing control marker") }
