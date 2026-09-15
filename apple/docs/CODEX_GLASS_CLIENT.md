@@ -37,11 +37,13 @@ does not invent or mutate projects. Stable 16-bit handles keep full server task 
 off the constrained glasses wire. The last selected task and handle map persist in
 Application Support.
 
-The drawer is paged at 24 wire rows, including repeated project headings. Reaching
+The drawer is paged at six wire rows, including repeated project headings. Reaching
 an end requests the next or previous page; a physical swipe still changes at most
-one selectable row. Opening a task resumes it on KJDev and fetches the newest ten
-turns. Older pages are prepended on demand. User and agent messages render; private
-reasoning and tool internals do not.
+one selectable row. Opening a task resumes it on KJDev and fetches the newest turn.
+Reaching the top fetches one older turn; returning downward walks the cached newer
+pages. `CDX1` version 2 carries the explicit history index so a page response cannot
+be confused with an unrelated live-status snapshot. User and agent messages render;
+private reasoning and tool internals do not.
 
 Active tasks show a small spinner and idle tasks a green completed/waiting dot.
 Agent message deltas stream into the current conversation. `request_user_input`
@@ -98,6 +100,9 @@ Developer RPCs `codexStatus` and `codexRefresh` report connectivity, task count,
 active task, thinking state, PTT state and draft byte count. The ordinary `status`
 response embeds the same object. Codex transport events join the existing daily
 JSONL log, but transcript contents and credentials are not added to command logs.
+SSH output is serialized through one ordered stream before WebSocket framing. The
+live regression probe requests a ten-turn, multi-megabyte page specifically to catch
+chunk reordering that small list responses cannot expose.
 
 Reproduce the off-device checks from the Apple repository root:
 

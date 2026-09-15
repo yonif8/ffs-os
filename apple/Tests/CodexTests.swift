@@ -4,7 +4,7 @@ import Foundation
     @MainActor static func main() async throws {
         var snapshot = CodexWire.Snapshot(revision: 0xfffffff0, selected: 2, connected: true,
             thinking: true, hasOlder: true, recording: false, paused: true, confirming: false,
-            hasPreviousRows: true, hasNextRows: true,
+            hasPreviousRows: true, hasNextRows: true, historyIndex: 2,
             conversation: String(repeating: "Earlier text. ", count: 200) + "LATEST ✅",
             rows: [.init(handle: 0, title: "misc poly", project: true, status: 0),
                    .init(handle: 2, title: "A current task", project: false, status: 1)],
@@ -14,6 +14,7 @@ import Foundation
         let decoded = CodexWire.decode(encoded)!
         precondition(decoded.connected && decoded.thinking && decoded.hasOlder && decoded.paused)
         precondition(decoded.hasPreviousRows && decoded.hasNextRows)
+        precondition(decoded.historyIndex == 2)
         precondition(decoded.rows == snapshot.rows && decoded.options == snapshot.options)
         precondition(decoded.conversation.hasSuffix("LATEST ✅"))
         precondition(decoded.draft == snapshot.draft && decoded.question == snapshot.question)

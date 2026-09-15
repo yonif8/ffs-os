@@ -27,6 +27,7 @@ enum CodexWire {
         var confirming = false
         var hasPreviousRows = false
         var hasNextRows = false
+        var historyIndex: UInt8 = 0
         var conversation = ""
         var rows: [Row] = []
         var draft = ""
@@ -132,17 +133,18 @@ enum CodexWire {
 
     static func decode(_ data: Data) -> Snapshot? {
         // Header: magic(4), version(1), flags(1), selected(2), revision(4),
-        // row/option counts(2), and three string lengths(6).
-        guard data.count >= 20, data.prefix(4) == magic, data[4] == 1 else { return nil }
+        // row/option counts(2), three string lengths(6), and history index(1).
+        guard data.count >= 21, data.prefix(4) == magic, data[4] == 2 else { return nil }
         let flags = data[5]
         var snapshot = Snapshot(revision: data.u32(8), selected: UInt16(data.u16(6)),
             connected: flags & 1 != 0, thinking: flags & 2 != 0,
             hasOlder: flags & 4 != 0, recording: flags & 8 != 0,
             paused: flags & 16 != 0, confirming: flags & 32 != 0,
-            hasPreviousRows: flags & 64 != 0, hasNextRows: flags & 128 != 0)
+            hasPreviousRows: flags & 64 != 0, hasNextRows: flags & 128 != 0,
+            historyIndex: data[20])
         let rowCount = Int(data[12]), optionCount = Int(data[13])
         let conversationLength = data.u16(14), draftLength = data.u16(16), questionLength = data.u16(18)
-        var offset = 20
+        var offset = 21
         for _ in 0..<rowCount {
             guard offset + 4 <= data.count else { return nil }
             let handle = UInt16(data.u16(offset)), rowFlags = data[offset + 2], length = Int(data[offset + 3])
@@ -181,9 +183,10 @@ enum CodexWire {
         if snapshot.paused { flags |= 16 }; if snapshot.confirming { flags |= 32 }
         if snapshot.hasPreviousRows { flags |= 64 }; if snapshot.hasNextRows { flags |= 128 }
         var data = magic
-        data.append(1); data.append(flags); data.le16(Int(snapshot.selected)); data.le32(snapshot.revision)
+        data.append(2); data.append(flags); data.le16(Int(snapshot.selected)); data.le32(snapshot.revision)
         data.append(UInt8(snapshot.rows.count)); data.append(UInt8(snapshot.options.count))
         data.le16(conversationData.count); data.le16(draftData.count); data.le16(questionData.count)
+        data.append(snapshot.historyIndex)
         for row in snapshot.rows {
             let title = Data(row.title.utf8)
             data.le16(Int(row.handle)); data.append((row.project ? 1 : 0) | ((row.status & 3) << 1))

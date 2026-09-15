@@ -41,6 +41,9 @@ final class CodexService: ObservableObject {
     private var drawerPage = 0
     private var refreshing = false
     private var resumedThreads = Set<String>()
+    private var latestConversation = ""
+    private var historyPages: [String] = []
+    private var historyIndex = 0
 
     private struct PendingQuestion {
         var requestID: Any
@@ -180,7 +183,7 @@ final class CodexService: ObservableObject {
             case .selectConversation:
                 guard let id = idsByHandle[command.value] else { throw BridgeError.invalid("Unknown conversation") }
                 try await open(id)
-            case .olderPage: try await loadOlder()
+            case .olderPage: try await changeHistoryPage(newer: command.value == 1)
             case .pushToTalkStart: try await pttStart()
             case .pushToTalkPause: try await pttPause()
             case .discardDraft: try await discardDraft()
@@ -210,25 +213,38 @@ final class CodexService: ObservableObject {
             }
         }
         activeThreadID = id; activeTurnID = ""; conversation = ""; olderCursor = nil
+        latestConversation = ""; historyPages = []; historyIndex = 0
         if let page = drawerPages().firstIndex(where: { $0.contains(where: { !$0.project && $0.handle == handle(for: id) }) }) { drawerPage = page }
         saveState()
-        let result = try await rpc.request("thread/turns/list", ["threadId": id, "limit": 10,
+        let result = try await rpc.request("thread/turns/list", ["threadId": id, "limit": 1,
             "sortDirection": "desc", "itemsView": "full"]) as? [String: Any] ?? [:]
         let turns = result["data"] as? [[String: Any]] ?? []
-        conversation = Self.render(turns: turns.reversed())
+        latestConversation = Self.render(turns: turns.reversed())
+        conversation = latestConversation; historyPages = [latestConversation]
         olderCursor = result["nextCursor"] as? String
         if let turn = turns.first, (turn["status"] as? String) == "inProgress" { activeTurnID = turn["id"] as? String ?? "" }
         statusMessage = readOnly ? "Conversation active elsewhere; viewing read-only" : "Conversation loaded"
         queueSnapshot()
     }
 
-    private func loadOlder() async throws {
-        guard let cursor = olderCursor, !activeThreadID.isEmpty else { return }
-        let result = try await rpc.request("thread/turns/list", ["threadId": activeThreadID, "limit": 10,
+    private func changeHistoryPage(newer: Bool) async throws {
+        guard !activeThreadID.isEmpty else { return }
+        if newer {
+            guard historyIndex > 0 else { return }
+            historyIndex -= 1
+            conversation = historyIndex == 0 ? latestConversation : historyPages[historyIndex]
+            queueSnapshot(); return
+        }
+        if historyIndex + 1 < historyPages.count {
+            historyIndex += 1; conversation = historyPages[historyIndex]; queueSnapshot(); return
+        }
+        guard let cursor = olderCursor else { return }
+        let result = try await rpc.request("thread/turns/list", ["threadId": activeThreadID, "limit": 1,
             "cursor": cursor, "sortDirection": "desc", "itemsView": "full"]) as? [String: Any] ?? [:]
         let page = Self.render(turns: (result["data"] as? [[String: Any]] ?? []).reversed())
-        if !page.isEmpty { conversation = page + (conversation.isEmpty ? "" : "\n\n") + conversation }
-        olderCursor = result["nextCursor"] as? String; queueSnapshot()
+        olderCursor = result["nextCursor"] as? String
+        if !page.isEmpty { historyPages.append(page); historyIndex += 1; conversation = page }
+        queueSnapshot()
     }
 
     private func pttStart() async throws {
@@ -265,7 +281,7 @@ final class CodexService: ObservableObject {
         let result = try await rpc.request("turn/start", ["threadId": activeThreadID,
             "input": [["type": "text", "text": text]], "clientUserMessageId": clientID]) as? [String: Any] ?? [:]
         if let turn = result["turn"] as? [String: Any] { activeTurnID = turn["id"] as? String ?? "" }
-        conversation += (conversation.isEmpty ? "" : "\n\n") + "YOU\n" + text
+        updateLatest { $0 += ($0.isEmpty ? "" : "\n\n") + "YOU\n" + text }
         voice.clearCurrentTranscript(); pttSession = false; confirming = false
         statusMessage = "Sent to Codex"; queueSnapshot()
     }
@@ -311,16 +327,14 @@ final class CodexService: ObservableObject {
         switch method {
         case "turn/started":
             if let turn = params["turn"] as? [String: Any] { activeTurnID = turn["id"] as? String ?? "" }
-            if !conversation.hasSuffix("CODEX\n") {
-                conversation += (conversation.isEmpty ? "" : "\n\n") + "CODEX\n"
-            }
+            updateLatest { if !$0.hasSuffix("CODEX\n") { $0 += ($0.isEmpty ? "" : "\n\n") + "CODEX\n" } }
             statusMessage = "Codex is thinking"; setActiveRowStatus(1); queueSnapshot()
         case "item/agentMessage/delta":
-            if let delta = params["delta"] as? String { conversation += delta; queueSnapshot(debounce: true) }
+            if let delta = params["delta"] as? String { updateLatest { $0 += delta }; queueSnapshot(debounce: true) }
         case "item/completed":
             if let item = params["item"] as? [String: Any], item["type"] as? String == "agentMessage",
                let text = item["text"] as? String, !text.isEmpty {
-                replaceTrailingAgent(with: text); queueSnapshot()
+                updateLatest { Self.replaceTrailingAgent(in: &$0, with: text) }; queueSnapshot()
             }
         case "turn/completed":
             activeTurnID = ""; statusMessage = "Codex is waiting for you"; setActiveRowStatus(2); queueSnapshot()
@@ -354,10 +368,12 @@ final class CodexService: ObservableObject {
         let rows = pages.isEmpty ? [] : pages[drawerPage]
         let selected = handles[activeThreadID] ?? 0
         var snapshot = CodexWire.Snapshot(revision: revision, selected: selected, connected: connected,
-            thinking: !activeTurnID.isEmpty, hasOlder: olderCursor != nil,
+            thinking: !activeTurnID.isEmpty, hasOlder: historyIndex + 1 < historyPages.count || olderCursor != nil,
             recording: voice.capturing, paused: pttSession && !voice.capturing,
             confirming: confirming, hasPreviousRows: drawerPage > 0,
-            hasNextRows: drawerPage + 1 < pages.count, conversation: conversation, rows: rows,
+            hasNextRows: drawerPage + 1 < pages.count,
+            historyIndex: UInt8(min(historyIndex, Int(UInt8.max))),
+            conversation: conversation, rows: rows,
             draft: pttSession ? voice.currentTranscript : "", question: question.text, options: question.options)
         if !connected && snapshot.conversation.isEmpty { snapshot.conversation = "KJDev is offline. Reconnecting…" }
         do {
@@ -377,7 +393,9 @@ final class CodexService: ObservableObject {
             return lhs.0.localizedCaseInsensitiveCompare(rhs.0) == .orderedAscending
         }
         var pages: [[CodexWire.Row]] = [[]]
-        let capacity = 24
+        // Six rows are all the 288 px drawer can display, and keeping the wire
+        // page this small leaves deterministic room for local conversation text.
+        let capacity = 6
         for (name, rows) in grouped {
             let heading = CodexWire.Row(handle: 0, title: name, project: true, status: 0)
             if pages[pages.count - 1].count >= capacity { pages.append([]) }
@@ -418,7 +436,14 @@ final class CodexService: ObservableObject {
         log("disconnected", ["error": error.localizedDescription]); queueSnapshot()
     }
 
-    private func replaceTrailingAgent(with text: String) {
+    private func updateLatest(_ mutation: (inout String) -> Void) {
+        mutation(&latestConversation)
+        if historyPages.isEmpty { historyPages = [latestConversation] }
+        else { historyPages[0] = latestConversation }
+        if historyIndex == 0 { conversation = latestConversation }
+    }
+
+    private static func replaceTrailingAgent(in conversation: inout String, with text: String) {
         if let range = conversation.range(of: "CODEX\n", options: .backwards) {
             conversation.replaceSubrange(range.lowerBound..<conversation.endIndex, with: "CODEX\n" + text)
         } else { conversation += (conversation.isEmpty ? "" : "\n\n") + "CODEX\n" + text }
