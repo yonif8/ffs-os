@@ -9,6 +9,10 @@ import Foundation
         body.replaceSubrange(36..<40,with:Data("Test".utf8)); let code=Data([0x70,0x47]);let crc=Wire.crc32(code)
         var c=Data();c.le32(crc);body.replaceSubrange(16..<20,with:c);body.append(code)
         let frame=Wire.fxp1(body), app=try AppPackage(frame:frame)
+        var abi5Body=body;abi5Body[5]=5
+        let abi5=try AppPackage(frame:Wire.fxp1(abi5Body));precondition(abi5.id==1)
+        var abi6Body=body;abi6Body[5]=6
+        do { _=try AppPackage(frame:Wire.fxp1(abi6Body));fatalError("Future ABI accepted") }catch{}
         func makeFrame(_ id: Int) -> Data {
             var image = body
             image[8] = UInt8(truncatingIfNeeded: id); image[9] = UInt8(truncatingIfNeeded: id >> 8)
