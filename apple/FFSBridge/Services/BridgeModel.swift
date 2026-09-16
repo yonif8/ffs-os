@@ -34,6 +34,7 @@ final class BridgeModel: ObservableObject {
     @Published var allowUnknownFirmware = false
     @Published var errorMessage: String?
     private var fb = Framebuffer()
+    private var fbSide = "R"   // lens whose link delivered the current framebuffer chunks
     private var eventID = 0
     private var eventBuffer: [[String: Any]] = []
     private var subscriptions = Set<AnyCancellable>()
@@ -88,6 +89,7 @@ final class BridgeModel: ObservableObject {
             guard let self else { return }
             if sid == 0x91 { self.paired.receive(data, side: side); self.library.receive(data); self.buzzer.receive(data); self.decodeEvent(data, side: side) }
             if sid == 0x30, self.fb.feed(data) {
+                self.fbSide = side
                 self.fbFlush?.cancel()
                 if self.fb.complete { self.finishScreenshot() }
                 else { self.fbFlush = Task { [weak self] in try? await Task.sleep(for: .milliseconds(900)); guard !Task.isCancelled else { return }; self?.finishScreenshot() } }
@@ -227,8 +229,8 @@ final class BridgeModel: ObservableObject {
             screenshot = UIImage(cgImage: image)
             try? screenshot?.pngData()?.write(to: root.appendingPathComponent("fbshot.png"), options: .atomic)
         }
-        screenshotDescription = "Right lens · \(fb.complete ? "complete" : "partial") · \(fb.received)/\(Framebuffer.size) bytes"
-        record("screenshot", ["message": screenshotDescription, "complete": fb.complete, "generation": fb.generation])
+        screenshotDescription = "\(fbSide == "L" ? "Left" : "Right") lens · \(fb.complete ? "complete" : "partial") · \(fb.received)/\(Framebuffer.size) bytes"
+        record("screenshot", ["message": screenshotDescription, "complete": fb.complete, "generation": fb.generation, "side": fbSide])
     }
     func importFirmware(_ url: URL) throws {
         let scoped = url.startAccessingSecurityScopedResource(); defer { if scoped { url.stopAccessingSecurityScopedResource() } }
@@ -325,7 +327,7 @@ final class BridgeModel: ObservableObject {
             guard fb.received > 0 else { throw BridgeError.unavailable("No framebuffer received; push the current fb_shot payload first") }
             let format = args["format"] as? String ?? "png", data = format == "a4" ? fb.bytes : screenshot?.pngData()
             guard let data else { throw BridgeError.unavailable("Screenshot not assembled") }
-            return ["base64": data.base64EncodedString(), "complete": fb.complete, "received": fb.received, "side": "R", "generation": fb.generation]
+            return ["base64": data.base64EncodedString(), "complete": fb.complete, "received": fb.received, "side": fbSide, "generation": fb.generation]
         case "uploadFirmware":
             guard !flasher.active, let b64 = args["base64"] as? String, let data = Data(base64Encoded: b64), data.count <= 32 * 1024 * 1024 else { throw BridgeError.invalid("Invalid firmware upload") }
             let target = root.appendingPathComponent("firmware.bin"); try data.write(to: target, options: .atomic); firmwareFile = target

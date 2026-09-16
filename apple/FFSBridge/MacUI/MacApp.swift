@@ -157,7 +157,7 @@ struct MacBridgeView: View {
                 if let image = model.screenshot {
                     Image(nsImage: image).resizable().interpolation(.none).aspectRatio(contentMode: .fit).background(.black)
                 } else {
-                    Rectangle().fill(.black).aspectRatio(2, contentMode: .fit).overlay(Text("Push the current screenshot payload\nto receive the right-lens framebuffer.").multilineTextAlignment(.center).font(.caption).foregroundStyle(.secondary))
+                    Rectangle().fill(.black).aspectRatio(2, contentMode: .fit).overlay(Text("Push the current screenshot payload\nto receive a lens framebuffer.").multilineTextAlignment(.center).font(.caption).foregroundStyle(.secondary))
                 }
                 Text(model.screenshotDescription).font(.caption).foregroundStyle(.secondary)
                 Divider()
