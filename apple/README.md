@@ -57,7 +57,7 @@ AES-GCM authenticated requests with freshness/replay checks, and writes the priv
 client config to `~/.config/ffs/mac.json` (mode 0600). It provides no shell execution.
 In the complete private workspace, use `python3 tools/mac.py --help` from its root:
 that wrapper shares the Android rig lease and builds glasses C apps before transmission.
-The wrapper also provides `capture --output /private/path/hud.png`: it builds the current framebuffer payload, sends it, and receives one complete frame. The low-level client here can be used standalone:
+The wrapper also provides `capture --side R|L --output /private/path/hud.png`: it builds the current framebuffer payload, sends it to that lens, and receives one complete frame. The left lens needs the payload's ungated sender override (the wrapper adds it); each lens is captured separately. The low-level client here can be used standalone:
 
 ```sh
 FFS_IPHONE_CONFIG="$HOME/.config/ffs/mac.json" tools/ffs-iphone status
@@ -67,8 +67,9 @@ The client request timeout defaults to 12 seconds so a multi-packet paired comma
 can receive its execution acknowledgement; set `FFS_IPHONE_TIMEOUT` to override it
 within the supported 1–30 second range.
 
-Use the desktop command panel for any RPC below. The framebuffer is explicitly the
-right lens; it does not prove stereo agreement or that the panel is physically lit.
+Use the desktop command panel for any RPC below. A framebuffer comes from whichever
+lens the payload was pushed to (`side` on the result); one capture never proves stereo
+agreement — capture both lenses and diff — nor that the panel is physically lit.
 
 **Wake display** clears the stock display-sleep (silent-mode) switch before sending
 FWAK. It is an explicit request to leave that mode, not an audio-mute operation.
