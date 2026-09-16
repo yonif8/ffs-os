@@ -6,13 +6,21 @@ struct LensStatus: Identifiable {
     var id: String
     var name = "Not connected", state = "disconnected", version = "—"
     var ready = false, battery: Int?, charging: Bool?, rssi: Int?, writeLimit = 0
+    var powerReceivedAt: Date?, powerSourceAgeMS: UInt32?
     var authenticated = false
     var diagnostics: [String: String] = [:]
     var receiveCount = 0
     var infoReceivedAt: Date?
     var settingsSnapshot: [String: Int] = [:]
     mutating func invalidateReadback() {
-        diagnostics = [:]; settingsSnapshot = [:]; version = "—"; battery = nil; charging = nil; infoReceivedAt = nil; authenticated = false
+        diagnostics = [:]; settingsSnapshot = [:]; version = "—"; battery = nil; charging = nil
+        powerReceivedAt = nil; powerSourceAgeMS = nil; infoReceivedAt = nil; authenticated = false
+    }
+    func powerFresh(at now: Date = Date()) -> Bool {
+        guard battery != nil, let received = powerReceivedAt, let sourceAge = powerSourceAgeMS,
+              sourceAge <= 1_500 else { return false }
+        let hostAgeMS = max(0, now.timeIntervalSince(received) * 1_000)
+        return Double(sourceAge) + hostAgeMS <= 75_000
     }
 }
 
@@ -29,8 +37,28 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
     @Published var scanning = false
     @Published private(set) var flashOwned = false
     @Published var micLive = false
+    @Published private(set) var reportedBattery: Int?
+    @Published private(set) var reportedCharging: Bool?
+    @Published private(set) var reportedPowerAt: Date?
     var pairReady: Bool { lenses.values.allSatisfy(\.ready) }
     var pairAuthenticated: Bool { pairReady && lenses.values.allSatisfy(\.authenticated) }
+    var glassesBattery: Int? {
+        let now = Date()
+        guard pairReady, let left = lenses["L"], let right = lenses["R"],
+              left.powerFresh(at: now), right.powerFresh(at: now),
+              let l = left.battery, let r = right.battery else { return nil }
+        return min(l, r)
+    }
+    var glassesCharging: Bool? {
+        let now = Date()
+        guard pairReady, let left = lenses["L"], let right = lenses["R"],
+              left.powerFresh(at: now), right.powerFresh(at: now),
+              let l = left.charging, let r = right.charging else { return nil }
+        return l || r
+    }
+    var reportedPowerFresh: Bool {
+        pairReady && reportedBattery != nil && reportedPowerAt.map { Date().timeIntervalSince($0) <= 75 } == true
+    }
     var event: ((String, [String: Any]) -> Void)?
     var audio: ((Data, String) -> Void)?
     var serviceMessage: ((UInt8, Data, String) -> Void)?
@@ -60,6 +88,7 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
     private var lastMic: Date?
     private var requestedMic = false
     private var rssiTask: Task<Void, Never>?
+    private var powerRefreshTask: Task<Void, Never>?
     private var connectionHeartbeatEnabled = false
     private var connectionHeartbeatTasks: [String: Task<Void, Never>] = [:]
     private var recovery = PeerRecovery()
@@ -115,7 +144,8 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
         authentication.removeAll()
         for s in ["L", "R"] { lenses[s]?.ready = false; lenses[s]?.invalidateReadback() }
         wanted.removeAll(); UserDefaults.standard.removeObject(forKey: "wantedSides")
-        stopScan(); connecting = nil; connectingGeneration = UUID(); rssiTask?.cancel()
+        stopScan(); connecting = nil; connectingGeneration = UUID(); rssiTask?.cancel(); powerRefreshTask?.cancel()
+        reportedBattery = nil; reportedCharging = nil; reportedPowerAt = nil
         for p in peripherals.values { manager.cancelPeripheralConnection(p) }
         failJobs(BridgeError.unavailable("Disconnected")); micLive = false
     }
@@ -142,7 +172,7 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
             }
             return
         }
-        if pairReady { observeRecovery(); stopScan(); event?("pairReady", [:]); startRSSI() }
+        if pairReady { observeRecovery(); stopScan(); event?("pairReady", [:]); startRSSI(); startPowerRefresh() }
     }
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         switch central.state {
@@ -157,7 +187,8 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
         } else {
             cancelRebootReconnect()
             recovery.reset(); recoveryTask?.cancel(); authentication.removeAll()
-            scanning = false; connecting = nil; connectingGeneration = UUID()
+            scanning = false; connecting = nil; connectingGeneration = UUID(); powerRefreshTask?.cancel()
+            reportedBattery = nil; reportedCharging = nil; reportedPowerAt = nil
             for s in ["L", "R"] { lenses[s]?.ready = false; lenses[s]?.state = "disconnected"; lenses[s]?.invalidateReadback() }
             failJobs(BridgeError.unavailable(bluetooth))
         }
@@ -200,6 +231,7 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
         guard let s = sideOf(p) else { return }
         authentication.removeValue(forKey: s)
         connectionHeartbeatTasks.removeValue(forKey: s)?.cancel()
+        powerRefreshTask?.cancel()
         lenses[s]?.ready = false; lenses[s]?.state = "disconnected"; lenses[s]?.invalidateReadback(); chars[s] = [:]; assemblers[s] = Reassembler()
         if connecting == s { connecting = nil; connectingGeneration = UUID() }
         event?("disconnected", ["side": s, "code": (error as NSError?)?.code ?? 0])
@@ -297,6 +329,18 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
             }
         }
     }
+    private func startPowerRefresh() {
+        powerRefreshTask?.cancel()
+        powerRefreshTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(30)) } catch { return }
+                guard let self, self.pairReady else { return }
+                guard !self.flashOwned else { continue }
+                do { try await self.settings("info", side: "R") }
+                catch { self.log("Power telemetry refresh stopped: \(error.localizedDescription)"); return }
+            }
+        }
+    }
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         guard let s = sideOf(peripheral), error == nil, let data = characteristic.value else { return }
         if characteristic.uuid == Self.audioID {
@@ -324,13 +368,24 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
     }
     private func decodeInfo(_ d: Data, side s: String) {
         guard let f = try? Proto.fields(d) else { return }
-        if f.bytes(104) != nil || f.string(100) != nil || f.bytes(4) != nil { lenses[s]?.infoReceivedAt = Date() }
+        let now = Date()
+        if f.bytes(106) != nil || f.bytes(104) != nil || f.string(100) != nil || f.bytes(4) != nil { lenses[s]?.infoReceivedAt = now }
         if let snapshot = SettingsWire.snapshot(d) { lenses[s]?.settingsSnapshot = snapshot }
         if let silent = SettingsWire.silentModeUpdate(d) { lenses[s]?.settingsSnapshot["silentMode"] = silent }
         if let inner = f.bytes(4) ?? f.bytes(5), let inf = try? Proto.fields(inner) {
-            if let v = inf.string(s == "L" ? 5 : 6) { lenses[s]?.version = v }
-            if let v = inf.number(12), (0...100).contains(v) { lenses[s]?.battery = v }
-            if let v = inf.number(13) { lenses[s]?.charging = v != 0 }
+            // The stock responder is right/master-only, but its payload carries both
+            // firmware versions and one aggregate/pair-level battery. Never assign that
+            // singular value to the physical right lens.
+            if s == "R" {
+                if let v = inf.string(5) { lenses["L"]?.version = v }
+                if let v = inf.string(6) { lenses["R"]?.version = v }
+                if let v = inf.number(12), (0...100).contains(v) { reportedBattery = v; reportedPowerAt = now }
+                if let v = inf.number(13) { reportedCharging = v != 0; reportedPowerAt = now }
+            }
+        }
+        if s == "R", let raw = f.bytes(106), let power = PowerTelemetry.decode(raw) {
+            applyPower(power.right, side: "R", receivedAt: now)
+            applyPower(power.left, side: "L", receivedAt: now)
         }
         if let caps = f.string(100) { lenses[s]?.diagnostics["capabilities"] = caps }
         if let ld = f.bytes(104), ld.count >= 20 {
@@ -360,7 +415,25 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
             } else { out += " crash=none" }
             lenses[s]?.diagnostics["crash"] = out; log("\(s): \(out)")
         }
-        event?("deviceInfo", ["side": s, "version": lenses[s]?.version ?? "—", "battery": lenses[s]?.battery as Any? ?? NSNull()])
+        event?("deviceInfo", [
+            "side": s, "version": lenses[s]?.version ?? "—",
+            "reportedBattery": reportedBattery as Any? ?? NSNull(),
+            "leftBattery": lenses["L"]?.battery as Any? ?? NSNull(),
+            "rightBattery": lenses["R"]?.battery as Any? ?? NSNull(),
+            "leftCharging": lenses["L"]?.charging as Any? ?? NSNull(),
+            "rightCharging": lenses["R"]?.charging as Any? ?? NSNull(),
+            "leftSourceAgeMS": lenses["L"]?.powerSourceAgeMS as Any? ?? NSNull(),
+            "rightSourceAgeMS": lenses["R"]?.powerSourceAgeMS as Any? ?? NSNull(),
+            "leftFresh": pairReady && (lenses["L"]?.powerFresh(at: now) == true),
+            "rightFresh": pairReady && (lenses["R"]?.powerFresh(at: now) == true),
+            "glassesBattery": glassesBattery as Any? ?? NSNull()
+        ])
+    }
+    private func applyPower(_ sample: PowerSample, side: String, receivedAt: Date) {
+        lenses[side]?.battery = sample.battery
+        lenses[side]?.charging = sample.charging
+        lenses[side]?.powerReceivedAt = sample.battery == nil ? nil : receivedAt
+        lenses[side]?.powerSourceAgeMS = sample.sourceAgeMS
     }
     func setConnectionHeartbeat(enabled: Bool) throws {
         guard !flashOwned else { throw BridgeError.unavailable("Firmware flash owns the link") }
@@ -454,7 +527,7 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
     }
     func acquireFlash() throws {
         guard pairAuthenticated, !flashOwned, !pumping, jobs.isEmpty, ["L","R"].allSatisfy(otaReady) else { throw BridgeError.unavailable("Flash needs an idle link and both subscribed OTA channels") }
-        flashOwned = true; recovery.reset(); recoveryTask?.cancel(); stopScan()
+        flashOwned = true; recovery.reset(); recoveryTask?.cancel(); powerRefreshTask?.cancel(); stopScan()
     }
     func releaseFlash() { flashOwned = false }
     private func cancelRebootReconnect() {
@@ -467,7 +540,8 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
         // call connectNext, and must respect the same physical reboot window.
         rebootReconnectAfter = ProcessInfo.processInfo.systemUptime + 10
         let generation = rebootReconnectGeneration
-        recovery.reset(); recoveryTask?.cancel(); stopScan()
+        recovery.reset(); recoveryTask?.cancel(); powerRefreshTask?.cancel(); stopScan()
+        reportedBattery = nil; reportedCharging = nil; reportedPowerAt = nil
         authentication.removeAll()
         for s in ["L", "R"] { lenses[s]?.ready = false; lenses[s]?.invalidateReadback(); chars[s] = [:] }
         connecting = nil; connectingGeneration = UUID()
@@ -511,6 +585,10 @@ final class GlassesLink: NSObject, ObservableObject, @preconcurrency CBCentralMa
         case "imu": try await send(SettingsWire.imu(value != 0, pace: value > 1 ? value : 100, magic: m), sid: 0xe0, side: side ?? "R"); return
         default: throw BridgeError.invalid("Unknown setting")
         }
-        try await send(body, sid: 9, side: side)
+        // Stock G2 device-info is intentionally master/right-authoritative. Sending the
+        // same query to the left creates traffic but no response, and used to make the UI
+        // imply that two independent stock battery values existed.
+        let target = ["query", "info"].contains(key.lowercased()) ? "R" : side
+        try await send(body, sid: 9, side: target)
     }
 }

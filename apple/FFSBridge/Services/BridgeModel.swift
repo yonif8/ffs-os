@@ -249,9 +249,15 @@ final class BridgeModel: ObservableObject {
          "lenses": ["L", "R"].map { side -> [String: Any] in
              let l = link.lenses[side]!
              return ["side": side, "name": l.name, "state": l.state, "ready": l.ready, "authenticated": l.authenticated, "version": l.version,
-                     "battery": l.battery as Any? ?? NSNull(), "rssi": l.rssi as Any? ?? NSNull(), "writeLimit": l.writeLimit, "receiveCount":l.receiveCount, "diagnostics": l.diagnostics,
+                     "battery": l.battery as Any? ?? NSNull(), "charging": l.charging as Any? ?? NSNull(),
+                     "powerFresh": link.pairReady && l.powerFresh(), "powerSourceAgeMS": l.powerSourceAgeMS as Any? ?? NSNull(),
+                     "powerReceivedAt": l.powerReceivedAt?.timeIntervalSince1970 as Any? ?? NSNull(),
+                     "rssi": l.rssi as Any? ?? NSNull(), "writeLimit": l.writeLimit, "receiveCount":l.receiveCount, "diagnostics": l.diagnostics,
                      "infoReceivedAt": l.infoReceivedAt?.timeIntervalSince1970 as Any? ?? NSNull(), "settings": l.settingsSnapshot]
-         }, "flash": ["active": flasher.active, "message": flasher.message, "progress": flasher.progress, "ok": flasher.success as Any? ?? NSNull()],
+         }, "power": ["glassesRemaining": link.glassesBattery as Any? ?? NSNull(), "charging": link.glassesCharging as Any? ?? NSNull(),
+                       "reportedBattery": link.reportedBattery as Any? ?? NSNull(), "reportedCharging": link.reportedCharging as Any? ?? NSNull(),
+                       "reportedFresh": link.reportedPowerFresh],
+         "flash": ["active": flasher.active, "message": flasher.message, "progress": flasher.progress, "ok": flasher.success as Any? ?? NSNull()],
          "pairedBusy": paired.busy, "reconnectAutoPanic": reconnectAutoPanic, "library": library.status(), "voice": voice.status(), "buzzer": ["state": buzzer.state, "message": buzzer.detail]]
     }
     func command(_ name: String, _ args: [String: Any]) async throws -> [String: Any] {

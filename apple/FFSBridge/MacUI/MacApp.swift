@@ -47,8 +47,26 @@ struct MacBridgeView: View {
                         Label(model.link.pairReady ? "Pair ready" : "Offline", systemImage: model.link.pairReady ? "checkmark.circle.fill" : "circle").foregroundStyle(model.link.pairReady ? .green : .secondary)
                     }
                     Text("Mac Bluetooth → G2 glasses · no phone required").foregroundStyle(.secondary)
+                    GroupBox("Power") {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("Glasses remaining")
+                                Spacer()
+                                if let battery = model.link.glassesBattery {
+                                    Label("\(battery)%", systemImage: model.link.glassesCharging == true ? "bolt.fill" : "battery.75percent")
+                                        .monospacedDigit().foregroundStyle(model.link.glassesCharging == true ? .green : .primary)
+                                } else { Text("—").foregroundStyle(.secondary) }
+                            }
+                            if model.link.glassesBattery == nil, model.link.reportedPowerFresh,
+                               let reported = model.link.reportedBattery {
+                                Text("Stock pair report: \(reported)% · individual lenses unavailable until telemetry firmware is installed")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }.padding(4)
+                    }
                     ForEach(["L", "R"], id: \.self) { side in
                         let lens = model.link.lenses[side]!
+                        let powerFresh = model.link.pairReady && lens.powerFresh()
                         GroupBox {
                             HStack {
                                 Text(side).font(.title2.bold()).foregroundStyle(lens.ready ? .green : .secondary)
@@ -57,7 +75,11 @@ struct MacBridgeView: View {
                                     Text(lens.version).font(.caption.monospaced())
                                 }
                                 Spacer()
-                                Text(lens.battery.map { "\($0)%" } ?? "—")
+                                if let battery = lens.battery {
+                                    Label("\(battery)%", systemImage: lens.charging == true ? "bolt.fill" : "battery.75percent")
+                                        .monospacedDigit().foregroundStyle(powerFresh ? (lens.charging == true ? .green : .primary) : .orange)
+                                    if !powerFresh { Text("stale").font(.caption).foregroundStyle(.orange) }
+                                } else { Text("—").foregroundStyle(.secondary) }
                                 if let rssi = lens.rssi { Text("\(rssi) dBm").font(.caption) }
                             }.frame(maxWidth: .infinity, alignment: .leading).padding(4)
                         }

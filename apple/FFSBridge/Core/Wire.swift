@@ -18,6 +18,34 @@ extension Data {
     var hex: String { map { String(format: "%02x", $0) }.joined() }
 }
 
+struct PowerSample: Equatable {
+    let battery: Int?
+    let charging: Bool?
+    let sourceAgeMS: UInt32?
+}
+
+struct PowerTelemetry: Equatable {
+    let right: PowerSample
+    let left: PowerSample
+
+    /// Firmware field 106: "PW01", right local power, left relayed power, left age.
+    /// Invalid values stay unknown; they are never clamped into a plausible percentage.
+    static func decode(_ data: Data) -> PowerTelemetry? {
+        guard data.count == 12, data.prefix(4) == Data("PW01".utf8) else { return nil }
+        func sample(_ batteryByte: UInt8, _ flags: UInt8, age: UInt32?) -> PowerSample {
+            guard flags & 1 != 0, batteryByte <= 100 else {
+                return PowerSample(battery: nil, charging: nil, sourceAgeMS: nil)
+            }
+            return PowerSample(battery: Int(batteryByte), charging: flags & 2 != 0, sourceAgeMS: age)
+        }
+        let peerAge = data.u32(8)
+        return PowerTelemetry(
+            right: sample(data[4], data[5], age: 0),
+            left: sample(data[6], data[7], age: peerAge == UInt32.max ? nil : peerAge)
+        )
+    }
+}
+
 enum Wire {
     // Exact connection heartbeat used by the Android OTA flasher. This is the
     // typed heartbeat entry; arbitrary service 0x80 writes stay blocked.

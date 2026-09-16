@@ -43,8 +43,19 @@ struct BridgeView: View {
                         Label(model.link.pairReady ? "PAIR READY" : "OFFLINE", systemImage: model.link.pairReady ? "checkmark.circle.fill" : "circle")
                             .font(.caption.bold()).foregroundStyle(model.link.pairReady ? Color.green : Color.secondary)
                     }.padding(.vertical, 10)
+                    HStack {
+                        Label("Glasses remaining", systemImage: model.link.glassesCharging == true ? "bolt.fill" : "battery.75percent")
+                        Spacer()
+                        Text(model.link.glassesBattery.map { "\($0)%" } ?? "—").monospacedDigit()
+                    }.foregroundStyle(model.link.glassesCharging == true ? Color.green : Color.primary)
+                    if model.link.glassesBattery == nil, model.link.reportedPowerFresh,
+                       let reported = model.link.reportedBattery {
+                        Text("Stock pair report: \(reported)% · per-lens telemetry unavailable")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     ForEach(["L", "R"], id: \.self) { side in
                         let lens = model.link.lenses[side]!
+                        let powerFresh = model.link.pairReady && lens.powerFresh()
                         HStack {
                             Text(side).font(.headline.monospaced()).frame(width: 22)
                             Circle().fill(lens.ready ? Color.green : Color.gray).frame(width: 7, height: 7)
@@ -54,7 +65,12 @@ struct BridgeView: View {
                             }
                             Spacer()
                             VStack(alignment: .trailing) {
-                                Text(lens.battery.map { "\($0)%" } ?? "—").font(.subheadline.monospacedDigit())
+                                if let battery = lens.battery {
+                                    Label("\(battery)%", systemImage: lens.charging == true ? "bolt.fill" : "battery.75percent")
+                                        .font(.subheadline.monospacedDigit())
+                                        .foregroundStyle(powerFresh ? (lens.charging == true ? Color.green : Color.primary) : Color.orange)
+                                    if !powerFresh { Text("stale").font(.caption).foregroundStyle(.orange) }
+                                } else { Text("—").font(.subheadline).foregroundStyle(.secondary) }
                                 if let rssi = lens.rssi { Text("\(rssi) dBm").font(.caption).foregroundStyle(.secondary) }
                             }
                         }

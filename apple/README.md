@@ -75,6 +75,14 @@ FWAK. It is an explicit request to leave that mode, not an audio-mute operation.
 `status` includes the settings snapshot and `infoReceivedAt`; cached device readings
 are invalidated when a connection drops or a new connection starts.
 
+Battery reporting keeps the stock and custom meanings separate. Stock G2 device-info is
+queried from the right/master only and exposes one `reportedBattery`; it is not labelled as
+the right arm. Matching custom firmware adds read-only field 106 (`PW01`): each MCU reads its
+own local charger state, the left relays its value and sample age over the resident peer-status
+channel, and the right returns both. `status.power.glassesRemaining` is the minimum only when
+both local samples are present and fresh; otherwise it is null and the UI says unknown/stale.
+The bridge refreshes this readback every 30 seconds while the authenticated pair is connected.
+
 ## iPhone app
 
 Open `FFSBridge.xcodeproj`, choose your Personal Team under Signing & Capabilities,

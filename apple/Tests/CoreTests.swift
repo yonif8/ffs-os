@@ -74,6 +74,12 @@ struct CoreTests {
         try check(SettingsWire.snapshot(defaultEnvelope.data)?["silentMode"] == 0, "Absent protobuf silent switch is off in a complete snapshot")
         try check(SettingsWire.snapshot(SettingsWire.query(false, magic: 1)) == nil, "A query or ACK cannot be mistaken for a fresh settings snapshot")
         try check(SettingsWire.silentModeUpdate(Data([8,3,42,2,16,1])) == 1, "Physical silent-mode switch notification updates display status")
+        let power = PowerTelemetry.decode(Data([0x50,0x57,0x30,0x31, 77,1, 14,3, 0xe0,1,0,0]))
+        try check(power?.right == PowerSample(battery: 77, charging: false, sourceAgeMS: 0), "Right battery is the right MCU local reading")
+        try check(power?.left == PowerSample(battery: 14, charging: true, sourceAgeMS: 480), "Left battery preserves relay age and charge state")
+        let unknownPower = PowerTelemetry.decode(Data([0x50,0x57,0x30,0x31, 255,0, 201,1, 0xff,0xff,0xff,0xff]))
+        try check(unknownPower?.right.battery == nil && unknownPower?.left.battery == nil, "Invalid power bytes remain unknown")
+        try check(PowerTelemetry.decode(Data("PW01".utf8)) == nil, "Truncated per-lens power is rejected")
         var framer = VoiceFramer()
         func packet(_ counter: Int) -> Data { var d = Data(repeating: 0, count: 205); d[204] = UInt8(counter); return d }
         try check(framer.offer(packet(255)) == 0, "Voice first packet")
